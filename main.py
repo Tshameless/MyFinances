@@ -92,6 +92,10 @@ def main():
         # 1.1 成分股列表
         stock_codes = fetcher.get_stock_universe(config.STOCK_UNIVERSE)
 
+        if not stock_codes:
+            console.print("[red]❌ 未获取到任何成分股，请检查网络或数据源。[/]")
+            return
+
         # 1.2 日线行情
         price_dict = fetcher.fetch_daily_prices(stock_codes, start_date, end_date)
 
@@ -109,6 +113,9 @@ def main():
     else:
         console.print("[dim]使用缓存数据...[/]")
         stock_codes = fetcher.get_stock_universe(config.STOCK_UNIVERSE)
+        if not stock_codes:
+            console.print("[red]❌ 未获取到任何成分股，缓存可能已损坏，请删除 output/cache/ 后重试。[/]")
+            return
         price_dict = fetcher.fetch_daily_prices(stock_codes, start_date, end_date)
         df_snapshot = fetcher.fetch_financial_snapshot(codes=stock_codes)
         roe_dict = fetcher.fetch_roe_data(stock_codes)

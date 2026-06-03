@@ -27,6 +27,21 @@ class DataFetcher:
         self.use_cache = use_cache
         self._price_cache: dict[str, pd.DataFrame] = {}
 
+    @staticmethod
+    def _safe_read_cache(filepath: Path, **kwargs) -> pd.DataFrame | None:
+        """安全读取缓存 CSV。文件为空/损坏时自动删除，返回 None 触发重新拉取。"""
+        if not filepath.exists():
+            return None
+        try:
+            df = pd.read_csv(filepath, **kwargs)
+            if df.empty:
+                filepath.unlink()
+                return None
+            return df
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, Exception):
+            filepath.unlink(missing_ok=True)
+            return None
+
     # ----------------------------------------------------------------
     # 一、成分股列表
     # ----------------------------------------------------------------
@@ -36,8 +51,8 @@ class DataFetcher:
             return universe
 
         cache_file = self.cache_dir / f"{universe}_stocks.csv"
-        if self.use_cache and cache_file.exists():
-            df = pd.read_csv(cache_file)
+        df = self._safe_read_cache(cache_file)
+        if df is not None:
             return df["code"].tolist()
 
         console.print(f"[bold cyan]📡 正在获取 {universe.upper()} 成分股列表...[/]")
@@ -119,8 +134,9 @@ class DataFetcher:
     ) -> pd.DataFrame | None:
         """获取单只股票日线"""
         cache_file = self.cache_dir / f"daily_{code}_{start}_{end}.csv"
-        if self.use_cache and cache_file.exists():
-            return pd.read_csv(cache_file, parse_dates=["date"])
+        df = self._safe_read_cache(cache_file, parse_dates=["date"])
+        if df is not None:
+            return df
 
         raw = code.replace("sh", "").replace("sz", "").replace("bj", "")
         try:
@@ -161,8 +177,8 @@ class DataFetcher:
         优选全市场快照接口（一次拉取）；失败时降级为按 codes 列表逐批获取。
         """
         cache_file = self.cache_dir / "a_share_snapshot.csv"
-        if self.use_cache and cache_file.exists():
-            df = pd.read_csv(cache_file)
+        df = self._safe_read_cache(cache_file)
+        if df is not None:
             if "date" in df.columns:
                 df["date"] = pd.to_datetime(df["date"])
             return df
@@ -272,8 +288,8 @@ class DataFetcher:
     def fetch_roe_data(self, codes: list[str]) -> dict[str, float]:
         """批量获取个股最新 ROE（TTM），拉取最近4个季度财报估算"""
         cache_file = self.cache_dir / "roe_data.csv"
-        if self.use_cache and cache_file.exists():
-            df = pd.read_csv(cache_file)
+        df = self._safe_read_cache(cache_file)
+        if df is not None:
             return dict(zip(df["code"], df["roe_ttm"]))
 
         console.print("[bold cyan]📡 正在获取 ROE 数据...[/]")
@@ -323,8 +339,9 @@ class DataFetcher:
     ) -> pd.DataFrame | None:
         """获取指数日线数据（作为基准）"""
         cache_file = self.cache_dir / f"index_{index_code}_{start}_{end}.csv"
-        if self.use_cache and cache_file.exists():
-            return pd.read_csv(cache_file, parse_dates=["date"])
+        df = self._safe_read_cache(cache_file, parse_dates=["date"])
+        if df is not None:
+            return df
 
         raw = index_code.replace(".SH", "").replace(".SZ", "")
         try:
@@ -348,8 +365,9 @@ class DataFetcher:
         result = {}
         for code in etf_codes:
             cache_file = self.cache_dir / f"etf_{code}_{start}_{end}.csv"
-            if self.use_cache and cache_file.exists():
-                result[code] = pd.read_csv(cache_file, parse_dates=["date"])
+            df = self._safe_read_cache(cache_file, parse_dates=["date"])
+            if df is not None:
+                result[code] = df
                 continue
             try:
                 df = ak.fund_etf_hist_em(symbol=code, period="daily",
