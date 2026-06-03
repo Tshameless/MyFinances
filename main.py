@@ -12,6 +12,7 @@ A股多因子选股量化系统 — 一键运行入口
 import argparse
 import sys
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # 修复 Windows 终端 GBK 编码问题
@@ -34,18 +35,37 @@ from report.generator import ReportGenerator
 console = Console(force_terminal=False)
 
 
+def _calc_date_range(trading_days: int):
+    """
+    根据交易日天数估算日历天数区间。
+    考虑周末+节假日，取 2x 日历天数作为安全余量，确保拿到足够的交易日数据。
+    """
+    end_date = datetime.now()
+    calendar_days = int(trading_days * 2.0)
+    start_date = end_date - timedelta(days=calendar_days)
+    return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+
+
 def main():
     parser = argparse.ArgumentParser(description="A股多因子选股回测系统")
     parser.add_argument("--skip-fetch", action="store_true", help="跳过数据获取，直接使用缓存")
     parser.add_argument("--top", type=int, default=None, help="持仓股票数量（覆盖 config.py）")
     parser.add_argument("--start", type=str, default=None, help="起始日期")
     parser.add_argument("--end", type=str, default=None, help="结束日期")
+    parser.add_argument("--days", type=int, default=None,
+                        help="回溯交易日天数 (30/60/90/120/180)")
     args = parser.parse_args()
 
     # 参数覆盖
     top_n = args.top or config.TOP_N_STOCKS
-    start_date = args.start or config.BACKTEST_START
-    end_date = args.end or config.BACKTEST_END
+    trading_days = args.days or config.DATA_TRADING_DAYS
+
+    # 日期范围：优先 --start/--end，否则由 --days / DATA_TRADING_DAYS 推算出
+    if args.start and args.end:
+        start_date = args.start
+        end_date = args.end
+    else:
+        start_date, end_date = _calc_date_range(trading_days)
 
     # 打印横幅
     console.print(Panel.fit(
@@ -53,6 +73,7 @@ def main():
         f"选股范围: {config.STOCK_UNIVERSE.upper()} · "
         f"持仓数: {top_n} · "
         f"调仓: {config.REBALANCE_FREQ} · "
+        f"回溯交易日: {trading_days}天 · "
         f"{start_date} → {end_date}",
         border_style="green",
     ))
@@ -74,8 +95,8 @@ def main():
         # 1.2 日线行情
         price_dict = fetcher.fetch_daily_prices(stock_codes, start_date, end_date)
 
-        # 1.3 财务快照
-        df_snapshot = fetcher.fetch_financial_snapshot()
+        # 1.3 财务快照（传入股票池用于降级 fallback）
+        df_snapshot = fetcher.fetch_financial_snapshot(codes=stock_codes)
 
         # 1.4 ROE
         roe_dict = fetcher.fetch_roe_data(stock_codes)
@@ -89,7 +110,7 @@ def main():
         console.print("[dim]使用缓存数据...[/]")
         stock_codes = fetcher.get_stock_universe(config.STOCK_UNIVERSE)
         price_dict = fetcher.fetch_daily_prices(stock_codes, start_date, end_date)
-        df_snapshot = fetcher.fetch_financial_snapshot()
+        df_snapshot = fetcher.fetch_financial_snapshot(codes=stock_codes)
         roe_dict = fetcher.fetch_roe_data(stock_codes)
         bench_df = fetcher.fetch_index_data(config.BENCHMARK_INDEX, start_date, end_date)
 

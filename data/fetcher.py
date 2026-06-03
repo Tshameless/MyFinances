@@ -153,10 +153,12 @@ class DataFetcher:
     # ----------------------------------------------------------------
     # 三、基础财务指标快照
     # ----------------------------------------------------------------
-    def fetch_financial_snapshot(self) -> pd.DataFrame:
+    def fetch_financial_snapshot(self, codes: list[str] | None = None) -> pd.DataFrame:
         """
         获取 A 股全市场实时财务快照。
-        包含：PE_TTM、PB、总市值、流通市值、ROE 等
+        包含：PE_TTM、PB、总市值、流通市值等。
+
+        优选全市场快照接口（一次拉取）；失败时降级为按 codes 列表逐批获取。
         """
         cache_file = self.cache_dir / "a_share_snapshot.csv"
         if self.use_cache and cache_file.exists():
@@ -165,38 +167,103 @@ class DataFetcher:
                 df["date"] = pd.to_datetime(df["date"])
             return df
 
+        # --- 方案 A：全市场快照（带重试） ---
         console.print("[bold cyan]📡 正在获取 A 股全市场快照数据...[/]")
+        df = self._fetch_snapshot_with_retry()
+        if df is not None:
+            df = self._format_snapshot(df)
+            if self.use_cache:
+                df.to_csv(cache_file, index=False)
+            console.print(f"  ✅ 共 {len(df)} 只 A 股快照数据")
+            return df
 
-        df = ak.stock_zh_a_spot_em()
+        # --- 方案 B：降级 — 仅拉取目标股票池的关键指标 ---
+        if codes:
+            console.print("[yellow]  ⚠ 全市场快照获取失败，降级为按股票池逐只拉取 PE/PB/市值...[/]")
+            df = self._fetch_snapshot_by_codes(codes)
+            if self.use_cache:
+                df.to_csv(cache_file, index=False)
+            console.print(f"  ✅ 降级获取 {len(df)} 只股票关键指标")
+            return df
+
+        # --- 完全失败：返回空壳 ---
+        console.print("[red]  ❌ 无法获取任何财务快照数据[/]")
+        return pd.DataFrame(columns=["code", "name", "pe_ttm", "pb",
+                                      "market_cap", "float_cap", "is_st", "date"])
+
+    def _fetch_snapshot_with_retry(self, max_retries: int = 3) -> pd.DataFrame | None:
+        """带指数退避重试的全市场快照"""
+        import time as _time
+        for attempt in range(max_retries):
+            try:
+                return ak.stock_zh_a_spot_em()
+            except Exception as e:
+                wait = (2 ** attempt) * 2  # 2s → 4s → 8s
+                if attempt < max_retries - 1:
+                    console.print(f"    第 {attempt + 1} 次请求失败，{wait}s 后重试...")
+                    _time.sleep(wait)
+                else:
+                    console.print(f"    [yellow]3 次重试均失败: {e}[/]")
+        return None
+
+    def _fetch_snapshot_by_codes(self, codes: list[str]) -> pd.DataFrame:
+        """降级方案：逐个股票获取 PE/PB/市值（仅拉取目标池）"""
+        rows = []
+        total = len(codes)
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[yellow]降级获取财务指标", total=total)
+            for code in codes:
+                raw = code.replace("sh", "").replace("sz", "").replace("bj", "")
+                try:
+                    info = ak.stock_individual_info_em(symbol=raw)
+                    if info is not None and not info.empty:
+                        info_dict = dict(zip(info["item"], info["value"]))
+                        rows.append({
+                            "code": code,
+                            "name": info_dict.get("股票简称", raw),
+                            "pe_ttm": pd.to_numeric(info_dict.get("市盈率-动态", None), errors="coerce"),
+                            "pb": pd.to_numeric(info_dict.get("市净率", None), errors="coerce"),
+                            "market_cap": pd.to_numeric(info_dict.get("总市值", None), errors="coerce"),
+                            "float_cap": pd.to_numeric(info_dict.get("流通市值", None), errors="coerce"),
+                            "is_st": False,
+                        })
+                except Exception:
+                    pass
+                progress.advance(task)
+                time.sleep(0.15)
+
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        df["date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
+        return df
+
+    def _format_snapshot(self, df: pd.DataFrame) -> pd.DataFrame:
+        """统一快照格式"""
         df = df.rename(columns={
             "代码": "code", "名称": "name",
             "市盈率-动态": "pe_ttm", "市净率": "pb",
             "总市值": "market_cap", "流通市值": "float_cap",
             "市销率": "ps_ttm",
         })
-
-        # 格式化为 sh600000
         df["code"] = df["code"].apply(lambda x: (
             f"sh{x}" if x.startswith("6")
             else f"sz{x}" if x.startswith(("0", "3"))
             else f"bj{x}" if x.startswith(("4", "8"))
             else x
         ))
-
-        # 标记 ST
         df["is_st"] = df["name"].str.contains("ST|\\*ST", na=False)
-
-        # 数值列
         for col in ["pe_ttm", "pb", "market_cap", "float_cap", "ps_ttm"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-
         df["date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
-
-        if self.use_cache:
-            df.to_csv(cache_file, index=False)
-
-        console.print(f"  ✅ 共 {len(df)} 只 A 股快照数据")
         return df
 
     # ----------------------------------------------------------------
