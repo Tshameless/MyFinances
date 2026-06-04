@@ -1,25 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
+node_modules/
 dist/
-*.egg
-
-# Virtual environment
-venv/
-.env/
-
-# Output & cache
 output/cache/
 output/*.html
-*.csv
-*.xlsx
-*.pkl
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
+output/*.csv
+__pycache__/
+*.pyc
+*.log
+.gitignore
