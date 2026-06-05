@@ -1,9 +1,9 @@
-node_modules/
-dist/
-output/cache/
-output/*.html
-output/*.csv
+output/
 __pycache__/
 *.pyc
+*.pyo
 *.log
-.gitignore
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
