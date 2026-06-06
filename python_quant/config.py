@@ -24,6 +24,7 @@ class BacktestConfig:
     rebalance_every_n_days: int = 5
     commission_rate: float = 0.0003
     slippage_rate: float = 0.0005
+    price_field: str = "auto"
     output_dir: Path = OUTPUT_DIR
     factor_weights: dict[str, float] = field(
         default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
@@ -44,6 +45,8 @@ class BacktestConfig:
             raise ValueError("All lookback windows must be greater than 0.")
         if min(self.commission_rate, self.slippage_rate) < 0:
             raise ValueError("Cost rates cannot be negative.")
+        if self.price_field not in {"auto", "close", "adjusted_close"}:
+            raise ValueError("price_field must be one of: auto, close, adjusted_close.")
         if not self.factor_weights:
             raise ValueError("factor_weights cannot be empty.")
 

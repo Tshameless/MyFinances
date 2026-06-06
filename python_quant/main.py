@@ -1,12 +1,17 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
 from .backtest import run_backtest
 from .config import BacktestConfig, OUTPUT_DIR
-from .data_loader import load_price_bars_from_csv
-from .reporting import print_summary, save_equity_curve, save_rebalance_log
+from .data_loader import load_benchmark_bars_from_csv, load_price_bars_from_csv
+from .reporting import (
+    print_summary,
+    save_equity_curve,
+    save_performance_summary,
+    save_rebalance_log,
+)
 from .sample_data import generate_demo_bars
 
 
@@ -22,9 +27,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--csv",
         type=str,
-        help="Path to a CSV file with columns: date,symbol,close and optional volume,tradable",
+        help=(
+            "Path to a CSV file with columns: date,symbol,close and optional "
+            "adjusted_close,volume,tradable,can_buy,can_sell"
+        ),
+    )
+    parser.add_argument(
+        "--benchmark-csv",
+        type=str,
+        help="Optional benchmark CSV with columns: date,close and optional adjusted_close,symbol",
     )
     parser.add_argument("--output-dir", type=str, default=str(OUTPUT_DIR))
+    parser.add_argument(
+        "--price-field",
+        choices=["auto", "close", "adjusted_close"],
+        default="auto",
+    )
     parser.add_argument("--top-n", type=int, default=3)
     parser.add_argument("--rebalance-days", type=int, default=5)
     parser.add_argument("--initial-cash", type=float, default=1_000_000.0)
@@ -46,6 +64,7 @@ def main() -> None:
         rebalance_every_n_days=args.rebalance_days,
         commission_rate=args.commission_rate,
         slippage_rate=args.slippage_rate,
+        price_field=args.price_field,
         lookback_momentum=args.lookback_momentum,
         lookback_mean_reversion=args.lookback_mean_reversion,
         lookback_volatility=args.lookback_volatility,
@@ -60,12 +79,27 @@ def main() -> None:
         parser.error("Use --demo or provide --csv <path>.")
         return
 
-    curve, rebalances, metrics = run_backtest(bars, backtest_config)
-    print_summary(curve, rebalances, metrics, backtest_config)
-    equity_path = save_equity_curve(curve, backtest_config.output_dir)
-    rebalance_path = save_rebalance_log(rebalances, backtest_config.output_dir)
+    benchmark_bars = None
+    if args.benchmark_csv:
+        benchmark_bars = load_benchmark_bars_from_csv(args.benchmark_csv)
+
+    result = run_backtest(bars, backtest_config, benchmark_bars=benchmark_bars)
+    print_summary(
+        result.equity_curve,
+        result.rebalance_records,
+        result.metrics,
+        backtest_config,
+    )
+    equity_path = save_equity_curve(
+        result.equity_curve,
+        backtest_config.output_dir,
+        result.benchmark_curve,
+    )
+    rebalance_path = save_rebalance_log(result.rebalance_records, backtest_config.output_dir)
+    summary_path = save_performance_summary(result.metrics, backtest_config.output_dir)
     print(f"Equity curve saved to: {equity_path}")
     print(f"Rebalance log saved to: {rebalance_path}")
+    print(f"Performance summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":

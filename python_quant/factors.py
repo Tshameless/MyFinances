@@ -21,10 +21,7 @@ def build_intersection_calendar(history_by_symbol: dict[str, list[PriceBar]]) ->
     if not history_by_symbol:
         return []
 
-    date_sets = [
-        {bar.date for bar in symbol_bars if bar.tradable}
-        for symbol_bars in history_by_symbol.values()
-    ]
+    date_sets = [{bar.date for bar in symbol_bars} for symbol_bars in history_by_symbol.values()]
     common_dates = set.intersection(*date_sets) if date_sets else set()
     return sorted(common_dates)
 
@@ -77,7 +74,7 @@ def calculate_factor_scores(
         if up_to_index >= len(bars):
             continue
 
-        closes = [bar.close for bar in bars[: up_to_index + 1]]
+        closes = [_price_for_bar(bar, config) for bar in bars[: up_to_index + 1]]
         if len(closes) <= config.max_lookback:
             continue
 
@@ -123,3 +120,15 @@ def calculate_factor_scores(
         )
 
     return total_scores
+
+
+def _price_for_bar(bar: PriceBar, config: BacktestConfig) -> float:
+    if config.price_field == "close":
+        return bar.close
+    if config.price_field == "adjusted_close":
+        if bar.adjusted_close is None:
+            raise ValueError(
+                f"Adjusted price requested but missing for {bar.symbol} on {bar.date.isoformat()}."
+            )
+        return bar.adjusted_close
+    return bar.adjusted_close if bar.adjusted_close is not None else bar.close
