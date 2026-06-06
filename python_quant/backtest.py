@@ -1,81 +1,142 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from math import sqrt
 
-from . import config
-from .factors import calculate_factor_scores, group_prices_by_symbol
-from .models import BacktestMetrics, EquityPoint, PriceBar
+from .config import BacktestConfig
+from .factors import (
+    align_history_to_calendar,
+    build_intersection_calendar,
+    calculate_factor_scores,
+    group_prices_by_symbol,
+)
+from .models import BacktestMetrics, EquityPoint, PriceBar, RebalanceRecord
 from .strategy import select_symbols
 
 
-def run_backtest(bars: list[PriceBar]) -> tuple[list[EquityPoint], BacktestMetrics]:
+def run_backtest(
+    bars: list[PriceBar],
+    config: BacktestConfig | None = None,
+) -> tuple[list[EquityPoint], list[RebalanceRecord], BacktestMetrics]:
+    config = config or BacktestConfig()
     history_by_symbol = group_prices_by_symbol(bars)
     if not history_by_symbol:
         raise ValueError("No price data available for backtest.")
 
-    common_length = min(len(symbol_bars) for symbol_bars in history_by_symbol.values())
-    if common_length < config.LOOKBACK_MOMENTUM + 2:
+    calendar = build_intersection_calendar(history_by_symbol)
+    aligned_history = align_history_to_calendar(history_by_symbol, calendar)
+    common_length = len(calendar)
+    if common_length < config.max_lookback + 2:
         raise ValueError("Not enough history to run the strategy.")
 
-    equity = config.INITIAL_CASH
+    equity = config.initial_cash
     equity_curve: list[EquityPoint] = []
-    holdings: list[str] = []
-
-    warmup = max(
-        config.LOOKBACK_MOMENTUM,
-        config.LOOKBACK_MEAN_REVERSION,
-        config.LOOKBACK_VOLATILITY,
-    )
+    rebalance_records: list[RebalanceRecord] = []
+    holdings: tuple[str, ...] = ()
+    weights: dict[str, float] = {}
+    total_cost = 0.0
+    total_turnover = 0.0
+    warmup = config.max_lookback
 
     for index in range(warmup, common_length - 1):
-        first_symbol = next(iter(history_by_symbol))
-        current_date = history_by_symbol[first_symbol][index].date
+        current_date = calendar[index]
+        next_date = calendar[index + 1]
 
-        if not holdings or (index - warmup) % config.REBALANCE_EVERY_N_DAYS == 0:
-            scores = calculate_factor_scores(history_by_symbol, index)
-            holdings = select_symbols(scores, config.TOP_N)
-            turnover_cost = equity * (config.COMMISSION_RATE + config.SLIPPAGE_RATE)
+        should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
+        if should_rebalance:
+            scores = calculate_factor_scores(aligned_history, index, config)
+            selected = tuple(select_symbols(scores, config.top_n))
+            target_weights = _build_target_weights(selected)
+            turnover = _calculate_turnover(weights, target_weights)
+            turnover_cost = equity * turnover * config.per_side_cost_rate
             equity -= turnover_cost
+            total_cost += turnover_cost
+            total_turnover += turnover
+            holdings = selected
+            weights = target_weights
+            rebalance_records.append(
+                RebalanceRecord(
+                    date=current_date,
+                    holdings=holdings,
+                    turnover=turnover,
+                    cost=round(turnover_cost, 2),
+                )
+            )
 
-        daily_returns: list[float] = []
-        for symbol in holdings:
-            bars_for_symbol = history_by_symbol[symbol]
+        portfolio_return = 0.0
+        for symbol, weight in weights.items():
+            bars_for_symbol = aligned_history[symbol]
             today_close = bars_for_symbol[index].close
             next_close = bars_for_symbol[index + 1].close
-            daily_returns.append(next_close / today_close - 1.0)
+            symbol_return = next_close / today_close - 1.0
+            portfolio_return += weight * symbol_return
 
-        portfolio_return = sum(daily_returns) / len(daily_returns) if daily_returns else 0.0
         equity *= 1.0 + portfolio_return
-        equity_curve.append(EquityPoint(date=current_date, equity=round(equity, 2)))
+        equity_curve.append(
+            EquityPoint(
+                date=next_date,
+                equity=round(equity, 2),
+                daily_return=portfolio_return,
+                holdings=holdings,
+            )
+        )
 
-    metrics = _calculate_metrics(equity_curve)
-    return equity_curve, metrics
+    metrics = _calculate_metrics(
+        equity_curve,
+        initial_cash=config.initial_cash,
+        total_turnover=total_turnover,
+        total_cost=total_cost,
+        rebalance_count=len(rebalance_records),
+    )
+    return equity_curve, rebalance_records, metrics
 
 
-def _calculate_metrics(equity_curve: list[EquityPoint]) -> BacktestMetrics:
-    if len(equity_curve) < 2:
+def _build_target_weights(holdings: tuple[str, ...]) -> dict[str, float]:
+    if not holdings:
+        return {}
+    weight = 1.0 / len(holdings)
+    return {symbol: weight for symbol in holdings}
+
+
+def _calculate_turnover(current_weights: dict[str, float], target_weights: dict[str, float]) -> float:
+    symbols = set(current_weights) | set(target_weights)
+    return sum(
+        abs(target_weights.get(symbol, 0.0) - current_weights.get(symbol, 0.0))
+        for symbol in symbols
+    )
+
+
+def _calculate_metrics(
+    equity_curve: list[EquityPoint],
+    *,
+    initial_cash: float,
+    total_turnover: float,
+    total_cost: float,
+    rebalance_count: int,
+) -> BacktestMetrics:
+    if not equity_curve:
         raise ValueError("Equity curve is too short to calculate metrics.")
 
-    daily_returns: list[float] = []
-    peak = equity_curve[0].equity
+    daily_returns = [point.daily_return for point in equity_curve]
+    peak = initial_cash
     max_drawdown = 0.0
 
-    for index in range(1, len(equity_curve)):
-        previous = equity_curve[index - 1].equity
-        current = equity_curve[index].equity
-        daily_returns.append(current / previous - 1.0)
+    for point in equity_curve:
+        current = point.equity
         peak = max(peak, current)
         drawdown = current / peak - 1.0
         max_drawdown = min(max_drawdown, drawdown)
 
-    total_return = equity_curve[-1].equity / equity_curve[0].equity - 1.0
+    total_return = equity_curve[-1].equity / initial_cash - 1.0
     mean_return = sum(daily_returns) / len(daily_returns)
     variance = (
-        sum((daily - mean_return) ** 2 for daily in daily_returns) / max(len(daily_returns) - 1, 1)
+        sum((daily - mean_return) ** 2 for daily in daily_returns)
+        / max(len(daily_returns) - 1, 1)
     )
     volatility = sqrt(max(variance, 0.0)) * sqrt(252)
     annualized_return = (1.0 + total_return) ** (252 / len(daily_returns)) - 1.0
-    sharpe = 0.0 if volatility == 0 else annualized_return / volatility
+    sharpe = 0.0 if volatility == 0 else (mean_return * 252) / volatility
+    wins = sum(1 for daily in daily_returns if daily > 0)
+    average_turnover = total_turnover / rebalance_count if rebalance_count else 0.0
 
     return BacktestMetrics(
         total_return=total_return,
@@ -83,4 +144,8 @@ def _calculate_metrics(equity_curve: list[EquityPoint]) -> BacktestMetrics:
         max_drawdown=max_drawdown,
         volatility=volatility,
         sharpe=sharpe,
+        win_rate=wins / len(daily_returns),
+        average_turnover=average_turnover,
+        total_cost=total_cost,
+        periods=len(daily_returns),
     )

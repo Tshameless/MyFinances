@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import date, timedelta
 from math import sin
@@ -25,7 +25,7 @@ def generate_demo_bars(days: int = 80) -> list[PriceBar]:
             close = round(base + trend + seasonal + mean_shift, 2)
             bars.append(
                 PriceBar(
-                    date=current_date.isoformat(),
+                    date=current_date,
                     symbol=symbol,
                     close=max(close, 1.0),
                 )
