@@ -78,6 +78,8 @@ class BacktestTests(unittest.TestCase):
         result = run_backtest(bars, config)
 
         self.assertGreater(result.equity_curve[-1].equity, 100.0)
+        self.assertGreaterEqual(result.metrics.sortino, 0.0)
+        self.assertGreaterEqual(result.metrics.calmar, 0.0)
 
     def test_keeps_locked_position_when_sell_is_blocked(self) -> None:
         bars = [
@@ -133,11 +135,43 @@ class BacktestTests(unittest.TestCase):
 
         self.assertIsNotNone(result.benchmark_curve)
         self.assertIsNotNone(result.metrics.benchmark_total_return)
+        self.assertIsNotNone(result.metrics.tracking_error)
+        self.assertIsNotNone(result.metrics.benchmark_volatility)
         self.assertAlmostEqual(
             result.metrics.total_return - result.metrics.benchmark_total_return,
             result.metrics.excess_return,
             places=6,
         )
+
+    def test_applies_stamp_duty_to_sell_turnover(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="AAA", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="AAA", close=12),
+            PriceBar(date=date(2024, 1, 4), symbol="AAA", close=11),
+            PriceBar(date=date(2024, 1, 5), symbol="AAA", close=10),
+            PriceBar(date=date(2024, 1, 2), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 4), symbol="BBB", close=15),
+            PriceBar(date=date(2024, 1, 5), symbol="BBB", close=16),
+        ]
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            rebalance_every_n_days=1,
+            price_field="close",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            stamp_duty_rate=0.01,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        self.assertEqual(1.0, result.rebalance_records[-1].sell_turnover)
+        self.assertGreater(result.rebalance_records[-1].cost, 0.0)
 
 
 def _build_aligned_bars() -> list[PriceBar]:

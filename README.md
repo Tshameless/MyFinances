@@ -9,7 +9,9 @@
 - 使用交集交易日对齐所有标的，避免按数组下标错位回测。
 - 支持复权价回测、基准比较、买卖受限持仓处理。
 - 支持等权选股、固定周期调仓、基于换手的交易成本扣减。
-- 输出净值曲线 CSV、调仓日志 CSV 和绩效摘要 CSV。
+- 支持 TOML 配置文件、因子权重覆盖、卖出印花税建模。
+- 输出净值曲线 CSV、调仓日志 CSV、绩效摘要 CSV 和 JSON。
+- 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
 - 内置 `unittest` 回归测试。
 
 ## CSV 格式
@@ -36,7 +38,14 @@
 python -m python_quant.main --demo
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
+python -m python_quant.main --config backtest.example.toml --csv data/sample_prices.csv
 ```
+
+## 配置文件
+
+可以使用 TOML 配置文件集中管理参数，再用 CLI 覆盖局部值。
+
+示例见：`backtest.example.toml`
 
 也可以安装后直接运行：
 
@@ -55,5 +64,7 @@ python -m unittest discover -s tests
 默认输出目录：`output/python`
 
 - `equity_curve.csv`：日期、权益、单期收益、持仓、基准和超额收益。
-- `rebalance_log.csv`：调仓日期、持仓、换手率、交易成本。
+- `rebalance_log.csv`：调仓日期、持仓、买入换手、卖出换手、总换手、交易成本。
 - `performance_summary.csv`：核心绩效指标和基准对比。
+- `performance_summary.json`：机器可读的绩效摘要。
+- `run_manifest.json`：本次运行的配置、输入、产物路径和指标快照。

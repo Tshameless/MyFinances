@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +25,7 @@ class BacktestConfig:
     rebalance_every_n_days: int = 5
     commission_rate: float = 0.0003
     slippage_rate: float = 0.0005
+    stamp_duty_rate: float = 0.0
     price_field: str = "auto"
     output_dir: Path = OUTPUT_DIR
     factor_weights: dict[str, float] = field(
@@ -43,12 +45,16 @@ class BacktestConfig:
             self.lookback_volatility,
         ) <= 0:
             raise ValueError("All lookback windows must be greater than 0.")
-        if min(self.commission_rate, self.slippage_rate) < 0:
+        if min(self.commission_rate, self.slippage_rate, self.stamp_duty_rate) < 0:
             raise ValueError("Cost rates cannot be negative.")
         if self.price_field not in {"auto", "close", "adjusted_close"}:
             raise ValueError("price_field must be one of: auto, close, adjusted_close.")
         if not self.factor_weights:
             raise ValueError("factor_weights cannot be empty.")
+        if any(weight < 0 for weight in self.factor_weights.values()):
+            raise ValueError("factor_weights cannot contain negative values.")
+        if sum(self.factor_weights.values()) <= 0:
+            raise ValueError("factor_weights must sum to a positive value.")
 
     @property
     def per_side_cost_rate(self) -> float:
@@ -61,3 +67,58 @@ class BacktestConfig:
             self.lookback_mean_reversion,
             self.lookback_volatility,
         )
+
+    @property
+    def normalized_factor_weights(self) -> dict[str, float]:
+        total_weight = sum(self.factor_weights.values())
+        return {
+            factor_name: weight / total_weight
+            for factor_name, weight in self.factor_weights.items()
+        }
+
+
+def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object]:
+    path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    with path.open("rb") as handle:
+        payload = tomllib.load(handle)
+
+    raw_config = payload.get("backtest", payload)
+    if not isinstance(raw_config, dict):
+        raise ValueError("Config file must contain a [backtest] table or a top-level mapping.")
+
+    normalized: dict[str, object] = {}
+    simple_fields = [
+        "initial_cash",
+        "top_n",
+        "lookback_momentum",
+        "lookback_mean_reversion",
+        "lookback_volatility",
+        "rebalance_every_n_days",
+        "commission_rate",
+        "slippage_rate",
+        "stamp_duty_rate",
+        "price_field",
+    ]
+    for field_name in simple_fields:
+        if field_name in raw_config:
+            normalized[field_name] = raw_config[field_name]
+
+    if "output_dir" in raw_config:
+        output_dir = Path(str(raw_config["output_dir"]))
+        if not output_dir.is_absolute():
+            output_dir = (path.parent / output_dir).resolve()
+        normalized["output_dir"] = output_dir
+
+    if "factor_weights" in raw_config:
+        factor_weights = raw_config["factor_weights"]
+        if not isinstance(factor_weights, dict):
+            raise ValueError("factor_weights must be a TOML table.")
+        normalized["factor_weights"] = {
+            str(name): float(value)
+            for name, value in factor_weights.items()
+        }
+
+    return normalized

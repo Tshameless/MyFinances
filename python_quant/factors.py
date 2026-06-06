@@ -94,7 +94,7 @@ def calculate_factor_scores(
         }
 
     normalized: dict[str, dict[str, float]] = {}
-    factor_names = list(config.factor_weights.keys())
+    factor_names = list(config.normalized_factor_weights.keys())
     for factor_name in factor_names:
         factor_values = [metrics[factor_name] for metrics in raw_scores.values()]
         if not factor_values:
@@ -116,7 +116,7 @@ def calculate_factor_scores(
     for symbol, metrics in normalized.items():
         total_scores[symbol] = sum(
             metrics.get(factor_name, 0.0) * weight
-            for factor_name, weight in config.factor_weights.items()
+            for factor_name, weight in config.normalized_factor_weights.items()
         )
 
     return total_scores

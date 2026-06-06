@@ -62,8 +62,12 @@ def run_backtest(
                 config=config,
             )
             target_weights = _build_target_weights(selected)
-            turnover = _calculate_turnover(weights, target_weights)
-            turnover_cost = equity * turnover * config.per_side_cost_rate
+            buy_turnover, sell_turnover = _calculate_turnover_sides(weights, target_weights)
+            turnover = buy_turnover + sell_turnover
+            turnover_cost = equity * (
+                turnover * config.per_side_cost_rate
+                + sell_turnover * config.stamp_duty_rate
+            )
             equity -= turnover_cost
             total_cost += turnover_cost
             total_turnover += turnover
@@ -73,6 +77,8 @@ def run_backtest(
                 RebalanceRecord(
                     date=current_date,
                     holdings=holdings,
+                    buy_turnover=buy_turnover,
+                    sell_turnover=sell_turnover,
                     turnover=turnover,
                     cost=round(turnover_cost, 2),
                 )
@@ -129,11 +135,24 @@ def _build_target_weights(holdings: tuple[str, ...]) -> dict[str, float]:
 
 
 def _calculate_turnover(current_weights: dict[str, float], target_weights: dict[str, float]) -> float:
+    buy_turnover, sell_turnover = _calculate_turnover_sides(current_weights, target_weights)
+    return buy_turnover + sell_turnover
+
+
+def _calculate_turnover_sides(
+    current_weights: dict[str, float],
+    target_weights: dict[str, float],
+) -> tuple[float, float]:
     symbols = set(current_weights) | set(target_weights)
-    return sum(
-        abs(target_weights.get(symbol, 0.0) - current_weights.get(symbol, 0.0))
-        for symbol in symbols
-    )
+    buy_turnover = 0.0
+    sell_turnover = 0.0
+    for symbol in symbols:
+        delta = target_weights.get(symbol, 0.0) - current_weights.get(symbol, 0.0)
+        if delta > 0:
+            buy_turnover += delta
+        elif delta < 0:
+            sell_turnover += -delta
+    return buy_turnover, sell_turnover
 
 
 def _build_target_holdings(
@@ -201,8 +220,15 @@ def _calculate_metrics(
         / max(len(daily_returns) - 1, 1)
     )
     volatility = sqrt(max(variance, 0.0)) * sqrt(252)
+    downside_variance = (
+        sum(min(daily, 0.0) ** 2 for daily in daily_returns)
+        / len(daily_returns)
+    )
+    downside_volatility = sqrt(max(downside_variance, 0.0)) * sqrt(252)
     annualized_return = (1.0 + total_return) ** (252 / len(daily_returns)) - 1.0
     sharpe = 0.0 if volatility == 0 else (mean_return * 252) / volatility
+    sortino = 0.0 if downside_volatility == 0 else annualized_return / downside_volatility
+    calmar = 0.0 if max_drawdown == 0 else annualized_return / abs(max_drawdown)
     wins = sum(1 for daily in daily_returns if daily > 0)
     average_turnover = total_turnover / rebalance_count if rebalance_count else 0.0
 
@@ -211,7 +237,10 @@ def _calculate_metrics(
         annualized_return=annualized_return,
         max_drawdown=max_drawdown,
         volatility=volatility,
+        downside_volatility=downside_volatility,
         sharpe=sharpe,
+        sortino=sortino,
+        calmar=calmar,
         win_rate=wins / len(daily_returns),
         average_turnover=average_turnover,
         total_cost=total_cost,
@@ -270,6 +299,19 @@ def _attach_benchmark_metrics(
     benchmark_annualized_return = (1.0 + benchmark_total_return) ** (
         252 / len(benchmark_curve)
     ) - 1.0
+    benchmark_daily_returns = [point.daily_return for point in benchmark_curve]
+    benchmark_mean_return = sum(benchmark_daily_returns) / len(benchmark_daily_returns)
+    benchmark_variance = (
+        sum((daily - benchmark_mean_return) ** 2 for daily in benchmark_daily_returns)
+        / max(len(benchmark_daily_returns) - 1, 1)
+    )
+    benchmark_volatility = sqrt(max(benchmark_variance, 0.0)) * sqrt(252)
+    benchmark_peak = initial_benchmark_equity
+    benchmark_max_drawdown = 0.0
+    for point in benchmark_curve:
+        benchmark_peak = max(benchmark_peak, point.equity)
+        benchmark_drawdown = point.equity / benchmark_peak - 1.0
+        benchmark_max_drawdown = min(benchmark_max_drawdown, benchmark_drawdown)
     excess_return = metrics.total_return - benchmark_total_return
     daily_excess_returns = [
         point.daily_return - benchmark_point.daily_return
@@ -280,15 +322,19 @@ def _attach_benchmark_metrics(
         sum((daily - mean_excess_return) ** 2 for daily in daily_excess_returns)
         / max(len(daily_excess_returns) - 1, 1)
     )
+    tracking_error = sqrt(max(excess_variance, 0.0)) * sqrt(252)
     information_ratio = 0.0
-    if excess_variance > 0:
-        information_ratio = (mean_excess_return * 252) / (sqrt(excess_variance) * sqrt(252))
+    if tracking_error > 0:
+        information_ratio = (mean_excess_return * 252) / tracking_error
 
     return replace(
         metrics,
         benchmark_total_return=benchmark_total_return,
         benchmark_annualized_return=benchmark_annualized_return,
+        benchmark_volatility=benchmark_volatility,
+        benchmark_max_drawdown=benchmark_max_drawdown,
         excess_return=excess_return,
+        tracking_error=tracking_error,
         information_ratio=information_ratio,
     )
 

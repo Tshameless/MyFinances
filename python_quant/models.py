@@ -28,6 +28,8 @@ class EquityPoint:
 class RebalanceRecord:
     date: date
     holdings: tuple[str, ...]
+    buy_turnover: float
+    sell_turnover: float
     turnover: float
     cost: float
 
@@ -38,14 +40,20 @@ class BacktestMetrics:
     annualized_return: float
     max_drawdown: float
     volatility: float
+    downside_volatility: float
     sharpe: float
+    sortino: float
+    calmar: float
     win_rate: float
     average_turnover: float
     total_cost: float
     periods: int
     benchmark_total_return: float | None = None
     benchmark_annualized_return: float | None = None
+    benchmark_volatility: float | None = None
+    benchmark_max_drawdown: float | None = None
     excess_return: float | None = None
+    tracking_error: float | None = None
     information_ratio: float | None = None
 
 
