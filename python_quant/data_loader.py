@@ -10,7 +10,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"CSV file not found: {path}")
-
+    print(f"Loading price bars from CSV: {path}")
     bars: list[PriceBar] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
