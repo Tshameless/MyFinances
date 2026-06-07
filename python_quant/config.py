@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import KeysView
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +14,42 @@ DEFAULT_FACTOR_WEIGHTS = {
     "low_volatility": 0.3,
 }
 SUPPORTED_FACTORS = frozenset(DEFAULT_FACTOR_WEIGHTS)
+_BACKTEST_SIMPLE_FIELDS = frozenset(
+    {
+        "initial_cash",
+        "top_n",
+        "lookback_momentum",
+        "lookback_mean_reversion",
+        "lookback_volatility",
+        "rebalance_every_n_days",
+        "commission_rate",
+        "slippage_rate",
+        "stamp_duty_rate",
+        "price_field",
+    }
+)
+_BACKTEST_PATH_FIELDS = frozenset({"output_dir", "symbol_name_csv"})
+_BACKTEST_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS | _BACKTEST_PATH_FIELDS | {"factor_weights"}
+_CONFIG_ALLOWED_TOP_LEVEL_TABLES = frozenset({"backtest", "sweep"})
+_SWEEP_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS - {"initial_cash"}
+_INT_FIELDS = frozenset(
+    {
+        "top_n",
+        "lookback_momentum",
+        "lookback_mean_reversion",
+        "lookback_volatility",
+        "rebalance_every_n_days",
+    }
+)
+_FLOAT_FIELDS = frozenset(
+    {
+        "initial_cash",
+        "commission_rate",
+        "slippage_rate",
+        "stamp_duty_rate",
+    }
+)
+_STRING_FIELDS = frozenset({"price_field"})
 
 
 @dataclass(frozen=True)
@@ -98,32 +135,38 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
     raw_config = payload.get("backtest")
     if not isinstance(raw_config, dict):
         raise ValueError("Config file must contain a [backtest] table.")
+    _reject_unknown_keys(
+        table_name="config",
+        keys=payload.keys(),
+        allowed=_CONFIG_ALLOWED_TOP_LEVEL_TABLES,
+    )
+    _reject_unknown_keys(
+        table_name="backtest",
+        keys=raw_config.keys(),
+        allowed=_BACKTEST_ALLOWED_FIELDS,
+    )
 
     normalized: dict[str, object] = {}
-    simple_fields = [
-        "initial_cash",
-        "top_n",
-        "lookback_momentum",
-        "lookback_mean_reversion",
-        "lookback_volatility",
-        "rebalance_every_n_days",
-        "commission_rate",
-        "slippage_rate",
-        "stamp_duty_rate",
-        "price_field",
-    ]
-    for field_name in simple_fields:
+    for field_name in _INT_FIELDS:
         if field_name in raw_config:
-            normalized[field_name] = raw_config[field_name]
+            normalized[field_name] = _require_int(raw_config[field_name], field_name)
+
+    for field_name in _FLOAT_FIELDS:
+        if field_name in raw_config:
+            normalized[field_name] = _require_number(raw_config[field_name], field_name)
+
+    for field_name in _STRING_FIELDS:
+        if field_name in raw_config:
+            normalized[field_name] = _require_str(raw_config[field_name], field_name)
 
     if "output_dir" in raw_config:
-        output_dir = Path(str(raw_config["output_dir"]))
+        output_dir = Path(_require_str(raw_config["output_dir"], "output_dir"))
         if not output_dir.is_absolute():
             output_dir = (path.parent / output_dir).resolve()
         normalized["output_dir"] = output_dir
 
     if "symbol_name_csv" in raw_config and raw_config["symbol_name_csv"] not in ("", None):
-        symbol_name_csv = Path(str(raw_config["symbol_name_csv"]))
+        symbol_name_csv = Path(_require_str(raw_config["symbol_name_csv"], "symbol_name_csv"))
         if not symbol_name_csv.is_absolute():
             symbol_name_csv = (path.parent / symbol_name_csv).resolve()
         normalized["symbol_name_csv"] = symbol_name_csv
@@ -133,7 +176,7 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
         if not isinstance(factor_weights, dict):
             raise ValueError("factor_weights must be a TOML table.")
         normalized["factor_weights"] = {
-            str(name): float(value)
+            str(name): _require_number(value, f"factor_weights.{name}")
             for name, value in factor_weights.items()
         }
 
@@ -148,29 +191,70 @@ def load_sweep_overrides_from_toml(config_path: str | Path) -> dict[str, list[ob
     with path.open("rb") as handle:
         payload = tomllib.load(handle)
 
+    _reject_unknown_keys(
+        table_name="config",
+        keys=payload.keys(),
+        allowed=_CONFIG_ALLOWED_TOP_LEVEL_TABLES,
+    )
     raw_sweep = payload.get("sweep")
     if raw_sweep is None:
         return {}
     if not isinstance(raw_sweep, dict):
         raise ValueError("Config file [sweep] section must be a TOML table.")
 
-    allowed_fields = {
-        "top_n",
-        "lookback_momentum",
-        "lookback_mean_reversion",
-        "lookback_volatility",
-        "rebalance_every_n_days",
-        "commission_rate",
-        "slippage_rate",
-        "stamp_duty_rate",
-        "price_field",
-    }
     normalized: dict[str, list[object]] = {}
     for field_name, values in raw_sweep.items():
-        if field_name not in allowed_fields:
+        if field_name not in _SWEEP_ALLOWED_FIELDS:
             raise ValueError(f"Unsupported sweep field: {field_name}")
         if not isinstance(values, list) or not values:
             raise ValueError(f"Sweep field '{field_name}' must be a non-empty TOML array.")
-        normalized[field_name] = list(values)
+        normalized[field_name] = [
+            _validate_sweep_value(field_name, value)
+            for value in values
+        ]
 
     return normalized
+
+
+def _reject_unknown_keys(
+    *,
+    table_name: str,
+    keys: KeysView[str],
+    allowed: frozenset[str],
+) -> None:
+    unknown = sorted(set(keys) - allowed)
+    if unknown:
+        unknown_text = ", ".join(unknown)
+        allowed_text = ", ".join(sorted(allowed))
+        raise ValueError(
+            f"Unsupported {table_name} field(s): {unknown_text}. "
+            f"Allowed fields: {allowed_text}."
+        )
+
+
+def _validate_sweep_value(field_name: str, value: object) -> object:
+    if field_name in _INT_FIELDS:
+        return _require_int(value, field_name)
+    if field_name in _FLOAT_FIELDS:
+        return _require_number(value, field_name)
+    if field_name in _STRING_FIELDS:
+        return _require_str(value, field_name)
+    raise ValueError(f"Unsupported sweep field: {field_name}")
+
+
+def _require_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer.")
+    return value
+
+
+def _require_number(value: object, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be a number.")
+    return float(value)
+
+
+def _require_str(value: object, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string.")
+    return value

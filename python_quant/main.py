@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
+import sys
+from collections.abc import Sequence
+from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Mapping, cast
@@ -109,9 +115,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    try:
+        _run_with_args(args, parser)
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        parser.exit(2, f"{parser.prog}: error: {exc}\n")
+    return 0
+
+
+def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     bars = _load_bars(args, parser)
     benchmark_bars = _load_benchmark_bars(args)
 
@@ -322,8 +336,11 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "factor_weights": default_config.factor_weights.copy(),
     }
 
+    has_explicit_output_dir = False
     if args.config:
-        config_kwargs.update(load_config_overrides_from_toml(args.config))
+        config_overrides = load_config_overrides_from_toml(args.config)
+        has_explicit_output_dir = "output_dir" in config_overrides
+        config_kwargs.update(config_overrides)
 
     cli_overrides = {
         "initial_cash": args.initial_cash,
@@ -343,11 +360,15 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
 
     if args.output_dir is not None:
         config_kwargs["output_dir"] = Path(args.output_dir)
+        has_explicit_output_dir = True
 
     if args.factor_weight:
         factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
         factor_weights.update(_parse_factor_weight_overrides(args.factor_weight))
         config_kwargs["factor_weights"] = factor_weights
+
+    if not has_explicit_output_dir:
+        config_kwargs["output_dir"] = _build_default_run_output_dir(config_kwargs)
 
     return _build_config_from_mapping(config_kwargs)
 
@@ -430,6 +451,36 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
     )
 
 
+def _build_default_run_output_dir(config_kwargs: Mapping[str, object]) -> Path:
+    timestamp = os.environ.get("MYFINANCES_RUN_TIMESTAMP")
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Path("output") / "runs" / f"{timestamp}-{_config_hash(config_kwargs)}"
+
+
+def _config_hash(config_kwargs: Mapping[str, object]) -> str:
+    payload = {
+        key: _jsonable_config_value(value)
+        for key, value in sorted(config_kwargs.items())
+        if key != "output_dir"
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:10]
+
+
+def _jsonable_config_value(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            str(key): _jsonable_config_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
@@ -449,4 +500,4 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

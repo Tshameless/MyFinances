@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import platform
+import subprocess
+import sys
 from dataclasses import asdict
 from datetime import datetime
 from html import escape
@@ -306,8 +310,12 @@ def save_run_manifest(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "config": _serialize_config(config),
         "inputs": inputs,
+        "input_files": _build_input_file_metadata(inputs),
         "artifacts": {name: str(path) for name, path in artifacts.items()},
+        "artifact_files": _build_artifact_file_metadata(artifacts),
         "metrics": asdict(metrics),
+        "environment": _build_environment_metadata(),
+        "git": _build_git_metadata(),
     }
     with target_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -517,6 +525,7 @@ def save_batch_rankings(
     rank_by: str = "annualized_return",
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_rank_metric(rows, rank_by)
     ranked_rows = _sort_rows_by_metric(rows, rank_by)
     for index, row in enumerate(ranked_rows, start=1):
         row["rank"] = index
@@ -629,6 +638,7 @@ def save_batch_chart_svg(
     metric: str = "annualized_return",
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_rank_metric(rows, metric)
     target_path = output_dir / f"batch_{metric}.svg"
     points = [
         (_format_run_label(row, row_index), _float_metric(row, metric))
@@ -664,6 +674,7 @@ def save_batch_heatmap_svg(
     metric: str,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_rank_metric(rows, metric)
     target_path = output_dir / f"batch_{metric}_heatmap.svg"
 
     points = [
@@ -689,6 +700,7 @@ def save_batch_report_html(
     artifacts: dict[str, Path],
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_rank_metric(rows, rank_by)
     target_path = output_dir / "batch_report.html"
     sorted_rows = _sort_rows_by_metric(rows, rank_by)
     top_rows = sorted_rows[:10]
@@ -991,6 +1003,42 @@ def _sort_rows_by_metric(rows: list[dict[str, object]], rank_by: str) -> list[di
     )
 
 
+def _validate_rank_metric(rows: list[dict[str, object]], rank_by: str) -> None:
+    if not rows:
+        return
+
+    available_metrics = sorted(
+        {
+            key
+            for row in rows
+            for key, value in row.items()
+            if _is_numeric_metric_value(value)
+        }
+    )
+    if rank_by not in available_metrics:
+        available_text = ", ".join(available_metrics) or "<none>"
+        raise ValueError(
+            f"Rank metric '{rank_by}' is not available. "
+            f"Available numeric metrics: {available_text}."
+        )
+
+
+def _is_numeric_metric_value(value: object) -> bool:
+    if value in ("", None):
+        return False
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return False
+        return True
+    return False
+
+
 def _serialize_config(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
@@ -1007,6 +1055,85 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "symbol_name_csv": None if config.symbol_name_csv is None else str(config.symbol_name_csv),
         "factor_weights": config.factor_weights,
     }
+
+
+def _build_input_file_metadata(
+    inputs: dict[str, str | bool | None],
+) -> dict[str, dict[str, object]]:
+    metadata: dict[str, dict[str, object]] = {}
+    for key in ("csv", "benchmark_csv", "config"):
+        raw_path = inputs.get(key)
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = Path(raw_path)
+        if not path.exists() or not path.is_file():
+            continue
+        metadata[key] = _file_metadata(path)
+    return metadata
+
+
+def _build_artifact_file_metadata(
+    artifacts: dict[str, Path],
+) -> dict[str, dict[str, object]]:
+    metadata: dict[str, dict[str, object]] = {}
+    for name, path in artifacts.items():
+        if path.exists() and path.is_file():
+            metadata[name] = _file_metadata(path)
+    return metadata
+
+
+def _build_environment_metadata() -> dict[str, str]:
+    return {
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "executable": sys.executable,
+    }
+
+
+def _build_git_metadata() -> dict[str, object]:
+    repo_root = Path(__file__).resolve().parent.parent
+    try:
+        commit = _run_git_command(repo_root, "rev-parse", "HEAD")
+        branch = _run_git_command(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+        status_short = _run_git_command(repo_root, "status", "--short")
+    except (OSError, subprocess.SubprocessError):
+        return {"available": False}
+
+    return {
+        "available": True,
+        "commit": commit,
+        "branch": branch,
+        "is_dirty": bool(status_short),
+        "status_short": status_short.splitlines(),
+    }
+
+
+def _run_git_command(repo_root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _file_metadata(path: Path) -> dict[str, object]:
+    stat = path.stat()
+    return {
+        "path": str(path.resolve()),
+        "size_bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        "sha256": _sha256_file(path),
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_symbol_name_mapping(symbol_name_csv: Path | None) -> dict[str, str]:

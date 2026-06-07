@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import tempfile
@@ -30,6 +31,8 @@ class ReportingTests(unittest.TestCase):
     def test_saves_run_manifest_with_config_and_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
+            config_path = output_dir / "backtest.toml"
+            config_path.write_text("[backtest]\ntop_n = 3\n", encoding="utf-8")
             config = BacktestConfig(output_dir=output_dir)
             metrics = BacktestMetrics(
                 total_return=0.1,
@@ -50,7 +53,12 @@ class ReportingTests(unittest.TestCase):
             manifest_path = save_run_manifest(
                 output_dir=output_dir,
                 config=config,
-                inputs={"demo": True, "csv": None, "benchmark_csv": None, "config": None},
+                inputs={
+                    "demo": True,
+                    "csv": None,
+                    "benchmark_csv": None,
+                    "config": str(config_path),
+                },
                 artifacts={"performance_summary_json": summary_json_path},
                 metrics=metrics,
             )
@@ -63,6 +71,26 @@ class ReportingTests(unittest.TestCase):
             )
             self.assertEqual(0.1, payload["metrics"]["total_return"])
             self.assertEqual(str(output_dir), payload["config"]["output_dir"])
+            self.assertIn("python_version", payload["environment"])
+            self.assertIn("platform", payload["environment"])
+            self.assertIn("available", payload["git"])
+            if payload["git"]["available"]:
+                self.assertIn("commit", payload["git"])
+                self.assertIn("branch", payload["git"])
+                self.assertIn("is_dirty", payload["git"])
+            self.assertEqual(str(config_path.resolve()), payload["input_files"]["config"]["path"])
+            self.assertEqual(
+                hashlib.sha256(config_path.read_bytes()).hexdigest(),
+                payload["input_files"]["config"]["sha256"],
+            )
+            self.assertEqual(config_path.stat().st_size, payload["input_files"]["config"]["size_bytes"])
+            artifact_metadata = payload["artifact_files"]["performance_summary_json"]
+            self.assertEqual(str(summary_json_path.resolve()), artifact_metadata["path"])
+            self.assertEqual(summary_json_path.stat().st_size, artifact_metadata["size_bytes"])
+            self.assertEqual(
+                hashlib.sha256(summary_json_path.read_bytes()).hexdigest(),
+                artifact_metadata["sha256"],
+            )
 
     def test_loads_symbol_name_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -297,6 +325,14 @@ class ReportingTests(unittest.TestCase):
             content = chart_path.read_text(encoding="utf-8-sig")
             self.assertIn("年化收益参数对比图", content)
             self.assertIn("暂无可展示数据", content)
+
+    def test_rejects_unknown_batch_rank_metric(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            rows = [{"run_id": "run_001", "annualized_return": 0.2}]
+
+            with self.assertRaisesRegex(ValueError, "Rank metric 'missing_metric'"):
+                save_batch_rankings(rows, output_dir, rank_by="missing_metric")
 
     def test_saves_single_run_report_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

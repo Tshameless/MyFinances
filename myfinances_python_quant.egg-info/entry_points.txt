@@ -1,2 +1,0 @@
-[console_scripts]
-myfinances-quant = python_quant.main:main

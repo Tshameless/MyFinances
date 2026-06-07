@@ -113,7 +113,9 @@ python -m unittest discover -s tests
 
 ## 输出
 
-默认输出目录：`output/python`
+默认输出目录：`output/runs/<timestamp>-<config_hash>/`，避免多次回测互相覆盖。
+
+如果在 TOML 的 `[backtest]` 中配置 `output_dir`，或通过命令行传入 `--output-dir`，则会精确使用指定目录。
 
 - `equity_curve.csv`：日期、权益、单期收益、持仓、基准和超额收益。
 - `rebalance_log.csv`：调仓日期、持仓、买入换手、卖出换手、总换手、交易成本。

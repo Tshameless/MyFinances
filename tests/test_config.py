@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from python_quant.config import BacktestConfig, load_config_overrides_from_toml
+from python_quant.config import (
+    BacktestConfig,
+    load_config_overrides_from_toml,
+    load_sweep_overrides_from_toml,
+)
 
 
 class ConfigTests(unittest.TestCase):
@@ -47,6 +51,84 @@ price_field = "adjusted_close"
 
             with self.assertRaisesRegex(ValueError, r"\[backtest\]"):
                 load_config_overrides_from_toml(config_path)
+
+    def test_rejects_unknown_backtest_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+top_n = 5
+typo_top_n = 3
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unsupported backtest field"):
+                load_config_overrides_from_toml(config_path)
+
+    def test_rejects_unknown_top_level_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+top_n = 5
+
+[database]
+url = "sqlite:///ignored.db"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unsupported config field"):
+                load_config_overrides_from_toml(config_path)
+
+    def test_rejects_wrong_backtest_field_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+top_n = "5"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "top_n must be an integer"):
+                load_config_overrides_from_toml(config_path)
+
+    def test_rejects_wrong_factor_weight_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+
+[backtest.factor_weights]
+momentum = "0.7"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "factor_weights.momentum must be a number"):
+                load_config_overrides_from_toml(config_path)
+
+    def test_rejects_wrong_sweep_value_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+
+[sweep]
+rebalance_every_n_days = [5, "10"]
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "rebalance_every_n_days must be an integer"):
+                load_sweep_overrides_from_toml(config_path)
 
     def test_rejects_unsupported_factor_weight_name(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported factors"):
