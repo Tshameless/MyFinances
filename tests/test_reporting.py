@@ -9,7 +9,13 @@ import unittest
 from pathlib import Path
 
 from python_quant.config import BacktestConfig
-from python_quant.models import BacktestMetrics, EquityPoint, RebalanceRecord
+from python_quant.models import (
+    BacktestMetrics,
+    EquityPoint,
+    PositionPoint,
+    RebalanceRecord,
+    TradeRecord,
+)
 from python_quant.reporting import (
     load_symbol_name_mapping,
     print_summary,
@@ -21,9 +27,11 @@ from python_quant.reporting import (
     save_equity_curve,
     save_performance_summary,
     save_performance_summary_json,
+    save_positions,
     save_rebalance_log,
     save_run_manifest,
     save_single_run_report_html,
+    save_trades,
 )
 
 
@@ -225,6 +233,71 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("123.45", rebalance_content)
             self.assertIn("000001（平安银行）", rebalance_content)
             self.assertIn("仅买入", rebalance_content)
+
+    def test_saves_position_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            positions = [
+                PositionPoint(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    symbol="000001",
+                    shares=100,
+                    price=10.25,
+                    market_value=1025.0,
+                    weight=0.1025,
+                    cash=8975.0,
+                    total_equity=10000.0,
+                ),
+                PositionPoint(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    symbol="CASH",
+                    shares=0,
+                    price=1.0,
+                    market_value=8975.0,
+                    weight=0.8975,
+                    cash=8975.0,
+                    total_equity=10000.0,
+                ),
+            ]
+
+            positions_path = save_positions(positions, output_dir)
+
+            content = positions_path.read_text(encoding="utf-8-sig")
+            self.assertIn("代码 / symbol", content)
+            self.assertIn("股数 / shares", content)
+            self.assertIn("市值 / market_value", content)
+            self.assertIn("10.25%", content)
+            self.assertIn("000001", content)
+            self.assertIn("CASH", content)
+
+    def test_saves_trade_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            trades = [
+                TradeRecord(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    symbol="000001",
+                    side="BUY",
+                    shares=100,
+                    price=10.25,
+                    gross_value=1025.0,
+                    commission=0.31,
+                    slippage=0.51,
+                    stamp_duty=0.0,
+                    total_cost=0.82,
+                    cash_change=-1025.82,
+                    reason="rebalance_entry",
+                )
+            ]
+
+            trades_path = save_trades(trades, output_dir)
+
+            content = trades_path.read_text(encoding="utf-8-sig")
+            self.assertIn("方向 / side", content)
+            self.assertIn("成交金额 / gross_value", content)
+            self.assertIn("佣金 / commission", content)
+            self.assertIn("BUY", content)
+            self.assertIn("-1025.82", content)
 
     def test_print_summary_uses_chinese_labels(self) -> None:
         metrics = BacktestMetrics(

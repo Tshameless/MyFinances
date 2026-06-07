@@ -1,6 +1,7 @@
 [backtest]
 initial_cash = 1000000
 top_n = 3
+lot_size = 100
 lookback_momentum = 20
 lookback_mean_reversion = 5
 lookback_volatility = 20

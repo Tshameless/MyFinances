@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from math import sqrt
 
 from .config import BacktestConfig
@@ -16,8 +16,10 @@ from .models import (
     BacktestResult,
     BenchmarkPoint,
     EquityPoint,
+    PositionPoint,
     PriceBar,
     RebalanceRecord,
+    TradeRecord,
 )
 from .strategy import select_symbols
 
@@ -39,18 +41,23 @@ def run_backtest(
     if common_length < config.max_lookback + 2:
         raise ValueError("Not enough history to run the strategy.")
 
-    equity = config.initial_cash
+    cash = config.initial_cash
+    positions: dict[str, int] = {}
+    entry_dates: dict[str, object] = {}
     equity_curve: list[EquityPoint] = []
+    position_points: list[PositionPoint] = []
+    trade_records: list[TradeRecord] = []
     rebalance_records: list[RebalanceRecord] = []
     holdings: tuple[str, ...] = ()
-    weights: dict[str, float] = {}
     total_cost = 0.0
     total_turnover = 0.0
     warmup = config.max_lookback
+    previous_equity = config.initial_cash
 
     for index in range(warmup, common_length - 1):
         current_date = calendar[index]
         next_date = calendar[index + 1]
+        current_equity = _calculate_account_equity(cash, positions, aligned_history, index, config)
 
         should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
         if should_rebalance:
@@ -61,47 +68,60 @@ def run_backtest(
                 index=index,
                 current_holdings=holdings,
                 config=config,
+                entry_dates=entry_dates,
+                current_date=current_date,
             )
-            target_weights = _build_target_weights(selected)
-            buy_turnover, sell_turnover = _calculate_turnover_sides(weights, target_weights)
-            turnover = buy_turnover + sell_turnover
-            turnover_cost = equity * (
-                turnover * config.per_side_cost_rate
-                + sell_turnover * config.stamp_duty_rate
+            trade_plan = _rebalance_account(
+                cash=cash,
+                positions=positions,
+                entry_dates=entry_dates,
+                target_holdings=selected,
+                aligned_history=aligned_history,
+                index=index,
+                config=config,
+                current_date=current_date,
             )
-            equity -= turnover_cost
-            total_cost += turnover_cost
+            cash = trade_plan.cash
+            positions = trade_plan.positions
+            entry_dates = trade_plan.entry_dates
+            holdings = trade_plan.holdings
+            turnover = trade_plan.buy_turnover + trade_plan.sell_turnover
+            total_cost += trade_plan.cost
             total_turnover += turnover
-            holdings = selected
-            weights = target_weights
+            trade_records.extend(trade_plan.trades)
             rebalance_records.append(
                 RebalanceRecord(
                     date=current_date,
                     holdings=holdings,
-                    buy_turnover=buy_turnover,
-                    sell_turnover=sell_turnover,
+                    buy_turnover=trade_plan.buy_turnover,
+                    sell_turnover=trade_plan.sell_turnover,
                     turnover=turnover,
-                    cost=round(turnover_cost, 2),
+                    cost=round(trade_plan.cost, 2),
                 )
             )
 
-        portfolio_return = 0.0
-        for symbol, weight in weights.items():
-            bars_for_symbol = aligned_history[symbol]
-            today_close = price_for_bar(bars_for_symbol[index], config)
-            next_close = price_for_bar(bars_for_symbol[index + 1], config)
-            symbol_return = next_close / today_close - 1.0
-            portfolio_return += weight * symbol_return
+        next_equity = _calculate_account_equity(cash, positions, aligned_history, index + 1, config)
+        daily_return = next_equity / previous_equity - 1.0
 
-        equity *= 1.0 + portfolio_return
         equity_curve.append(
             EquityPoint(
                 date=next_date,
-                equity=round(equity, 2),
-                daily_return=portfolio_return,
+                equity=round(next_equity, 2),
+                daily_return=daily_return,
                 holdings=holdings,
             )
         )
+        position_points.extend(
+            _build_position_points(
+                cash=cash,
+                positions=positions,
+                aligned_history=aligned_history,
+                index=index + 1,
+                config=config,
+                total_equity=next_equity,
+            )
+        )
+        previous_equity = next_equity
 
     metrics = _calculate_metrics(
         equity_curve,
@@ -125,30 +145,187 @@ def run_backtest(
         rebalance_records=rebalance_records,
         metrics=metrics,
         benchmark_curve=benchmark_curve,
+        positions=position_points,
+        trades=trade_records,
     )
 
 
-def _build_target_weights(holdings: tuple[str, ...]) -> dict[str, float]:
-    if not holdings:
-        return {}
-    weight = 1.0 / len(holdings)
-    return {symbol: weight for symbol in holdings}
+@dataclass(frozen=True)
+class _AccountTradeResult:
+    cash: float
+    positions: dict[str, int]
+    entry_dates: dict[str, object]
+    holdings: tuple[str, ...]
+    buy_turnover: float
+    sell_turnover: float
+    cost: float
+    trades: list[TradeRecord]
 
 
-def _calculate_turnover_sides(
-    current_weights: dict[str, float],
-    target_weights: dict[str, float],
-) -> tuple[float, float]:
-    symbols = set(current_weights) | set(target_weights)
-    buy_turnover = 0.0
-    sell_turnover = 0.0
-    for symbol in symbols:
-        delta = target_weights.get(symbol, 0.0) - current_weights.get(symbol, 0.0)
-        if delta > 0:
-            buy_turnover += delta
-        elif delta < 0:
-            sell_turnover += -delta
-    return buy_turnover, sell_turnover
+def _calculate_account_equity(
+    cash: float,
+    positions: dict[str, int],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+) -> float:
+    market_value = sum(
+        shares * price_for_bar(aligned_history[symbol][index], config)
+        for symbol, shares in positions.items()
+    )
+    return cash + market_value
+
+
+def _rebalance_account(
+    *,
+    cash: float,
+    positions: dict[str, int],
+    entry_dates: dict[str, object],
+    target_holdings: tuple[str, ...],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+    current_date: object,
+) -> _AccountTradeResult:
+    positions = positions.copy()
+    entry_dates = entry_dates.copy()
+    start_equity = _calculate_account_equity(cash, positions, aligned_history, index, config)
+    sold_value = 0.0
+    bought_value = 0.0
+    cost = 0.0
+    trades: list[TradeRecord] = []
+
+    for symbol in sorted(set(positions) - set(target_holdings)):
+        bar = aligned_history[symbol][index]
+        if not _is_sellable(bar) or entry_dates.get(symbol) == current_date:
+            continue
+        shares = positions.pop(symbol)
+        price = price_for_bar(bar, config)
+        gross_value = shares * price
+        commission = gross_value * config.commission_rate
+        slippage = gross_value * config.slippage_rate
+        stamp_duty = gross_value * config.stamp_duty_rate
+        trade_cost = commission + slippage + stamp_duty
+        cash += gross_value - trade_cost
+        sold_value += gross_value
+        cost += trade_cost
+        entry_dates.pop(symbol, None)
+        trades.append(
+            TradeRecord(
+                date=bar.date,
+                symbol=symbol,
+                side="SELL",
+                shares=shares,
+                price=round(price, 4),
+                gross_value=round(gross_value, 2),
+                commission=round(commission, 2),
+                slippage=round(slippage, 2),
+                stamp_duty=round(stamp_duty, 2),
+                total_cost=round(trade_cost, 2),
+                cash_change=round(gross_value - trade_cost, 2),
+                reason="rebalance_exit",
+            )
+        )
+
+    retained_targets = tuple(symbol for symbol in target_holdings if symbol in positions)
+    new_targets = tuple(symbol for symbol in target_holdings if symbol not in positions)
+    target_count = len(retained_targets) + len(new_targets)
+    target_value = start_equity / target_count if target_count else 0.0
+
+    for symbol in new_targets:
+        bar = aligned_history[symbol][index]
+        if not _is_buyable(bar):
+            continue
+        price = price_for_bar(bar, config)
+        max_cash_for_position = min(target_value, cash / (1.0 + config.per_side_cost_rate))
+        shares = _round_down_to_lot(max_cash_for_position / price, config.lot_size)
+        if shares <= 0:
+            continue
+        gross_value = shares * price
+        commission = gross_value * config.commission_rate
+        slippage = gross_value * config.slippage_rate
+        stamp_duty = 0.0
+        trade_cost = commission + slippage
+        cash -= gross_value + trade_cost
+        positions[symbol] = shares
+        entry_dates[symbol] = current_date
+        bought_value += gross_value
+        cost += trade_cost
+        trades.append(
+            TradeRecord(
+                date=bar.date,
+                symbol=symbol,
+                side="BUY",
+                shares=shares,
+                price=round(price, 4),
+                gross_value=round(gross_value, 2),
+                commission=round(commission, 2),
+                slippage=round(slippage, 2),
+                stamp_duty=round(stamp_duty, 2),
+                total_cost=round(trade_cost, 2),
+                cash_change=round(-(gross_value + trade_cost), 2),
+                reason="rebalance_entry",
+            )
+        )
+
+    holdings = tuple(sorted(positions))
+    return _AccountTradeResult(
+        cash=cash,
+        positions=positions,
+        entry_dates=entry_dates,
+        holdings=holdings,
+        buy_turnover=0.0 if start_equity == 0 else bought_value / start_equity,
+        sell_turnover=0.0 if start_equity == 0 else sold_value / start_equity,
+        cost=cost,
+        trades=trades,
+    )
+
+
+def _round_down_to_lot(shares: float, lot_size: int) -> int:
+    return int(shares // lot_size) * lot_size
+
+
+def _build_position_points(
+    *,
+    cash: float,
+    positions: dict[str, int],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+    total_equity: float,
+) -> list[PositionPoint]:
+    if not positions:
+        return [
+            PositionPoint(
+                date=next(iter(aligned_history.values()))[index].date,
+                symbol="CASH",
+                shares=0,
+                price=1.0,
+                market_value=round(cash, 2),
+                weight=1.0 if total_equity > 0 else 0.0,
+                cash=round(cash, 2),
+                total_equity=round(total_equity, 2),
+            )
+        ]
+
+    rows = []
+    for symbol in sorted(positions):
+        bar = aligned_history[symbol][index]
+        price = price_for_bar(bar, config)
+        market_value = positions[symbol] * price
+        rows.append(
+            PositionPoint(
+                date=bar.date,
+                symbol=symbol,
+                shares=positions[symbol],
+                price=round(price, 4),
+                market_value=round(market_value, 2),
+                weight=0.0 if total_equity == 0 else market_value / total_equity,
+                cash=round(cash, 2),
+                total_equity=round(total_equity, 2),
+            )
+        )
+    return rows
 
 
 def _build_target_holdings(
@@ -158,6 +335,8 @@ def _build_target_holdings(
     index: int,
     current_holdings: tuple[str, ...],
     config: BacktestConfig,
+    entry_dates: dict[str, object] | None = None,
+    current_date: object | None = None,
 ) -> tuple[str, ...]:
     if not scores and not current_holdings:
         return ()
@@ -165,7 +344,13 @@ def _build_target_holdings(
     locked_holdings = [
         symbol
         for symbol in current_holdings
-        if not _is_sellable(aligned_history[symbol][index])
+        if not _can_exit_position(
+            symbol,
+            aligned_history,
+            index,
+            entry_dates or {},
+            current_date,
+        )
     ]
     target_size = max(config.top_n, len(locked_holdings))
     candidate_scores = {
@@ -352,3 +537,15 @@ def _is_buyable(bar: PriceBar) -> bool:
 
 def _is_sellable(bar: PriceBar) -> bool:
     return bar.tradable and bar.can_sell
+
+
+def _can_exit_position(
+    symbol: str,
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    entry_dates: dict[str, object],
+    current_date: object | None,
+) -> bool:
+    if entry_dates.get(symbol) == current_date:
+        return False
+    return _is_sellable(aligned_history[symbol][index])

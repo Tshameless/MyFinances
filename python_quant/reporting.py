@@ -13,13 +13,34 @@ from pathlib import Path
 
 from .config import BacktestConfig
 from .market import is_a_share_symbol
-from .models import BacktestMetrics, BenchmarkPoint, EquityPoint, RebalanceRecord
+from .models import (
+    BacktestMetrics,
+    BenchmarkPoint,
+    EquityPoint,
+    PositionPoint,
+    RebalanceRecord,
+    TradeRecord,
+)
 
 _ZH_LABELS = {
     "date": "日期",
     "equity": "权益",
     "daily_return": "单期收益",
     "holdings": "持仓",
+    "symbol": "代码",
+    "shares": "股数",
+    "price": "价格",
+    "market_value": "市值",
+    "weight": "权重",
+    "cash": "现金",
+    "total_equity": "总权益",
+    "side": "方向",
+    "gross_value": "成交金额",
+    "commission": "佣金",
+    "slippage": "滑点",
+    "stamp_duty": "印花税",
+    "cash_change": "现金变化",
+    "reason": "原因",
     "benchmark_equity": "基准权益",
     "benchmark_daily_return": "基准单期收益",
     "excess_daily_return": "超额单期收益",
@@ -55,6 +76,7 @@ _ZH_LABELS = {
     "rank": "名次",
     "initial_cash": "初始资金",
     "top_n": "持仓数量TopN",
+    "lot_size": "每手股数",
     "rebalance_every_n_days": "调仓间隔天数",
     "lookback_momentum": "动量回看窗口",
     "lookback_mean_reversion": "均值回归回看窗口",
@@ -66,6 +88,8 @@ _ZH_LABELS = {
     "equity_curve_csv": "净值曲线CSV",
     "run_manifest_json": "运行清单JSON",
     "equity_curve_svg": "净值曲线图",
+    "positions_csv": "每日持仓账本CSV",
+    "trades_csv": "逐笔交易明细CSV",
     "rebalance_log_csv": "调仓日志CSV",
     "performance_summary_csv": "绩效汇总CSV",
     "performance_summary_json": "绩效汇总JSON",
@@ -240,6 +264,112 @@ def save_rebalance_log(
                     f"{record.cost:.2f}",
                     _format_money(record.cost),
                     _rebalance_note(record),
+                ]
+            )
+
+    return target_path
+
+
+def save_positions(
+    positions: list[PositionPoint],
+    output_dir: Path,
+    *,
+    symbol_names: dict[str, str] | None = None,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_path = output_dir / "positions.csv"
+
+    with target_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                _display_label("date"),
+                _display_label("symbol"),
+                "代码展示 / symbol_display",
+                _display_label("shares"),
+                _display_label("price"),
+                _display_label("market_value"),
+                "市值展示 / market_value_display",
+                _display_label("weight"),
+                "权重展示 / weight_pct",
+                _display_label("cash"),
+                "现金展示 / cash_display",
+                _display_label("total_equity"),
+                "总权益展示 / total_equity_display",
+            ]
+        )
+        for point in positions:
+            writer.writerow(
+                [
+                    point.date.isoformat(),
+                    point.symbol,
+                    _format_symbol(point.symbol, symbol_names),
+                    str(point.shares),
+                    f"{point.price:.4f}",
+                    f"{point.market_value:.2f}",
+                    _format_money(point.market_value),
+                    f"{point.weight:.8f}",
+                    _format_pct(point.weight),
+                    f"{point.cash:.2f}",
+                    _format_money(point.cash),
+                    f"{point.total_equity:.2f}",
+                    _format_money(point.total_equity),
+                ]
+            )
+
+    return target_path
+
+
+def save_trades(
+    trades: list[TradeRecord],
+    output_dir: Path,
+    *,
+    symbol_names: dict[str, str] | None = None,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_path = output_dir / "trades.csv"
+
+    with target_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                _display_label("date"),
+                _display_label("symbol"),
+                "代码展示 / symbol_display",
+                _display_label("side"),
+                _display_label("shares"),
+                _display_label("price"),
+                _display_label("gross_value"),
+                "成交金额展示 / gross_value_display",
+                _display_label("commission"),
+                _display_label("slippage"),
+                _display_label("stamp_duty"),
+                _display_label("total_cost"),
+                "总成本展示 / total_cost_display",
+                _display_label("cash_change"),
+                "现金变化展示 / cash_change_display",
+                _display_label("reason"),
+            ]
+        )
+        for trade in trades:
+            writer.writerow(
+                [
+                    trade.date.isoformat(),
+                    trade.symbol,
+                    _format_symbol(trade.symbol, symbol_names),
+                    trade.side,
+                    str(trade.shares),
+                    f"{trade.price:.4f}",
+                    f"{trade.gross_value:.2f}",
+                    _format_money(trade.gross_value),
+                    f"{trade.commission:.2f}",
+                    f"{trade.slippage:.2f}",
+                    f"{trade.stamp_duty:.2f}",
+                    f"{trade.total_cost:.2f}",
+                    _format_money(trade.total_cost),
+                    f"{trade.cash_change:.2f}",
+                    _format_money(trade.cash_change),
+                    trade.reason,
                 ]
             )
 
@@ -435,6 +565,7 @@ def save_single_run_report_html(
       <table>
         <tr><th>{_display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
         <tr><th>{_display_label("top_n")}</th><td>{config.top_n}</td></tr>
+        <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
         <tr><th>{_display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
         <tr><th>{_display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
         <tr><th>{_display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
@@ -1043,6 +1174,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
+        "lot_size": config.lot_size,
         "lookback_momentum": config.lookback_momentum,
         "lookback_mean_reversion": config.lookback_mean_reversion,
         "lookback_volatility": config.lookback_volatility,

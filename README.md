@@ -8,10 +8,12 @@
 - 对 A 股 CSV 做日期解析、重复行检查、价格校验和可交易标记解析。
 - 使用交集交易日对齐所有标的，避免按数组下标错位回测。
 - 支持收盘价或复权价回测、基准比较、买卖受限持仓处理。
-- 支持等权选股、固定周期调仓、基于换手的交易成本扣减。
+- 支持等权选股、固定周期调仓、现金/股数持仓账本、A 股整手买入和基于实际成交的交易成本扣减。
 - 支持 TOML 配置文件、因子权重覆盖、卖出印花税建模。
 - 支持通过 `symbol_name_csv` 给 A 股代码补充中文名映射，提升表格、图表和网页报告可读性。
 - 输出净值曲线 CSV、调仓日志 CSV、绩效摘要 CSV 和绩效摘要 JSON。
+- 输出每日持仓账本 CSV，便于核对每只股票的股数、市值、权重和现金余额。
+- 输出逐笔交易明细 CSV，便于核对每次买卖的股数、成交金额、成本拆分和现金变化。
 - 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
 - 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
 - 自动输出中文化 SVG 图表和批量排行榜，减少手工读表。
@@ -43,8 +45,10 @@
 
 ```bash
 python -m python_quant.main --demo
+python -m python_quant.main --csv data/sample_prices.csv --validate-csv
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
+python -m python_quant.main --csv data/sample_prices.csv --lot-size 1 --initial-cash 10000
 python -m python_quant.main --config backtest.example.toml --csv data/sample_prices.csv
 python -m python_quant.main --config backtest.example.toml --demo --sweep
 python -m python_quant.main --config backtest.example.toml --demo --sweep --rank-by sharpe
@@ -57,6 +61,20 @@ python -m python_quant.main --config backtest.example.toml --demo --sweep --rank
 示例见：`backtest.example.toml`
 
 当前版本要求把回测参数放在 `[backtest]` 配置段中，不再兼容顶层同名参数直写。
+
+当前回测默认使用 A 股 100 股整手交易：
+
+```toml
+lot_size = 100
+```
+
+如果只是做小资金或教学样例，可以把 `lot_size` 设为 `1`，让回测允许按单股成交。回测内部会维护现金和持仓股数，买入按整手向下取整，卖出会检查 `tradable`、`can_sell` 和同日新买入的 T+1 限制。
+
+也可以用命令行临时覆盖：
+
+```bash
+python -m python_quant.main --demo --lot-size 1
+```
 
 如果希望在导出结果中显示“A 股代码 + 中文名”，可以在配置里指定：
 
@@ -119,6 +137,8 @@ python -m unittest discover -s tests
 
 - `equity_curve.csv`：日期、权益、单期收益、持仓、基准和超额收益。
 - `rebalance_log.csv`：调仓日期、持仓、买入换手、卖出换手、总换手、交易成本。
+- `positions.csv`：每日持仓账本，包含代码、股数、价格、市值、权重、现金和总权益。
+- `trades.csv`：逐笔交易明细，包含买卖方向、股数、成交价、成交金额、佣金、滑点、印花税、现金变化和交易原因。
 - `performance_summary.csv`：核心绩效指标和基准对比。
 - `performance_summary.json`：机器可读的绩效摘要。
 - `run_manifest.json`：本次运行的配置、输入、产物路径和指标快照。

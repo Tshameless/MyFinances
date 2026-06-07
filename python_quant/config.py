@@ -18,6 +18,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
     {
         "initial_cash",
         "top_n",
+        "lot_size",
         "lookback_momentum",
         "lookback_mean_reversion",
         "lookback_volatility",
@@ -35,6 +36,7 @@ _SWEEP_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS - {"initial_cash"}
 _INT_FIELDS = frozenset(
     {
         "top_n",
+        "lot_size",
         "lookback_momentum",
         "lookback_mean_reversion",
         "lookback_volatility",
@@ -56,6 +58,7 @@ _STRING_FIELDS = frozenset({"price_field"})
 class BacktestConfig:
     initial_cash: float = 1_000_000.0
     top_n: int = 3
+    lot_size: int = 100
     lookback_momentum: int = 20
     lookback_mean_reversion: int = 5
     lookback_volatility: int = 20
@@ -78,6 +81,8 @@ class BacktestConfig:
             raise ValueError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
             raise ValueError("top_n must be greater than 0.")
+        if self.lot_size <= 0:
+            raise ValueError("lot_size must be greater than 0.")
         if self.rebalance_every_n_days <= 0:
             raise ValueError("rebalance_every_n_days must be greater than 0.")
         if min(

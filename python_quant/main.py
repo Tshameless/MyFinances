@@ -31,9 +31,11 @@ from .reporting import (
     save_equity_curve,
     save_performance_summary,
     save_performance_summary_json,
+    save_positions,
     save_rebalance_log,
     save_run_manifest,
     save_single_run_report_html,
+    save_trades,
 )
 from .sample_data import generate_demo_bars
 
@@ -62,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选基准 CSV 路径。必填列为 date、close；可选列为 adjusted_close。",
     )
     parser.add_argument(
+        "--validate-csv",
+        action="store_true",
+        help="只校验 --csv 和 --benchmark-csv 指定的数据文件，不执行回测。",
+    )
+    parser.add_argument(
         "--config",
         type=str,
         help="可选 TOML 配置文件。命令行参数会覆盖文件中的同名配置。",
@@ -88,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="选择回测使用的价格字段，可选 close 或 adjusted_close。",
     )
     parser.add_argument("--top-n", type=int, help="每次调仓选取的股票数量。")
+    parser.add_argument("--lot-size", type=int, help="每手股数，A 股默认使用 100。")
     parser.add_argument("--rebalance-days", type=int, help="调仓间隔天数。")
     parser.add_argument("--initial-cash", type=float, help="回测初始资金。")
     parser.add_argument("--commission-rate", type=float, help="买卖双边佣金费率。")
@@ -126,6 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if args.validate_csv:
+        _validate_csv_inputs(args, parser)
+        return
+
     bars = _load_bars(args, parser)
     benchmark_bars = _load_benchmark_bars(args)
 
@@ -147,6 +159,8 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     )
     print(f"净值曲线 CSV 已保存：{artifact_paths['equity_curve_csv']}")
     print(f"调仓日志 CSV 已保存：{artifact_paths['rebalance_log_csv']}")
+    print(f"每日持仓账本 CSV 已保存：{artifact_paths['positions_csv']}")
+    print(f"逐笔交易明细 CSV 已保存：{artifact_paths['trades_csv']}")
     print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
     print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
     print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
@@ -256,6 +270,31 @@ def _load_benchmark_bars(args: argparse.Namespace) -> list[PriceBar] | None:
     return None
 
 
+def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    loaded_any = False
+    if args.csv:
+        bars = load_price_bars_from_csv(args.csv)
+        symbols = sorted({bar.symbol for bar in bars})
+        dates = sorted({bar.date for bar in bars})
+        loaded_any = True
+        print(
+            "行情 CSV 校验通过："
+            f"{len(bars)} 行，{len(symbols)} 只标的，"
+            f"{dates[0].isoformat()} 至 {dates[-1].isoformat()}。"
+        )
+    if args.benchmark_csv:
+        benchmark_bars = load_benchmark_bars_from_csv(args.benchmark_csv)
+        dates = [bar.date for bar in benchmark_bars]
+        loaded_any = True
+        print(
+            "基准 CSV 校验通过："
+            f"{len(benchmark_bars)} 行，"
+            f"{dates[0].isoformat()} 至 {dates[-1].isoformat()}。"
+        )
+    if not loaded_any:
+        parser.error("--validate-csv 需要配合 --csv 或 --benchmark-csv 使用。")
+
+
 def _persist_run_outputs(
     *,
     output_dir: Path,
@@ -283,6 +322,16 @@ def _persist_run_outputs(
         output_dir,
         symbol_names=symbol_names,
     )
+    positions_path = save_positions(
+        result.positions or [],
+        output_dir,
+        symbol_names=symbol_names,
+    )
+    trades_path = save_trades(
+        result.trades or [],
+        output_dir,
+        symbol_names=symbol_names,
+    )
     summary_path = save_performance_summary(result.metrics, output_dir)
     summary_json_path = save_performance_summary_json(result.metrics, output_dir)
     equity_chart_path = save_equity_chart_svg(
@@ -294,6 +343,8 @@ def _persist_run_outputs(
         "equity_curve_csv": equity_path,
         "equity_curve_svg": equity_chart_path,
         "rebalance_log_csv": rebalance_path,
+        "positions_csv": positions_path,
+        "trades_csv": trades_path,
         "performance_summary_csv": summary_path,
         "performance_summary_json": summary_json_path,
     }
@@ -323,6 +374,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     config_kwargs: dict[str, object] = {
         "initial_cash": default_config.initial_cash,
         "top_n": default_config.top_n,
+        "lot_size": default_config.lot_size,
         "lookback_momentum": default_config.lookback_momentum,
         "lookback_mean_reversion": default_config.lookback_mean_reversion,
         "lookback_volatility": default_config.lookback_volatility,
@@ -345,6 +397,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     cli_overrides = {
         "initial_cash": args.initial_cash,
         "top_n": args.top_n,
+        "lot_size": args.lot_size,
         "lookback_momentum": args.lookback_momentum,
         "lookback_mean_reversion": args.lookback_mean_reversion,
         "lookback_volatility": args.lookback_volatility,
@@ -437,6 +490,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
     return BacktestConfig(
         initial_cash=cast(float, config_kwargs["initial_cash"]),
         top_n=cast(int, config_kwargs["top_n"]),
+        lot_size=cast(int, config_kwargs["lot_size"]),
         lookback_momentum=cast(int, config_kwargs["lookback_momentum"]),
         lookback_mean_reversion=cast(int, config_kwargs["lookback_mean_reversion"]),
         lookback_volatility=cast(int, config_kwargs["lookback_volatility"]),
@@ -485,6 +539,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
+        "lot_size": config.lot_size,
         "lookback_momentum": config.lookback_momentum,
         "lookback_mean_reversion": config.lookback_mean_reversion,
         "lookback_volatility": config.lookback_volatility,

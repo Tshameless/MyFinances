@@ -35,6 +35,34 @@ class RebalanceRecord:
 
 
 @dataclass(frozen=True)
+class PositionPoint:
+    date: date
+    symbol: str
+    shares: int
+    price: float
+    market_value: float
+    weight: float
+    cash: float
+    total_equity: float
+
+
+@dataclass(frozen=True)
+class TradeRecord:
+    date: date
+    symbol: str
+    side: str
+    shares: int
+    price: float
+    gross_value: float
+    commission: float
+    slippage: float
+    stamp_duty: float
+    total_cost: float
+    cash_change: float
+    reason: str
+
+
+@dataclass(frozen=True)
 class BacktestMetrics:
     total_return: float
     annualized_return: float
@@ -70,3 +98,5 @@ class BacktestResult:
     rebalance_records: list[RebalanceRecord]
     metrics: BacktestMetrics
     benchmark_curve: list[BenchmarkPoint] | None = None
+    positions: list[PositionPoint] | None = None
+    trades: list[TradeRecord] | None = None

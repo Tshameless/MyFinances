@@ -64,11 +64,15 @@ output_dir = "{output_dir.as_posix()}"
             self.assertTrue(manifest_path.exists())
             self.assertTrue((output_dir / "equity_curve.csv").exists())
             self.assertTrue((output_dir / "rebalance_log.csv").exists())
+            self.assertTrue((output_dir / "positions.csv").exists())
+            self.assertTrue((output_dir / "trades.csv").exists())
             self.assertTrue((output_dir / "report.html").exists())
 
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertTrue(manifest["inputs"]["demo"])
             self.assertEqual(2, manifest["config"]["top_n"])
+            self.assertIn("positions_csv", manifest["artifacts"])
+            self.assertIn("trades_csv", manifest["artifacts"])
             self.assertGreater(manifest["metrics"]["periods"], 0)
             self.assertIn("HTML 报告已保存", buffer.getvalue())
             self.assertEqual(0, exit_code)
@@ -223,6 +227,7 @@ rebalance_every_n_days = [5, 10]
                 config=None,
                 initial_cash=None,
                 top_n=None,
+                lot_size=None,
                 lookback_momentum=None,
                 lookback_mean_reversion=None,
                 lookback_volatility=None,
@@ -239,11 +244,34 @@ rebalance_every_n_days = [5, 10]
 
             self.assertTrue(config.output_dir.is_absolute())
 
+    def test_build_backtest_config_accepts_cli_lot_size(self) -> None:
+        args = argparse.Namespace(
+            config=None,
+            initial_cash=None,
+            top_n=None,
+            lot_size=1,
+            lookback_momentum=None,
+            lookback_mean_reversion=None,
+            lookback_volatility=None,
+            rebalance_days=None,
+            commission_rate=None,
+            slippage_rate=None,
+            stamp_duty_rate=None,
+            price_field=None,
+            output_dir=None,
+            factor_weight=None,
+        )
+
+        config = _build_backtest_config(args)
+
+        self.assertEqual(1, config.lot_size)
+
     def test_build_backtest_config_uses_run_directory_when_output_dir_is_implicit(self) -> None:
         args = argparse.Namespace(
             config=None,
             initial_cash=None,
             top_n=None,
+            lot_size=None,
             lookback_momentum=None,
             lookback_mean_reversion=None,
             lookback_volatility=None,
@@ -282,6 +310,43 @@ rebalance_every_n_days = [5, 10]
 
         self.assertEqual(_config_hash(base), _config_hash(changed_output))
         self.assertNotEqual(_config_hash(base), _config_hash(changed_parameter))
+
+    def test_validate_csv_cli_checks_inputs_without_writing_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            price_csv = temp_path / "prices.csv"
+            benchmark_csv = temp_path / "benchmark.csv"
+            _write_price_csv(price_csv)
+            _write_benchmark_csv(benchmark_csv)
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "--validate-csv",
+                        "--csv",
+                        str(price_csv),
+                        "--benchmark-csv",
+                        str(benchmark_csv),
+                    ]
+                )
+
+            self.assertEqual(0, exit_code)
+            output = buffer.getvalue()
+            self.assertIn("行情 CSV 校验通过", output)
+            self.assertIn("基准 CSV 校验通过", output)
+            self.assertFalse((temp_path / "report.html").exists())
+
+    def test_validate_csv_requires_at_least_one_input_file(self) -> None:
+        stderr = io.StringIO()
+        with (
+            contextlib.redirect_stderr(stderr),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            main(["--validate-csv"])
+
+        self.assertEqual(2, raised.exception.code)
+        self.assertIn("--validate-csv", stderr.getvalue())
 
 def _write_price_csv(path: Path) -> None:
     rows = ["date,symbol,close,adjusted_close"]
