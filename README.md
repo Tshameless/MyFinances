@@ -12,6 +12,10 @@
 - 支持 TOML 配置文件、因子权重覆盖、卖出印花税建模。
 - 输出净值曲线 CSV、调仓日志 CSV、绩效摘要 CSV 和 JSON。
 - 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
+- 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
+- 自动输出 SVG 图表和批量排行榜，减少手工读表。
+- 支持 `--rank-by` 自定义批量排序指标；双参数 sweep 会自动输出热力图。
+- 单次和批量运行都会生成 HTML 报告，方便直接浏览结果。
 - 内置 `unittest` 回归测试。
 
 ## CSV 格式
@@ -39,6 +43,8 @@ python -m python_quant.main --demo
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
 python -m python_quant.main --config backtest.example.toml --csv data/sample_prices.csv
+python -m python_quant.main --config backtest.example.toml --demo --sweep
+python -m python_quant.main --config backtest.example.toml --demo --sweep --rank-by sharpe
 ```
 
 ## 配置文件
@@ -46,6 +52,8 @@ python -m python_quant.main --config backtest.example.toml --csv data/sample_pri
 可以使用 TOML 配置文件集中管理参数，再用 CLI 覆盖局部值。
 
 示例见：`backtest.example.toml`
+
+如果配置文件包含 `[sweep]`，可以配合 `--sweep` 一次运行多组参数。批量结果默认输出到 `output_dir/batch_runs/`。
 
 也可以安装后直接运行：
 
@@ -59,6 +67,15 @@ myfinances-quant --demo
 python -m unittest discover -s tests
 ```
 
+## 开发检查
+
+```bash
+python -m pip install -e ".[dev]"
+python -m ruff check .
+python -m mypy python_quant
+python -m unittest discover -s tests
+```
+
 ## 输出
 
 默认输出目录：`output/python`
@@ -68,3 +85,12 @@ python -m unittest discover -s tests
 - `performance_summary.csv`：核心绩效指标和基准对比。
 - `performance_summary.json`：机器可读的绩效摘要。
 - `run_manifest.json`：本次运行的配置、输入、产物路径和指标快照。
+- `equity_curve.svg`：单次回测净值图。
+- `report.html`：单次回测 HTML 报告。
+- `batch_runs/batch_summary.csv`：批量扫描汇总表。
+- `batch_runs/batch_summary.json`：批量扫描汇总 JSON。
+- `batch_runs/batch_leaderboard.csv`：按指标排序的批量排行榜。
+- `batch_runs/best_run.json`：当前批量结果中的最佳运行。
+- `batch_runs/batch_annualized_return.svg`：批量结果对比图。
+- `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
+- `batch_runs/batch_report.html`：批量扫描 HTML 报告。

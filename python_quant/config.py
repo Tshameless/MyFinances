@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-import tomllib
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "output" / "python"
@@ -33,6 +32,7 @@ class BacktestConfig:
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "output_dir", self.output_dir.resolve())
         if self.initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
@@ -120,5 +120,41 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
             str(name): float(value)
             for name, value in factor_weights.items()
         }
+
+    return normalized
+
+
+def load_sweep_overrides_from_toml(config_path: str | Path) -> dict[str, list[object]]:
+    path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    with path.open("rb") as handle:
+        payload = tomllib.load(handle)
+
+    raw_sweep = payload.get("sweep")
+    if raw_sweep is None:
+        return {}
+    if not isinstance(raw_sweep, dict):
+        raise ValueError("Config file [sweep] section must be a TOML table.")
+
+    allowed_fields = {
+        "top_n",
+        "lookback_momentum",
+        "lookback_mean_reversion",
+        "lookback_volatility",
+        "rebalance_every_n_days",
+        "commission_rate",
+        "slippage_rate",
+        "stamp_duty_rate",
+        "price_field",
+    }
+    normalized: dict[str, list[object]] = {}
+    for field_name, values in raw_sweep.items():
+        if field_name not in allowed_fields:
+            raise ValueError(f"Unsupported sweep field: {field_name}")
+        if not isinstance(values, list) or not values:
+            raise ValueError(f"Sweep field '{field_name}' must be a non-empty TOML array.")
+        normalized[field_name] = list(values)
 
     return normalized
