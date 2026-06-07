@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from python_quant.config import BacktestConfig
-from python_quant.models import BacktestMetrics, EquityPoint
+from python_quant.models import BacktestMetrics, EquityPoint, RebalanceRecord
 from python_quant.reporting import (
+    load_symbol_name_mapping,
+    print_summary,
     save_batch_chart_svg,
     save_batch_heatmap_svg,
     save_batch_rankings,
     save_batch_report_html,
     save_equity_chart_svg,
+    save_equity_curve,
+    save_performance_summary,
     save_performance_summary_json,
+    save_rebalance_log,
     save_run_manifest,
     save_single_run_report_html,
 )
@@ -50,30 +57,196 @@ class ReportingTests(unittest.TestCase):
 
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(True, payload["inputs"]["demo"])
-            self.assertEqual(str(summary_json_path), payload["artifacts"]["performance_summary_json"])
+            self.assertEqual(
+                str(summary_json_path),
+                payload["artifacts"]["performance_summary_json"],
+            )
             self.assertEqual(0.1, payload["metrics"]["total_return"])
             self.assertEqual(str(output_dir), payload["config"]["output_dir"])
+
+    def test_loads_symbol_name_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "symbols.csv"
+            csv_path.write_text(
+                "symbol,name\n000001,平安银行\n600519,贵州茅台\n",
+                encoding="utf-8",
+            )
+
+            mapping = load_symbol_name_mapping(csv_path)
+
+            self.assertEqual("平安银行", mapping["000001"])
+            self.assertEqual("贵州茅台", mapping["600519"])
+
+    def test_rejects_non_a_share_symbol_name_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "symbols.csv"
+            csv_path.write_text(
+                "symbol,name\nAAPL,苹果\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unsupported A-share symbol format"):
+                load_symbol_name_mapping(csv_path)
 
     def test_saves_equity_chart_svg(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             curve = [
-                EquityPoint(date=__import__("datetime").date(2024, 1, 2), equity=100.0, daily_return=0.01, holdings=("AAA",)),
-                EquityPoint(date=__import__("datetime").date(2024, 1, 3), equity=101.0, daily_return=0.02, holdings=("AAA",)),
+                EquityPoint(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    equity=100.0,
+                    daily_return=0.01,
+                    holdings=("AAA",),
+                ),
+                EquityPoint(
+                    date=__import__("datetime").date(2024, 1, 3),
+                    equity=101.0,
+                    daily_return=0.02,
+                    holdings=("AAA",),
+                ),
             ]
 
             chart_path = save_equity_chart_svg(curve, output_dir)
 
-            content = chart_path.read_text(encoding="utf-8")
+            content = chart_path.read_text(encoding="utf-8-sig")
             self.assertIn("<svg", content)
-            self.assertIn("Equity Curve", content)
+            self.assertIn("策略净值走势", content)
+
+    def test_saves_bilingual_csv_headers_and_descriptions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            curve = [
+                EquityPoint(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    equity=100.0,
+                    daily_return=0.01,
+                    holdings=("000001",),
+                ),
+            ]
+            metrics = BacktestMetrics(
+                total_return=0.1,
+                annualized_return=0.2,
+                max_drawdown=-0.05,
+                volatility=0.15,
+                downside_volatility=0.1,
+                sharpe=1.2,
+                sortino=1.5,
+                calmar=4.0,
+                win_rate=0.6,
+                average_turnover=0.25,
+                total_cost=123.45,
+                periods=20,
+            )
+
+            equity_curve_path = save_equity_curve(curve, output_dir)
+            rebalance_log_path = save_rebalance_log([], output_dir)
+            summary_path = save_performance_summary(metrics, output_dir)
+
+            self.assertIn("日期 / date", equity_curve_path.read_text(encoding="utf-8-sig"))
+            self.assertIn("持仓 / holdings", rebalance_log_path.read_text(encoding="utf-8-sig"))
+            summary_content = summary_path.read_text(encoding="utf-8-sig")
+            self.assertIn("指标代码 / metric", summary_content)
+            self.assertIn("说明 / description", summary_content)
+            self.assertIn("总收益 = 期末权益 / 期初权益 - 1。", summary_content)
+            equity_content = equity_curve_path.read_text(encoding="utf-8-sig")
+            self.assertIn("权益展示 / equity_display", equity_content)
+            self.assertIn("单期收益率展示 / daily_return_pct", equity_content)
+            self.assertIn("持仓展示 / holdings_display", equity_content)
+            self.assertIn("持仓数量 / holding_count", equity_content)
+            self.assertIn("备注 / note", equity_content)
+            rebalance_content = rebalance_log_path.read_text(encoding="utf-8-sig")
+            self.assertIn("买入换手率展示 / buy_turnover_pct", rebalance_content)
+            self.assertIn("交易成本展示 / cost_display", rebalance_content)
+            self.assertIn("持仓展示 / holdings_display", rebalance_content)
+
+    def test_saves_readable_equity_and_rebalance_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            curve = [
+                EquityPoint(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    equity=123456.78,
+                    daily_return=0.0123,
+                    holdings=("000001", "600519"),
+                ),
+            ]
+            equity_curve_path = save_equity_curve(curve, output_dir)
+            equity_content = equity_curve_path.read_text(encoding="utf-8-sig")
+            self.assertIn("123,456.78", equity_content)
+            self.assertIn("1.23%", equity_content)
+            self.assertIn("000001（平安银行） | 600519（贵州茅台）", equity_content)
+            self.assertIn("2只持仓", equity_content)
+
+            equity_curve_with_names = save_equity_curve(curve, output_dir, symbol_names={"000001": "平安银行"})
+            named_content = equity_curve_with_names.read_text(encoding="utf-8-sig")
+            self.assertIn("000001（平安银行） | 600519（贵州茅台）", named_content)
+
+            rebalances = [
+                RebalanceRecord(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    holdings=("000001",),
+                    buy_turnover=0.25,
+                    sell_turnover=0.0,
+                    turnover=0.25,
+                    cost=123.45,
+                )
+            ]
+            rebalance_log_path = save_rebalance_log(rebalances, output_dir)
+            rebalance_content = rebalance_log_path.read_text(encoding="utf-8-sig")
+            self.assertIn("25.00%", rebalance_content)
+            self.assertIn("123.45", rebalance_content)
+            self.assertIn("000001（平安银行）", rebalance_content)
+            self.assertIn("仅买入", rebalance_content)
+
+    def test_print_summary_uses_chinese_labels(self) -> None:
+        metrics = BacktestMetrics(
+            total_return=0.1,
+            annualized_return=0.2,
+            max_drawdown=-0.05,
+            volatility=0.15,
+            downside_volatility=0.1,
+            sharpe=1.2,
+            sortino=1.5,
+            calmar=4.0,
+            win_rate=0.6,
+            average_turnover=0.25,
+            total_cost=123.45,
+            periods=20,
+        )
+        curve = [
+            EquityPoint(
+                date=__import__("datetime").date(2024, 1, 2),
+                equity=110.0,
+                daily_return=0.01,
+                holdings=("000001",),
+            ),
+        ]
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            print_summary(curve, [], metrics, BacktestConfig(initial_cash=100.0))
+
+        output = buffer.getvalue()
+        self.assertIn("A股回测摘要", output)
+        self.assertIn("回测摘要", output)
+        self.assertIn("总收益", output)
+        self.assertIn("夏普比率", output)
 
     def test_saves_batch_rankings_and_chart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             rows = [
-                {"run_id": "run_001", "annualized_return": 0.2, "param_top_n": 2, "param_rebalance_every_n_days": 5},
-                {"run_id": "run_002", "annualized_return": 0.3, "param_top_n": 3, "param_rebalance_every_n_days": 5},
+                {
+                    "run_id": "run_001",
+                    "annualized_return": 0.2,
+                    "param_top_n": 2,
+                    "param_rebalance_every_n_days": 5,
+                },
+                {
+                    "run_id": "run_002",
+                    "annualized_return": 0.3,
+                    "param_top_n": 3,
+                    "param_rebalance_every_n_days": 5,
+                },
             ]
 
             leaderboard_csv, leaderboard_json, best_run_json = save_batch_rankings(
@@ -95,8 +268,35 @@ class ReportingTests(unittest.TestCase):
             self.assertTrue(best_run_json.exists())
             self.assertTrue(chart_path.exists())
             self.assertTrue(heatmap_path.exists())
+            leaderboard_payload = json.loads(leaderboard_json.read_text(encoding="utf-8"))
             best_payload = json.loads(best_run_json.read_text(encoding="utf-8"))
+            self.assertEqual("方案2", leaderboard_payload["reader_friendly"]["best_scheme"])
+            self.assertEqual("run_002", leaderboard_payload["reader_friendly"]["best_internal_id"])
+            self.assertEqual("run_002", leaderboard_payload["rows"][0]["run_id"])
             self.assertEqual("run_002", best_payload["best_run"]["run_id"])
+            self.assertEqual("方案2", best_payload["reader_friendly"]["best_scheme"])
+            self.assertEqual("run_002", best_payload["reader_friendly"]["best_internal_id"])
+            leaderboard_content = leaderboard_csv.read_text(encoding="utf-8-sig")
+            self.assertIn("方案编号 / scheme_label", leaderboard_content)
+            self.assertIn("内部编号 / run_id", leaderboard_content)
+            self.assertIn("方案1", leaderboard_content)
+            self.assertIn("run_002", leaderboard_content)
+            chart_content = chart_path.read_text(encoding="utf-8-sig")
+            heatmap_content = heatmap_path.read_text(encoding="utf-8-sig")
+            self.assertIn("年化收益参数对比图", chart_content)
+            self.assertIn("方案1", chart_content)
+            self.assertIn("方案2", chart_content)
+            self.assertIn("年化收益参数热力图", heatmap_content)
+
+    def test_saves_empty_batch_chart_with_chinese_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            chart_path = save_batch_chart_svg([], output_dir, metric="annualized_return")
+
+            content = chart_path.read_text(encoding="utf-8-sig")
+            self.assertIn("年化收益参数对比图", content)
+            self.assertIn("暂无可展示数据", content)
 
     def test_saves_single_run_report_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -115,24 +315,71 @@ class ReportingTests(unittest.TestCase):
                 average_turnover=0.25,
                 total_cost=123.45,
                 periods=20,
+                benchmark_total_return=0.06,
+                benchmark_annualized_return=0.12,
+                benchmark_volatility=0.10,
+                benchmark_max_drawdown=-0.08,
+                excess_return=0.04,
+                tracking_error=0.03,
+                information_ratio=1.1,
             )
             report_path = save_single_run_report_html(
                 output_dir=output_dir,
                 config=config,
                 metrics=metrics,
                 artifacts={"equity_curve_svg": output_dir / "equity_curve.svg"},
+                latest_holdings=("000001", "600519"),
+                latest_rebalance=RebalanceRecord(
+                    date=__import__("datetime").date(2024, 1, 8),
+                    holdings=("000001", "600519"),
+                    buy_turnover=0.12,
+                    sell_turnover=0.08,
+                    turnover=0.20,
+                    cost=88.80,
+                ),
+                symbol_names={"000001": "平安银行", "600519": "贵州茅台"},
             )
 
-            content = report_path.read_text(encoding="utf-8")
-            self.assertIn("MyFinances Backtest Report", content)
-            self.assertIn("Total return", content)
+            content = report_path.read_text(encoding="utf-8-sig")
+            self.assertIn("<h1>回测报告</h1>", content)
+            self.assertIn("总收益 / total_return", content)
+            self.assertIn("核心结论", content)
+            self.assertIn("当前持仓", content)
+            self.assertIn("调仓摘要", content)
+            self.assertIn("基准复盘", content)
+            self.assertIn("配置摘要", content)
+            self.assertIn("指标怎么看", content)
+            self.assertIn("持仓代码说明", content)
+            self.assertIn("2024-01-08", content)
+            self.assertIn("12.00%", content)
+            self.assertIn("8.00%", content)
+            self.assertIn("20.00%", content)
+            self.assertIn("88.80", content)
+            self.assertIn("同期基准收益为 6.00%，策略跑赢基准 4.00%。", content)
+            self.assertIn("1.100", content)
+            self.assertIn("000001（平安银行）", content)
+            self.assertIn("600519（贵州茅台）", content)
 
     def test_saves_batch_report_html(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             rows = [
-                {"run_id": "run_001", "annualized_return": 0.2, "total_return": 0.1, "sharpe": 1.0, "sortino": 1.1, "calmar": 2.0},
-                {"run_id": "run_002", "annualized_return": 0.3, "total_return": 0.2, "sharpe": 1.5, "sortino": 1.6, "calmar": 3.0},
+                {
+                    "run_id": "run_001",
+                    "annualized_return": 0.2,
+                    "total_return": 0.1,
+                    "sharpe": 1.0,
+                    "sortino": 1.1,
+                    "calmar": 2.0,
+                },
+                {
+                    "run_id": "run_002",
+                    "annualized_return": 0.3,
+                    "total_return": 0.2,
+                    "sharpe": 1.5,
+                    "sortino": 1.6,
+                    "calmar": 3.0,
+                },
             ]
             report_path = save_batch_report_html(
                 output_dir=output_dir,
@@ -141,9 +388,16 @@ class ReportingTests(unittest.TestCase):
                 artifacts={"batch_chart_svg": output_dir / "batch_annualized_return.svg"},
             )
 
-            content = report_path.read_text(encoding="utf-8")
-            self.assertIn("MyFinances Batch Sweep Report", content)
+            content = report_path.read_text(encoding="utf-8-sig")
+            self.assertIn("<h1>A股参数扫描报告</h1>", content)
+            self.assertIn("研究结论", content)
+            self.assertIn("最优参数", content)
+            self.assertIn("结果观察", content)
+            self.assertIn("最佳方案", content)
+            self.assertIn("方案2", content)
+            self.assertIn("内部编号", content)
             self.assertIn("run_002", content)
+            self.assertIn("年化收益 / annualized_return", content)
 
 
 if __name__ == "__main__":

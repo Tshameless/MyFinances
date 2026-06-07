@@ -5,6 +5,7 @@ from datetime import date
 from math import sqrt
 
 from .config import BacktestConfig
+from .market import price_for_bar
 from .models import PriceBar
 
 
@@ -74,7 +75,7 @@ def calculate_factor_scores(
         if up_to_index >= len(bars):
             continue
 
-        closes = [_price_for_bar(bar, config) for bar in bars[: up_to_index + 1]]
+        closes = [price_for_bar(bar, config) for bar in bars[: up_to_index + 1]]
         if len(closes) <= config.max_lookback:
             continue
 
@@ -120,15 +121,3 @@ def calculate_factor_scores(
         )
 
     return total_scores
-
-
-def _price_for_bar(bar: PriceBar, config: BacktestConfig) -> float:
-    if config.price_field == "close":
-        return bar.close
-    if config.price_field == "adjusted_close":
-        if bar.adjusted_close is None:
-            raise ValueError(
-                f"Adjusted price requested but missing for {bar.symbol} on {bar.date.isoformat()}."
-            )
-        return bar.adjusted_close
-    return bar.adjusted_close if bar.adjusted_close is not None else bar.close

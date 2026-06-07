@@ -8,8 +8,9 @@ rebalance_every_n_days = 5
 commission_rate = 0.0003
 slippage_rate = 0.0005
 stamp_duty_rate = 0.001
-price_field = "auto"
+price_field = "adjusted_close"
 output_dir = "output/python"
+symbol_name_csv = "symbols.csi300.csv"
 
 [backtest.factor_weights]
 momentum = 0.5

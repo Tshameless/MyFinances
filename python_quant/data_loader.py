@@ -4,6 +4,7 @@ import csv
 from datetime import date, datetime
 from pathlib import Path
 
+from .market import BENCHMARK_SYMBOL, is_a_share_symbol
 from .models import PriceBar
 
 _DATE_FORMATS = (
@@ -29,9 +30,13 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
             raise ValueError(f"CSV missing required columns: {missing_str}")
 
         for line_number, row in enumerate(reader, start=2):
-            symbol = (row.get("symbol") or "").strip().upper()
+            symbol = (row.get("symbol") or "").strip()
             if not symbol:
                 raise ValueError(f"Line {line_number}: symbol is empty.")
+            if not is_a_share_symbol(symbol):
+                raise ValueError(
+                    f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
+                )
 
             parsed_date = _parse_date(row.get("date"), line_number)
             close_value = _parse_positive_float(row.get("close"), "close", line_number)
@@ -44,7 +49,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
             seen_keys.add(key)
 
             adjusted_close = _parse_optional_float(
-                _pick_first_present(row, "adjusted_close", "adj_close"),
+                row.get("adjusted_close"),
                 "adjusted_close",
                 line_number,
             )
@@ -59,12 +64,12 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
 
             tradable = _parse_boolean(row.get("tradable"), line_number, default=True)
             can_buy = _parse_boolean(
-                _pick_first_present(row, "can_buy", "buyable"),
+                row.get("can_buy"),
                 line_number,
                 default=tradable,
             )
             can_sell = _parse_boolean(
-                _pick_first_present(row, "can_sell", "sellable"),
+                row.get("can_sell"),
                 line_number,
                 default=tradable,
             )
@@ -87,8 +92,6 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
 
 def load_benchmark_bars_from_csv(
     csv_path: str | Path,
-    *,
-    default_symbol: str = "BENCHMARK",
 ) -> list[PriceBar]:
     path = Path(csv_path)
     if not path.exists():
@@ -96,7 +99,6 @@ def load_benchmark_bars_from_csv(
 
     bars: list[PriceBar] = []
     seen_dates: set[date] = set()
-    detected_symbol: str | None = None
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"date", "close"}
@@ -113,19 +115,13 @@ def load_benchmark_bars_from_csv(
                 )
             seen_dates.add(parsed_date)
 
-            symbol = (row.get("symbol") or default_symbol).strip().upper() or default_symbol
-            if detected_symbol is None:
-                detected_symbol = symbol
-            elif symbol != detected_symbol:
-                raise ValueError("Benchmark CSV must contain exactly one symbol series.")
-
             bars.append(
                 PriceBar(
                     date=parsed_date,
-                    symbol=symbol,
+                    symbol=BENCHMARK_SYMBOL,
                     close=_parse_positive_float(row.get("close"), "close", line_number),
                     adjusted_close=_parse_optional_float(
-                        _pick_first_present(row, "adjusted_close", "adj_close"),
+                        row.get("adjusted_close"),
                         "adjusted_close",
                         line_number,
                     ),
@@ -190,10 +186,3 @@ def _parse_boolean(raw_value: str | None, line_number: int, *, default: bool) ->
     if value in {"0", "false", "no", "n"}:
         return False
     raise ValueError(f"Line {line_number}: unsupported tradable flag '{raw_value}'.")
-
-
-def _pick_first_present(row: dict[str, str], *field_names: str) -> str | None:
-    for field_name in field_names:
-        if field_name in row:
-            return row.get(field_name)
-    return None

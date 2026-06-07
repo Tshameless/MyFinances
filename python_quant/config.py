@@ -12,6 +12,7 @@ DEFAULT_FACTOR_WEIGHTS = {
     "mean_reversion": 0.2,
     "low_volatility": 0.3,
 }
+SUPPORTED_FACTORS = frozenset(DEFAULT_FACTOR_WEIGHTS)
 
 
 @dataclass(frozen=True)
@@ -25,14 +26,17 @@ class BacktestConfig:
     commission_rate: float = 0.0003
     slippage_rate: float = 0.0005
     stamp_duty_rate: float = 0.0
-    price_field: str = "auto"
+    price_field: str = "adjusted_close"
     output_dir: Path = OUTPUT_DIR
+    symbol_name_csv: Path | None = None
     factor_weights: dict[str, float] = field(
         default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
     )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "output_dir", self.output_dir.resolve())
+        if self.symbol_name_csv is not None:
+            object.__setattr__(self, "symbol_name_csv", self.symbol_name_csv.resolve())
         if self.initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
@@ -47,10 +51,16 @@ class BacktestConfig:
             raise ValueError("All lookback windows must be greater than 0.")
         if min(self.commission_rate, self.slippage_rate, self.stamp_duty_rate) < 0:
             raise ValueError("Cost rates cannot be negative.")
-        if self.price_field not in {"auto", "close", "adjusted_close"}:
-            raise ValueError("price_field must be one of: auto, close, adjusted_close.")
+        if self.price_field not in {"close", "adjusted_close"}:
+            raise ValueError("price_field must be one of: close, adjusted_close.")
         if not self.factor_weights:
             raise ValueError("factor_weights cannot be empty.")
+        unsupported_factors = sorted(set(self.factor_weights) - SUPPORTED_FACTORS)
+        if unsupported_factors:
+            unsupported_text = ", ".join(unsupported_factors)
+            raise ValueError(
+                f"factor_weights contains unsupported factors: {unsupported_text}."
+            )
         if any(weight < 0 for weight in self.factor_weights.values()):
             raise ValueError("factor_weights cannot contain negative values.")
         if sum(self.factor_weights.values()) <= 0:
@@ -85,9 +95,9 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
     with path.open("rb") as handle:
         payload = tomllib.load(handle)
 
-    raw_config = payload.get("backtest", payload)
+    raw_config = payload.get("backtest")
     if not isinstance(raw_config, dict):
-        raise ValueError("Config file must contain a [backtest] table or a top-level mapping.")
+        raise ValueError("Config file must contain a [backtest] table.")
 
     normalized: dict[str, object] = {}
     simple_fields = [
@@ -111,6 +121,12 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
         if not output_dir.is_absolute():
             output_dir = (path.parent / output_dir).resolve()
         normalized["output_dir"] = output_dir
+
+    if "symbol_name_csv" in raw_config and raw_config["symbol_name_csv"] not in ("", None):
+        symbol_name_csv = Path(str(raw_config["symbol_name_csv"]))
+        if not symbol_name_csv.is_absolute():
+            symbol_name_csv = (path.parent / symbol_name_csv).resolve()
+        normalized["symbol_name_csv"] = symbol_name_csv
 
     if "factor_weights" in raw_config:
         factor_weights = raw_config["factor_weights"]

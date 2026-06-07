@@ -10,6 +10,7 @@ from .factors import (
     calculate_factor_scores,
     group_prices_by_symbol,
 )
+from .market import price_for_bar
 from .models import (
     BacktestMetrics,
     BacktestResult,
@@ -87,8 +88,8 @@ def run_backtest(
         portfolio_return = 0.0
         for symbol, weight in weights.items():
             bars_for_symbol = aligned_history[symbol]
-            today_close = _price_for_bar(bars_for_symbol[index], config)
-            next_close = _price_for_bar(bars_for_symbol[index + 1], config)
+            today_close = price_for_bar(bars_for_symbol[index], config)
+            next_close = price_for_bar(bars_for_symbol[index + 1], config)
             symbol_return = next_close / today_close - 1.0
             portfolio_return += weight * symbol_return
 
@@ -132,11 +133,6 @@ def _build_target_weights(holdings: tuple[str, ...]) -> dict[str, float]:
         return {}
     weight = 1.0 / len(holdings)
     return {symbol: weight for symbol in holdings}
-
-
-def _calculate_turnover(current_weights: dict[str, float], target_weights: dict[str, float]) -> float:
-    buy_turnover, sell_turnover = _calculate_turnover_sides(current_weights, target_weights)
-    return buy_turnover + sell_turnover
 
 
 def _calculate_turnover_sides(
@@ -272,8 +268,8 @@ def _build_benchmark_curve(
     for index in range(warmup, len(calendar) - 1):
         current_date = calendar[index]
         next_date = calendar[index + 1]
-        current_price = _price_for_bar(benchmark_by_date[current_date], config)
-        next_price = _price_for_bar(benchmark_by_date[next_date], config)
+        current_price = price_for_bar(benchmark_by_date[current_date], config)
+        next_price = price_for_bar(benchmark_by_date[next_date], config)
         daily_return = next_price / current_price - 1.0
         equity *= 1.0 + daily_return
         benchmark_curve.append(
@@ -337,19 +333,6 @@ def _attach_benchmark_metrics(
         tracking_error=tracking_error,
         information_ratio=information_ratio,
     )
-
-
-def _price_for_bar(bar: PriceBar, config: BacktestConfig) -> float:
-    if config.price_field == "close":
-        return bar.close
-    if config.price_field == "adjusted_close":
-        if bar.adjusted_close is None:
-            raise ValueError(
-                f"Adjusted price requested but missing for {bar.symbol} on {bar.date.isoformat()}."
-            )
-        return bar.adjusted_close
-    return bar.adjusted_close if bar.adjusted_close is not None else bar.close
-
 
 def _can_be_selected(
     symbol: str,

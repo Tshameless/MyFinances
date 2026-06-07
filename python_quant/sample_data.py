@@ -7,7 +7,7 @@ from .models import PriceBar
 
 
 def generate_demo_bars(days: int = 80) -> list[PriceBar]:
-    symbols = ["ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO"]
+    symbols = ["000001", "600036", "600519", "601318", "300750"]
     start = date(2024, 1, 2)
     bars: list[PriceBar] = []
 
@@ -28,6 +28,7 @@ def generate_demo_bars(days: int = 80) -> list[PriceBar]:
                     date=current_date,
                     symbol=symbol,
                     close=max(close, 1.0),
+                    adjusted_close=max(close, 1.0),
                 )
             )
 

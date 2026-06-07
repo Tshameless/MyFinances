@@ -14,6 +14,7 @@ from .config import (
 from .data_loader import load_benchmark_bars_from_csv, load_price_bars_from_csv
 from .models import BacktestResult, PriceBar
 from .reporting import (
+    load_symbol_name_mapping,
     print_summary,
     save_batch_chart_svg,
     save_batch_heatmap_svg,
@@ -33,60 +34,77 @@ from .sample_data import generate_demo_bars
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the MyFinances Python quant backtester."
+        description="运行 MyFinances A 股量化回测工具。"
     )
     parser.add_argument(
         "--demo",
         action="store_true",
-        help="Use built-in demo data instead of a CSV file.",
+        help="使用内置演示数据，不从 CSV 文件读取行情。",
     )
     parser.add_argument(
         "--csv",
         type=str,
         help=(
-            "Path to a CSV file with columns: date,symbol,close and optional "
-            "adjusted_close,volume,tradable,can_buy,can_sell"
+            "A 股行情 CSV 路径。必填列为 date、symbol、close；可选列为 "
+            "adjusted_close、volume、tradable、can_buy、can_sell。"
+            "symbol 必须为 6 位 A 股代码。"
         ),
     )
     parser.add_argument(
         "--benchmark-csv",
         type=str,
-        help="Optional benchmark CSV with columns: date,close and optional adjusted_close,symbol",
+        help="可选基准 CSV 路径。必填列为 date、close；可选列为 adjusted_close。",
     )
     parser.add_argument(
         "--config",
         type=str,
-        help="Optional TOML config file. Values in the CLI override the file.",
+        help="可选 TOML 配置文件。命令行参数会覆盖文件中的同名配置。",
     )
     parser.add_argument(
         "--sweep",
         action="store_true",
-        help="Run a parameter sweep using the [sweep] section in the TOML config.",
+        help="读取 TOML 中的 [sweep] 配置并执行批量参数扫描。",
     )
     parser.add_argument(
         "--rank-by",
         type=str,
         default="annualized_return",
-        help="Metric used to rank sweep results. Default: annualized_return",
+        help="批量扫描结果的排序指标，默认值为 annualized_return。",
     )
-    parser.add_argument("--output-dir", type=str)
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="指定结果输出目录，默认使用配置中的 output_dir。",
+    )
     parser.add_argument(
         "--price-field",
-        choices=["auto", "close", "adjusted_close"],
+        choices=["close", "adjusted_close"],
+        help="选择回测使用的价格字段，可选 close 或 adjusted_close。",
     )
-    parser.add_argument("--top-n", type=int)
-    parser.add_argument("--rebalance-days", type=int)
-    parser.add_argument("--initial-cash", type=float)
-    parser.add_argument("--commission-rate", type=float)
-    parser.add_argument("--slippage-rate", type=float)
-    parser.add_argument("--stamp-duty-rate", type=float)
-    parser.add_argument("--lookback-momentum", type=int)
-    parser.add_argument("--lookback-mean-reversion", type=int)
-    parser.add_argument("--lookback-volatility", type=int)
+    parser.add_argument("--top-n", type=int, help="每次调仓选取的股票数量。")
+    parser.add_argument("--rebalance-days", type=int, help="调仓间隔天数。")
+    parser.add_argument("--initial-cash", type=float, help="回测初始资金。")
+    parser.add_argument("--commission-rate", type=float, help="买卖双边佣金费率。")
+    parser.add_argument("--slippage-rate", type=float, help="交易滑点费率。")
+    parser.add_argument("--stamp-duty-rate", type=float, help="卖出印花税费率。")
+    parser.add_argument("--lookback-momentum", type=int, help="动量因子的回看天数。")
+    parser.add_argument(
+        "--lookback-mean-reversion",
+        type=int,
+        help="均值回归因子的回看天数。",
+    )
+    parser.add_argument(
+        "--lookback-volatility",
+        type=int,
+        help="低波动因子的回看天数。",
+    )
     parser.add_argument(
         "--factor-weight",
         action="append",
-        help="Override a factor weight with name=value. Can be provided multiple times.",
+        help=(
+            "使用 name=value 覆盖因子权重，可重复传入多次。"
+            "当前仅支持 momentum、mean_reversion、low_volatility。"
+        ),
     )
     return parser
 
@@ -99,7 +117,7 @@ def main() -> None:
 
     if args.sweep:
         if not args.config:
-            parser.error("--sweep requires --config with a [sweep] section.")
+            parser.error("--sweep 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
             return
         _run_sweep(args, bars, benchmark_bars)
         return
@@ -113,13 +131,13 @@ def main() -> None:
         inputs=_build_input_metadata(args),
         print_console=True,
     )
-    print(f"Equity curve saved to: {artifact_paths['equity_curve_csv']}")
-    print(f"Rebalance log saved to: {artifact_paths['rebalance_log_csv']}")
-    print(f"Performance summary saved to: {artifact_paths['performance_summary_csv']}")
-    print(f"Performance summary JSON saved to: {artifact_paths['performance_summary_json']}")
-    print(f"Run manifest saved to: {artifact_paths['run_manifest_json']}")
-    print(f"Equity chart saved to: {artifact_paths['equity_curve_svg']}")
-    print(f"HTML report saved to: {artifact_paths['report_html']}")
+    print(f"净值曲线 CSV 已保存：{artifact_paths['equity_curve_csv']}")
+    print(f"调仓日志 CSV 已保存：{artifact_paths['rebalance_log_csv']}")
+    print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
+    print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
+    print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
+    print(f"净值图 SVG 已保存：{artifact_paths['equity_curve_svg']}")
+    print(f"HTML 报告已保存：{artifact_paths['report_html']}")
 
 
 def _run_sweep(
@@ -130,7 +148,7 @@ def _run_sweep(
     base_config = _build_backtest_config(args)
     sweep_overrides = load_sweep_overrides_from_toml(args.config)
     if not sweep_overrides:
-        raise ValueError("No [sweep] section found in config file.")
+        raise ValueError("配置文件中未找到 [sweep] 配置段。")
 
     batch_output_dir = base_config.output_dir / "batch_runs"
     rows: list[dict[str, object]] = []
@@ -197,16 +215,16 @@ def _run_sweep(
         rank_by=args.rank_by,
         artifacts=batch_artifacts,
     )
-    print(f"Batch sweep completed: {len(rows)} runs")
-    print(f"Batch summary saved to: {summary_csv_path}")
-    print(f"Batch summary JSON saved to: {summary_json_path}")
-    print(f"Batch leaderboard saved to: {leaderboard_csv_path}")
-    print(f"Batch leaderboard JSON saved to: {leaderboard_json_path}")
-    print(f"Best run summary saved to: {best_run_path}")
-    print(f"Batch chart saved to: {batch_chart_path}")
+    print(f"批量参数扫描完成，共运行 {len(rows)} 组方案。")
+    print(f"批量汇总 CSV 已保存：{summary_csv_path}")
+    print(f"批量汇总 JSON 已保存：{summary_json_path}")
+    print(f"排行榜 CSV 已保存：{leaderboard_csv_path}")
+    print(f"排行榜 JSON 已保存：{leaderboard_json_path}")
+    print(f"最佳方案摘要已保存：{best_run_path}")
+    print(f"批量对比图已保存：{batch_chart_path}")
     if heatmap_path is not None:
-        print(f"Batch heatmap saved to: {heatmap_path}")
-    print(f"Batch HTML report saved to: {batch_report_path}")
+        print(f"热力图已保存：{heatmap_path}")
+    print(f"批量 HTML 报告已保存：{batch_report_path}")
 
 
 def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[PriceBar]:
@@ -214,8 +232,8 @@ def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> lis
         return generate_demo_bars()
     if args.csv:
         return load_price_bars_from_csv(args.csv)
-    parser.error("Use --demo or provide --csv <path>.")
-    raise AssertionError("parser.error should have exited")
+    parser.error("请使用 --demo，或通过 --csv <path> 提供行情文件。")
+    raise AssertionError("parser.error 应已终止程序")
 
 
 def _load_benchmark_bars(args: argparse.Namespace) -> list[PriceBar] | None:
@@ -232,6 +250,7 @@ def _persist_run_outputs(
     inputs: dict[str, str | bool | None],
     print_console: bool,
 ) -> dict[str, Path]:
+    symbol_names = load_symbol_name_mapping(config.symbol_name_csv)
     if print_console:
         print_summary(
             result.equity_curve,
@@ -243,8 +262,13 @@ def _persist_run_outputs(
         result.equity_curve,
         output_dir,
         result.benchmark_curve,
+        symbol_names=symbol_names,
     )
-    rebalance_path = save_rebalance_log(result.rebalance_records, output_dir)
+    rebalance_path = save_rebalance_log(
+        result.rebalance_records,
+        output_dir,
+        symbol_names=symbol_names,
+    )
     summary_path = save_performance_summary(result.metrics, output_dir)
     summary_json_path = save_performance_summary_json(result.metrics, output_dir)
     equity_chart_path = save_equity_chart_svg(
@@ -272,6 +296,9 @@ def _persist_run_outputs(
         config=config,
         metrics=result.metrics,
         artifacts=artifact_paths,
+        latest_holdings=result.equity_curve[-1].holdings if result.equity_curve else (),
+        latest_rebalance=result.rebalance_records[-1] if result.rebalance_records else None,
+        symbol_names=symbol_names,
     )
     artifact_paths["report_html"] = report_path
     return artifact_paths
@@ -291,6 +318,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "stamp_duty_rate": default_config.stamp_duty_rate,
         "price_field": default_config.price_field,
         "output_dir": default_config.output_dir,
+        "symbol_name_csv": default_config.symbol_name_csv,
         "factor_weights": default_config.factor_weights.copy(),
     }
 
@@ -329,12 +357,12 @@ def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
     for entry in entries:
         if "=" not in entry:
             raise ValueError(
-                f"Invalid factor weight '{entry}'. Use the format factor_name=value."
+                f"无效的因子权重配置：'{entry}'。请使用 factor_name=value 格式。"
             )
         name, raw_value = entry.split("=", 1)
         factor_name = name.strip()
         if not factor_name:
-            raise ValueError("Factor weight name cannot be empty.")
+            raise ValueError("因子权重名称不能为空。")
         parsed[factor_name] = float(raw_value.strip())
     return parsed
 
@@ -397,6 +425,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
         stamp_duty_rate=cast(float, config_kwargs["stamp_duty_rate"]),
         price_field=cast(str, config_kwargs["price_field"]),
         output_dir=cast(Path, config_kwargs["output_dir"]),
+        symbol_name_csv=cast(Path | None, config_kwargs["symbol_name_csv"]),
         factor_weights=cast(dict[str, float], config_kwargs["factor_weights"]).copy(),
     )
 
@@ -414,6 +443,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "stamp_duty_rate": config.stamp_duty_rate,
         "price_field": config.price_field,
         "output_dir": config.output_dir,
+        "symbol_name_csv": config.symbol_name_csv,
         "factor_weights": config.factor_weights.copy(),
     }
 

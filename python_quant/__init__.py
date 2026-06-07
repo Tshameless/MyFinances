@@ -1,1 +1,1 @@
-"""Python quant research skeleton for MyFinances."""
+"""MyFinances 的 A 股量化回测工具。"""
