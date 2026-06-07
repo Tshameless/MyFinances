@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from itertools import product
 from pathlib import Path
 from typing import Mapping, cast
@@ -17,6 +17,7 @@ from .config import (
     load_config_overrides_from_toml,
     load_sweep_overrides_from_toml,
 )
+from .data_quality import build_price_data_quality_report, save_data_quality_report
 from .data_loader import load_benchmark_bars_from_csv, load_price_bars_from_csv
 from .models import BacktestResult, PriceBar
 from .reporting import (
@@ -29,12 +30,14 @@ from .reporting import (
     save_batch_summary,
     save_equity_chart_svg,
     save_equity_curve,
+    save_factor_scores,
     save_performance_summary,
     save_performance_summary_json,
     save_positions,
     save_rebalance_log,
     save_run_manifest,
     save_single_run_report_html,
+    save_trade_attempts,
     save_trades,
 )
 from .sample_data import generate_demo_bars
@@ -102,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--slippage-rate", type=float, help="交易滑点费率。")
     parser.add_argument("--stamp-duty-rate", type=float, help="卖出印花税费率。")
     parser.add_argument("--lookback-momentum", type=int, help="动量因子的回看天数。")
+    parser.add_argument("--min-commission", type=float, help="单笔最低佣金。")
+    parser.add_argument("--transfer-fee-rate", type=float, help="买卖双边过户费率。")
+    parser.add_argument("--start-date", type=str, help="回测开始日期，格式为 YYYY-MM-DD。")
+    parser.add_argument("--end-date", type=str, help="回测结束日期，格式为 YYYY-MM-DD。")
     parser.add_argument(
         "--lookback-mean-reversion",
         type=int,
@@ -138,17 +145,27 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         _validate_csv_inputs(args, parser)
         return
 
-    bars = _load_bars(args, parser)
+    backtest_config = _build_backtest_config(args)
+    bars = _filter_bars_by_date_range(
+        _load_bars(args, parser),
+        start_date=backtest_config.start_date,
+        end_date=backtest_config.end_date,
+    )
     benchmark_bars = _load_benchmark_bars(args)
+    if benchmark_bars is not None:
+        benchmark_bars = _filter_bars_by_date_range(
+            benchmark_bars,
+            start_date=backtest_config.start_date,
+            end_date=backtest_config.end_date,
+        )
 
     if args.sweep:
         if not args.config:
             parser.error("--sweep 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
             return
-        _run_sweep(args, bars, benchmark_bars)
+        _run_sweep(args, bars, benchmark_bars, base_config=backtest_config)
         return
 
-    backtest_config = _build_backtest_config(args)
     result = run_backtest(bars, backtest_config, benchmark_bars=benchmark_bars)
     artifact_paths = _persist_run_outputs(
         output_dir=backtest_config.output_dir,
@@ -161,6 +178,8 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     print(f"调仓日志 CSV 已保存：{artifact_paths['rebalance_log_csv']}")
     print(f"每日持仓账本 CSV 已保存：{artifact_paths['positions_csv']}")
     print(f"逐笔交易明细 CSV 已保存：{artifact_paths['trades_csv']}")
+    print(f"未成交原因 CSV 已保存：{artifact_paths['trade_attempts_csv']}")
+    print(f"因子评分明细 CSV 已保存：{artifact_paths['factor_scores_csv']}")
     print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
     print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
     print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
@@ -172,8 +191,10 @@ def _run_sweep(
     args: argparse.Namespace,
     bars: list[PriceBar],
     benchmark_bars: list[PriceBar] | None,
+    *,
+    base_config: BacktestConfig | None = None,
 ) -> None:
-    base_config = _build_backtest_config(args)
+    base_config = base_config or _build_backtest_config(args)
     sweep_overrides = load_sweep_overrides_from_toml(args.config)
     if not sweep_overrides:
         raise ValueError("配置文件中未找到 [sweep] 配置段。")
@@ -270,18 +291,42 @@ def _load_benchmark_bars(args: argparse.Namespace) -> list[PriceBar] | None:
     return None
 
 
+def _filter_bars_by_date_range(
+    bars: list[PriceBar],
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> list[PriceBar]:
+    if start_date is None and end_date is None:
+        return bars
+    filtered = [
+        bar
+        for bar in bars
+        if (start_date is None or bar.date >= start_date)
+        and (end_date is None or bar.date <= end_date)
+    ]
+    if not filtered:
+        raise ValueError("No price data remains after applying date range filters.")
+    return filtered
+
+
 def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     loaded_any = False
+    output_dir = Path(args.output_dir) if args.output_dir else Path("output") / "data_quality"
     if args.csv:
         bars = load_price_bars_from_csv(args.csv)
         symbols = sorted({bar.symbol for bar in bars})
         dates = sorted({bar.date for bar in bars})
+        report = build_price_data_quality_report(bars)
+        report_paths = save_data_quality_report(report, output_dir, prefix="price_data_quality")
         loaded_any = True
         print(
             "行情 CSV 校验通过："
             f"{len(bars)} 行，{len(symbols)} 只标的，"
             f"{dates[0].isoformat()} 至 {dates[-1].isoformat()}。"
         )
+        print(f"行情数据质量 CSV 已保存：{report_paths['price_data_quality_report_csv']}")
+        print(f"行情数据质量 JSON 已保存：{report_paths['price_data_quality_report_json']}")
     if args.benchmark_csv:
         benchmark_bars = load_benchmark_bars_from_csv(args.benchmark_csv)
         dates = [bar.date for bar in benchmark_bars]
@@ -332,6 +377,16 @@ def _persist_run_outputs(
         output_dir,
         symbol_names=symbol_names,
     )
+    trade_attempts_path = save_trade_attempts(
+        result.trade_attempts or [],
+        output_dir,
+        symbol_names=symbol_names,
+    )
+    factor_scores_path = save_factor_scores(
+        result.factor_scores or [],
+        output_dir,
+        symbol_names=symbol_names,
+    )
     summary_path = save_performance_summary(result.metrics, output_dir)
     summary_json_path = save_performance_summary_json(result.metrics, output_dir)
     equity_chart_path = save_equity_chart_svg(
@@ -345,6 +400,8 @@ def _persist_run_outputs(
         "rebalance_log_csv": rebalance_path,
         "positions_csv": positions_path,
         "trades_csv": trades_path,
+        "trade_attempts_csv": trade_attempts_path,
+        "factor_scores_csv": factor_scores_path,
         "performance_summary_csv": summary_path,
         "performance_summary_json": summary_json_path,
     }
@@ -382,7 +439,11 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "commission_rate": default_config.commission_rate,
         "slippage_rate": default_config.slippage_rate,
         "stamp_duty_rate": default_config.stamp_duty_rate,
+        "min_commission": default_config.min_commission,
+        "transfer_fee_rate": default_config.transfer_fee_rate,
         "price_field": default_config.price_field,
+        "start_date": default_config.start_date,
+        "end_date": default_config.end_date,
         "output_dir": default_config.output_dir,
         "symbol_name_csv": default_config.symbol_name_csv,
         "factor_weights": default_config.factor_weights.copy(),
@@ -405,7 +466,11 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "commission_rate": args.commission_rate,
         "slippage_rate": args.slippage_rate,
         "stamp_duty_rate": args.stamp_duty_rate,
+        "min_commission": args.min_commission,
+        "transfer_fee_rate": args.transfer_fee_rate,
         "price_field": args.price_field,
+        "start_date": _parse_cli_date(args.start_date, "start_date"),
+        "end_date": _parse_cli_date(args.end_date, "end_date"),
     }
     for key, value in cli_overrides.items():
         if value is not None:
@@ -439,6 +504,15 @@ def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
             raise ValueError("因子权重名称不能为空。")
         parsed[factor_name] = float(raw_value.strip())
     return parsed
+
+
+def _parse_cli_date(raw_value: str | None, field_name: str) -> date | None:
+    if raw_value in ("", None):
+        return None
+    try:
+        return datetime.strptime(raw_value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must use YYYY-MM-DD format.") from exc
 
 
 def _expand_sweep_combinations(sweep_overrides: dict[str, list[object]]) -> list[dict[str, object]]:
@@ -498,7 +572,11 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
         commission_rate=cast(float, config_kwargs["commission_rate"]),
         slippage_rate=cast(float, config_kwargs["slippage_rate"]),
         stamp_duty_rate=cast(float, config_kwargs["stamp_duty_rate"]),
+        min_commission=cast(float, config_kwargs["min_commission"]),
+        transfer_fee_rate=cast(float, config_kwargs["transfer_fee_rate"]),
         price_field=cast(str, config_kwargs["price_field"]),
+        start_date=cast(date | None, config_kwargs["start_date"]),
+        end_date=cast(date | None, config_kwargs["end_date"]),
         output_dir=cast(Path, config_kwargs["output_dir"]),
         symbol_name_csv=cast(Path | None, config_kwargs["symbol_name_csv"]),
         factor_weights=cast(dict[str, float], config_kwargs["factor_weights"]).copy(),
@@ -547,7 +625,11 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "commission_rate": config.commission_rate,
         "slippage_rate": config.slippage_rate,
         "stamp_duty_rate": config.stamp_duty_rate,
+        "min_commission": config.min_commission,
+        "transfer_fee_rate": config.transfer_fee_rate,
         "price_field": config.price_field,
+        "start_date": config.start_date,
+        "end_date": config.end_date,
         "output_dir": config.output_dir,
         "symbol_name_csv": config.symbol_name_csv,
         "factor_weights": config.factor_weights.copy(),

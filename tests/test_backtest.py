@@ -30,6 +30,8 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(len(result.rebalance_records), 0)
         self.assertTrue(result.positions)
         self.assertTrue(result.trades)
+        self.assertTrue(result.factor_scores)
+        self.assertTrue(any(record.selected for record in result.factor_scores or []))
         self.assertAlmostEqual(
             result.equity_curve[-1].equity / 100.0 - 1.0,
             result.metrics.total_return,
@@ -189,6 +191,36 @@ class BacktestTests(unittest.TestCase):
             sell_trades[-1].total_cost,
         )
 
+    def test_applies_min_commission_and_transfer_fee(self) -> None:
+        bars = _build_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0001,
+            min_commission=5.0,
+            transfer_fee_rate=0.001,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(bars, config)
+
+        buy_trade = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        self.assertEqual(5.0, buy_trade.commission)
+        self.assertGreater(buy_trade.transfer_fee, 0.0)
+        self.assertAlmostEqual(
+            buy_trade.commission
+            + buy_trade.slippage
+            + buy_trade.transfer_fee
+            + buy_trade.stamp_duty,
+            buy_trade.total_cost,
+        )
+
     def test_default_lot_size_requires_buying_whole_a_share_lots(self) -> None:
         bars = _build_aligned_bars()
         config = BacktestConfig(
@@ -208,6 +240,8 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual((), result.equity_curve[-1].holdings)
         self.assertEqual(100.0, result.equity_curve[-1].equity)
         self.assertEqual("CASH", (result.positions or [])[-1].symbol)
+        self.assertTrue(result.trade_attempts)
+        self.assertEqual("insufficient_cash_for_lot", (result.trade_attempts or [])[-1].reason)
 
     def test_t_plus_one_lock_keeps_same_day_new_buy_in_target_holdings(self) -> None:
         bars = _build_reversing_signal_bars()

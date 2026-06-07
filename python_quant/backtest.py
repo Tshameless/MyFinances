@@ -7,7 +7,7 @@ from .config import BacktestConfig
 from .factors import (
     align_history_to_calendar,
     build_intersection_calendar,
-    calculate_factor_scores,
+    calculate_factor_score_records,
     group_prices_by_symbol,
 )
 from .market import price_for_bar
@@ -16,9 +16,11 @@ from .models import (
     BacktestResult,
     BenchmarkPoint,
     EquityPoint,
+    FactorScoreRecord,
     PositionPoint,
     PriceBar,
     RebalanceRecord,
+    TradeAttemptRecord,
     TradeRecord,
 )
 from .strategy import select_symbols
@@ -47,6 +49,8 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     position_points: list[PositionPoint] = []
     trade_records: list[TradeRecord] = []
+    trade_attempt_records: list[TradeAttemptRecord] = []
+    factor_score_records: list[FactorScoreRecord] = []
     rebalance_records: list[RebalanceRecord] = []
     holdings: tuple[str, ...] = ()
     total_cost = 0.0
@@ -61,7 +65,8 @@ def run_backtest(
 
         should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
         if should_rebalance:
-            scores = calculate_factor_scores(aligned_history, index, config)
+            factor_records = calculate_factor_score_records(aligned_history, index, config)
+            scores = {symbol: record.total_score for symbol, record in factor_records.items()}
             selected = _build_target_holdings(
                 scores=scores,
                 aligned_history=aligned_history,
@@ -70,6 +75,14 @@ def run_backtest(
                 config=config,
                 entry_dates=entry_dates,
                 current_date=current_date,
+            )
+            factor_score_records.extend(
+                calculate_factor_score_records(
+                    aligned_history,
+                    index,
+                    config,
+                    selected_symbols=set(selected),
+                ).values()
             )
             trade_plan = _rebalance_account(
                 cash=cash,
@@ -89,6 +102,7 @@ def run_backtest(
             total_cost += trade_plan.cost
             total_turnover += turnover
             trade_records.extend(trade_plan.trades)
+            trade_attempt_records.extend(trade_plan.trade_attempts)
             rebalance_records.append(
                 RebalanceRecord(
                     date=current_date,
@@ -147,6 +161,8 @@ def run_backtest(
         benchmark_curve=benchmark_curve,
         positions=position_points,
         trades=trade_records,
+        trade_attempts=trade_attempt_records,
+        factor_scores=factor_score_records,
     )
 
 
@@ -160,6 +176,7 @@ class _AccountTradeResult:
     sell_turnover: float
     cost: float
     trades: list[TradeRecord]
+    trade_attempts: list[TradeAttemptRecord]
 
 
 def _calculate_account_equity(
@@ -194,18 +211,28 @@ def _rebalance_account(
     bought_value = 0.0
     cost = 0.0
     trades: list[TradeRecord] = []
+    trade_attempts: list[TradeAttemptRecord] = []
 
     for symbol in sorted(set(positions) - set(target_holdings)):
         bar = aligned_history[symbol][index]
-        if not _is_sellable(bar) or entry_dates.get(symbol) == current_date:
+        price = price_for_bar(bar, config)
+        if entry_dates.get(symbol) == current_date:
+            trade_attempts.append(
+                _build_trade_attempt(bar, "SELL", positions[symbol], price, "t_plus_one_locked", cash)
+            )
+            continue
+        if not _is_sellable(bar):
+            trade_attempts.append(
+                _build_trade_attempt(bar, "SELL", positions[symbol], price, "not_sellable", cash)
+            )
             continue
         shares = positions.pop(symbol)
-        price = price_for_bar(bar, config)
         gross_value = shares * price
-        commission = gross_value * config.commission_rate
+        commission = _calculate_commission(gross_value, config)
         slippage = gross_value * config.slippage_rate
+        transfer_fee = gross_value * config.transfer_fee_rate
         stamp_duty = gross_value * config.stamp_duty_rate
-        trade_cost = commission + slippage + stamp_duty
+        trade_cost = commission + slippage + transfer_fee + stamp_duty
         cash += gross_value - trade_cost
         sold_value += gross_value
         cost += trade_cost
@@ -220,6 +247,7 @@ def _rebalance_account(
                 gross_value=round(gross_value, 2),
                 commission=round(commission, 2),
                 slippage=round(slippage, 2),
+                transfer_fee=round(transfer_fee, 2),
                 stamp_duty=round(stamp_duty, 2),
                 total_cost=round(trade_cost, 2),
                 cash_change=round(gross_value - trade_cost, 2),
@@ -234,18 +262,25 @@ def _rebalance_account(
 
     for symbol in new_targets:
         bar = aligned_history[symbol][index]
-        if not _is_buyable(bar):
-            continue
         price = price_for_bar(bar, config)
+        if not _is_buyable(bar):
+            trade_attempts.append(
+                _build_trade_attempt(bar, "BUY", 0, price, "not_buyable", cash)
+            )
+            continue
         max_cash_for_position = min(target_value, cash / (1.0 + config.per_side_cost_rate))
         shares = _round_down_to_lot(max_cash_for_position / price, config.lot_size)
         if shares <= 0:
+            trade_attempts.append(
+                _build_trade_attempt(bar, "BUY", 0, price, "insufficient_cash_for_lot", cash)
+            )
             continue
         gross_value = shares * price
-        commission = gross_value * config.commission_rate
+        commission = _calculate_commission(gross_value, config)
         slippage = gross_value * config.slippage_rate
+        transfer_fee = gross_value * config.transfer_fee_rate
         stamp_duty = 0.0
-        trade_cost = commission + slippage
+        trade_cost = commission + slippage + transfer_fee
         cash -= gross_value + trade_cost
         positions[symbol] = shares
         entry_dates[symbol] = current_date
@@ -261,6 +296,7 @@ def _rebalance_account(
                 gross_value=round(gross_value, 2),
                 commission=round(commission, 2),
                 slippage=round(slippage, 2),
+                transfer_fee=round(transfer_fee, 2),
                 stamp_duty=round(stamp_duty, 2),
                 total_cost=round(trade_cost, 2),
                 cash_change=round(-(gross_value + trade_cost), 2),
@@ -278,11 +314,38 @@ def _rebalance_account(
         sell_turnover=0.0 if start_equity == 0 else sold_value / start_equity,
         cost=cost,
         trades=trades,
+        trade_attempts=trade_attempts,
     )
 
 
 def _round_down_to_lot(shares: float, lot_size: int) -> int:
     return int(shares // lot_size) * lot_size
+
+
+def _calculate_commission(gross_value: float, config: BacktestConfig) -> float:
+    commission = gross_value * config.commission_rate
+    if gross_value > 0 and config.min_commission > 0:
+        return max(commission, config.min_commission)
+    return commission
+
+
+def _build_trade_attempt(
+    bar: PriceBar,
+    side: str,
+    target_shares: int,
+    price: float,
+    reason: str,
+    cash: float,
+) -> TradeAttemptRecord:
+    return TradeAttemptRecord(
+        date=bar.date,
+        symbol=bar.symbol,
+        side=side,
+        target_shares=target_shares,
+        price=round(price, 4),
+        reason=reason,
+        cash=round(cash, 2),
+    )
 
 
 def _build_position_points(

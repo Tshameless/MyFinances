@@ -14,6 +14,9 @@
 - 输出净值曲线 CSV、调仓日志 CSV、绩效摘要 CSV 和绩效摘要 JSON。
 - 输出每日持仓账本 CSV，便于核对每只股票的股数、市值、权重和现金余额。
 - 输出逐笔交易明细 CSV，便于核对每次买卖的股数、成交金额、成本拆分和现金变化。
+- 输出未成交原因 CSV，解释现金不足、不够一手、不可买卖和 T+1 锁定等跳过原因。
+- 输出因子评分明细 CSV，记录每次调仓时的原始因子、标准化因子、总分和入选状态。
+- `--validate-csv` 会生成数据质量报告，检查缺失交易日、复权价缺失、异常收益和每日股票数量变化。
 - 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
 - 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
 - 自动输出中文化 SVG 图表和批量排行榜，减少手工读表。
@@ -49,6 +52,7 @@ python -m python_quant.main --csv data/sample_prices.csv --validate-csv
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
 python -m python_quant.main --csv data/sample_prices.csv --lot-size 1 --initial-cash 10000
+python -m python_quant.main --csv data/sample_prices.csv --start-date 2020-01-01 --end-date 2024-12-31
 python -m python_quant.main --config backtest.example.toml --csv data/sample_prices.csv
 python -m python_quant.main --config backtest.example.toml --demo --sweep
 python -m python_quant.main --config backtest.example.toml --demo --sweep --rank-by sharpe
@@ -74,6 +78,23 @@ lot_size = 100
 
 ```bash
 python -m python_quant.main --demo --lot-size 1
+```
+
+费用模型支持比例费率、最低佣金和过户费：
+
+```toml
+commission_rate = 0.0003
+slippage_rate = 0.0005
+stamp_duty_rate = 0.001
+min_commission = 5.0
+transfer_fee_rate = 0.00001
+```
+
+可以用日期范围做分阶段回测：
+
+```toml
+start_date = "2020-01-01"
+end_date = "2024-12-31"
 ```
 
 如果希望在导出结果中显示“A 股代码 + 中文名”，可以在配置里指定：
@@ -139,6 +160,8 @@ python -m unittest discover -s tests
 - `rebalance_log.csv`：调仓日期、持仓、买入换手、卖出换手、总换手、交易成本。
 - `positions.csv`：每日持仓账本，包含代码、股数、价格、市值、权重、现金和总权益。
 - `trades.csv`：逐笔交易明细，包含买卖方向、股数、成交价、成交金额、佣金、滑点、印花税、现金变化和交易原因。
+- `trade_attempts.csv`：未成交原因，记录因为 T+1、不可买卖、现金不足或不够一手导致的跳过交易。
+- `factor_scores.csv`：因子评分明细，记录调仓时每只股票的因子值、标准化因子、总分和入选状态。
 - `performance_summary.csv`：核心绩效指标和基准对比。
 - `performance_summary.json`：机器可读的绩效摘要。
 - `run_manifest.json`：本次运行的配置、输入、产物路径和指标快照。
@@ -151,6 +174,7 @@ python -m unittest discover -s tests
 - `batch_runs/batch_annualized_return.svg`：批量结果对比图。
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
 - `batch_runs/batch_report.html`：批量扫描网页报告。
+- `price_data_quality_report.csv/json`：`--validate-csv` 生成的数据质量报告。
 
 当前版本的输出风格已经按 A 股中文阅读场景做过收缩：
 

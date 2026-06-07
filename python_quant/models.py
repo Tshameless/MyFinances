@@ -56,10 +56,36 @@ class TradeRecord:
     gross_value: float
     commission: float
     slippage: float
+    transfer_fee: float
     stamp_duty: float
     total_cost: float
     cash_change: float
     reason: str
+
+
+@dataclass(frozen=True)
+class TradeAttemptRecord:
+    date: date
+    symbol: str
+    side: str
+    target_shares: int
+    price: float
+    reason: str
+    cash: float
+
+
+@dataclass(frozen=True)
+class FactorScoreRecord:
+    date: date
+    symbol: str
+    momentum: float
+    mean_reversion: float
+    low_volatility: float
+    normalized_momentum: float
+    normalized_mean_reversion: float
+    normalized_low_volatility: float
+    total_score: float
+    selected: bool
 
 
 @dataclass(frozen=True)
@@ -100,3 +126,5 @@ class BacktestResult:
     benchmark_curve: list[BenchmarkPoint] | None = None
     positions: list[PositionPoint] | None = None
     trades: list[TradeRecord] | None = None
+    trade_attempts: list[TradeAttemptRecord] | None = None
+    factor_scores: list[FactorScoreRecord] | None = None

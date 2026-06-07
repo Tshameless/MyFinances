@@ -17,9 +17,16 @@ from .models import (
     BacktestMetrics,
     BenchmarkPoint,
     EquityPoint,
+    FactorScoreRecord,
     PositionPoint,
     RebalanceRecord,
+    TradeAttemptRecord,
     TradeRecord,
+)
+from .reporting_csv import (
+    save_factor_scores_csv,
+    save_trade_attempts_csv,
+    save_trades_csv,
 )
 
 _ZH_LABELS = {
@@ -35,12 +42,22 @@ _ZH_LABELS = {
     "cash": "现金",
     "total_equity": "总权益",
     "side": "方向",
+    "target_shares": "目标股数",
     "gross_value": "成交金额",
     "commission": "佣金",
     "slippage": "滑点",
+    "transfer_fee": "过户费",
     "stamp_duty": "印花税",
     "cash_change": "现金变化",
     "reason": "原因",
+    "momentum": "动量",
+    "mean_reversion": "均值回归",
+    "low_volatility": "低波动",
+    "normalized_momentum": "标准化动量",
+    "normalized_mean_reversion": "标准化均值回归",
+    "normalized_low_volatility": "标准化低波动",
+    "total_score": "总分",
+    "selected": "入选",
     "benchmark_equity": "基准权益",
     "benchmark_daily_return": "基准单期收益",
     "excess_daily_return": "超额单期收益",
@@ -84,12 +101,18 @@ _ZH_LABELS = {
     "commission_rate": "佣金率",
     "slippage_rate": "滑点率",
     "stamp_duty_rate": "印花税率",
+    "min_commission": "最低佣金",
+    "transfer_fee_rate": "过户费率",
     "price_field": "价格字段",
+    "start_date": "开始日期",
+    "end_date": "结束日期",
     "equity_curve_csv": "净值曲线CSV",
     "run_manifest_json": "运行清单JSON",
     "equity_curve_svg": "净值曲线图",
     "positions_csv": "每日持仓账本CSV",
     "trades_csv": "逐笔交易明细CSV",
+    "trade_attempts_csv": "未成交原因CSV",
+    "factor_scores_csv": "因子评分明细CSV",
     "rebalance_log_csv": "调仓日志CSV",
     "performance_summary_csv": "绩效汇总CSV",
     "performance_summary_json": "绩效汇总JSON",
@@ -326,54 +349,42 @@ def save_trades(
     *,
     symbol_names: dict[str, str] | None = None,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    target_path = output_dir / "trades.csv"
+    return save_trades_csv(
+        trades,
+        output_dir,
+        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
+        display_label=_display_label,
+        format_money=_format_money,
+    )
 
-    with target_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(
-            [
-                _display_label("date"),
-                _display_label("symbol"),
-                "代码展示 / symbol_display",
-                _display_label("side"),
-                _display_label("shares"),
-                _display_label("price"),
-                _display_label("gross_value"),
-                "成交金额展示 / gross_value_display",
-                _display_label("commission"),
-                _display_label("slippage"),
-                _display_label("stamp_duty"),
-                _display_label("total_cost"),
-                "总成本展示 / total_cost_display",
-                _display_label("cash_change"),
-                "现金变化展示 / cash_change_display",
-                _display_label("reason"),
-            ]
-        )
-        for trade in trades:
-            writer.writerow(
-                [
-                    trade.date.isoformat(),
-                    trade.symbol,
-                    _format_symbol(trade.symbol, symbol_names),
-                    trade.side,
-                    str(trade.shares),
-                    f"{trade.price:.4f}",
-                    f"{trade.gross_value:.2f}",
-                    _format_money(trade.gross_value),
-                    f"{trade.commission:.2f}",
-                    f"{trade.slippage:.2f}",
-                    f"{trade.stamp_duty:.2f}",
-                    f"{trade.total_cost:.2f}",
-                    _format_money(trade.total_cost),
-                    f"{trade.cash_change:.2f}",
-                    _format_money(trade.cash_change),
-                    trade.reason,
-                ]
-            )
 
-    return target_path
+def save_trade_attempts(
+    attempts: list[TradeAttemptRecord],
+    output_dir: Path,
+    *,
+    symbol_names: dict[str, str] | None = None,
+) -> Path:
+    return save_trade_attempts_csv(
+        attempts,
+        output_dir,
+        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
+        display_label=_display_label,
+        format_money=_format_money,
+    )
+
+
+def save_factor_scores(
+    records: list[FactorScoreRecord],
+    output_dir: Path,
+    *,
+    symbol_names: dict[str, str] | None = None,
+) -> Path:
+    return save_factor_scores_csv(
+        records,
+        output_dir,
+        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
+        display_label=_display_label,
+    )
 
 
 def save_performance_summary(metrics: BacktestMetrics, output_dir: Path) -> Path:
@@ -568,9 +579,13 @@ def save_single_run_report_html(
         <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
         <tr><th>{_display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
         <tr><th>{_display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
+        <tr><th>{_display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
+        <tr><th>{_display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
         <tr><th>{_display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
         <tr><th>{_display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
         <tr><th>{_display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
+        <tr><th>{_display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
+        <tr><th>{_display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
       </table>
       <h2 style="margin-top:20px;">因子权重</h2>
       <table>{factor_rows}</table>
@@ -1182,7 +1197,11 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "commission_rate": config.commission_rate,
         "slippage_rate": config.slippage_rate,
         "stamp_duty_rate": config.stamp_duty_rate,
+        "min_commission": config.min_commission,
+        "transfer_fee_rate": config.transfer_fee_rate,
         "price_field": config.price_field,
+        "start_date": None if config.start_date is None else config.start_date.isoformat(),
+        "end_date": None if config.end_date is None else config.end_date.isoformat(),
         "output_dir": str(config.output_dir),
         "symbol_name_csv": None if config.symbol_name_csv is None else str(config.symbol_name_csv),
         "factor_weights": config.factor_weights,
@@ -1397,6 +1416,14 @@ def _format_pct(value: float) -> str:
 
 def _format_money(value: float) -> str:
     return f"{value:,.2f}"
+
+
+def _format_optional_date(value: object) -> str:
+    if value is None:
+        return "-"
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
 
 
 def _build_equity_curve_benchmark_columns(

@@ -12,8 +12,10 @@ from python_quant.config import BacktestConfig
 from python_quant.models import (
     BacktestMetrics,
     EquityPoint,
+    FactorScoreRecord,
     PositionPoint,
     RebalanceRecord,
+    TradeAttemptRecord,
     TradeRecord,
 )
 from python_quant.reporting import (
@@ -25,12 +27,14 @@ from python_quant.reporting import (
     save_batch_report_html,
     save_equity_chart_svg,
     save_equity_curve,
+    save_factor_scores,
     save_performance_summary,
     save_performance_summary_json,
     save_positions,
     save_rebalance_log,
     save_run_manifest,
     save_single_run_report_html,
+    save_trade_attempts,
     save_trades,
 )
 
@@ -283,9 +287,10 @@ class ReportingTests(unittest.TestCase):
                     gross_value=1025.0,
                     commission=0.31,
                     slippage=0.51,
+                    transfer_fee=0.02,
                     stamp_duty=0.0,
-                    total_cost=0.82,
-                    cash_change=-1025.82,
+                    total_cost=0.84,
+                    cash_change=-1025.84,
                     reason="rebalance_entry",
                 )
             ]
@@ -297,7 +302,54 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("成交金额 / gross_value", content)
             self.assertIn("佣金 / commission", content)
             self.assertIn("BUY", content)
-            self.assertIn("-1025.82", content)
+            self.assertIn("-1025.84", content)
+
+    def test_saves_trade_attempt_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            attempts = [
+                TradeAttemptRecord(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    symbol="000001",
+                    side="BUY",
+                    target_shares=0,
+                    price=10.25,
+                    reason="insufficient_cash_for_lot",
+                    cash=99.0,
+                )
+            ]
+
+            attempts_path = save_trade_attempts(attempts, output_dir)
+
+            content = attempts_path.read_text(encoding="utf-8-sig")
+            self.assertIn("目标股数 / target_shares", content)
+            self.assertIn("insufficient_cash_for_lot", content)
+            self.assertIn("99.00", content)
+
+    def test_saves_factor_score_details(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            records = [
+                FactorScoreRecord(
+                    date=__import__("datetime").date(2024, 1, 2),
+                    symbol="000001",
+                    momentum=0.1,
+                    mean_reversion=-0.02,
+                    low_volatility=-0.01,
+                    normalized_momentum=1.0,
+                    normalized_mean_reversion=0.5,
+                    normalized_low_volatility=0.25,
+                    total_score=0.675,
+                    selected=True,
+                )
+            ]
+
+            score_path = save_factor_scores(records, output_dir)
+
+            content = score_path.read_text(encoding="utf-8-sig")
+            self.assertIn("总分 / total_score", content)
+            self.assertIn("入选 / selected", content)
+            self.assertIn("0.67500000", content)
 
     def test_print_summary_uses_chinese_labels(self) -> None:
         metrics = BacktestMetrics(

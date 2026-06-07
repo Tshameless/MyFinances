@@ -98,6 +98,27 @@ top_n = "5"
             with self.assertRaisesRegex(ValueError, "top_n must be an integer"):
                 load_config_overrides_from_toml(config_path)
 
+    def test_loads_date_range_from_toml(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                """
+[backtest]
+start_date = "2024-01-10"
+end_date = "2024-02-20"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            overrides = load_config_overrides_from_toml(config_path)
+
+            self.assertEqual("2024-01-10", overrides["start_date"].isoformat())
+            self.assertEqual("2024-02-20", overrides["end_date"].isoformat())
+
+    def test_rejects_inverted_date_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "start_date"):
+            BacktestConfig(start_date=__import__("datetime").date(2024, 2, 1), end_date=__import__("datetime").date(2024, 1, 1))
+
     def test_rejects_wrong_factor_weight_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "backtest.toml"

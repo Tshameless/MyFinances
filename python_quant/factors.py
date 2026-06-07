@@ -6,7 +6,7 @@ from math import sqrt
 
 from .config import BacktestConfig
 from .market import price_for_bar
-from .models import PriceBar
+from .models import FactorScoreRecord, PriceBar
 
 
 def group_prices_by_symbol(bars: list[PriceBar]) -> dict[str, list[PriceBar]]:
@@ -69,6 +69,23 @@ def calculate_factor_scores(
     up_to_index: int,
     config: BacktestConfig,
 ) -> dict[str, float]:
+    return {
+        symbol: record.total_score
+        for symbol, record in calculate_factor_score_records(
+            history_by_symbol,
+            up_to_index,
+            config,
+        ).items()
+    }
+
+
+def calculate_factor_score_records(
+    history_by_symbol: dict[str, list[PriceBar]],
+    up_to_index: int,
+    config: BacktestConfig,
+    *,
+    selected_symbols: set[str] | None = None,
+) -> dict[str, FactorScoreRecord]:
     raw_scores: dict[str, dict[str, float]] = {}
 
     for symbol, bars in history_by_symbol.items():
@@ -120,4 +137,21 @@ def calculate_factor_scores(
             for factor_name, weight in config.normalized_factor_weights.items()
         )
 
-    return total_scores
+    selected_symbols = selected_symbols or set()
+    records: dict[str, FactorScoreRecord] = {}
+    for symbol, score in total_scores.items():
+        raw = raw_scores[symbol]
+        norm = normalized.get(symbol, {})
+        records[symbol] = FactorScoreRecord(
+            date=history_by_symbol[symbol][up_to_index].date,
+            symbol=symbol,
+            momentum=raw["momentum"],
+            mean_reversion=raw["mean_reversion"],
+            low_volatility=raw["low_volatility"],
+            normalized_momentum=norm.get("momentum", 0.0),
+            normalized_mean_reversion=norm.get("mean_reversion", 0.0),
+            normalized_low_volatility=norm.get("low_volatility", 0.0),
+            total_score=score,
+            selected=symbol in selected_symbols,
+        )
+    return records

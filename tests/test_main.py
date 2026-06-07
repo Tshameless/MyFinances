@@ -66,6 +66,8 @@ output_dir = "{output_dir.as_posix()}"
             self.assertTrue((output_dir / "rebalance_log.csv").exists())
             self.assertTrue((output_dir / "positions.csv").exists())
             self.assertTrue((output_dir / "trades.csv").exists())
+            self.assertTrue((output_dir / "trade_attempts.csv").exists())
+            self.assertTrue((output_dir / "factor_scores.csv").exists())
             self.assertTrue((output_dir / "report.html").exists())
 
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -73,6 +75,8 @@ output_dir = "{output_dir.as_posix()}"
             self.assertEqual(2, manifest["config"]["top_n"])
             self.assertIn("positions_csv", manifest["artifacts"])
             self.assertIn("trades_csv", manifest["artifacts"])
+            self.assertIn("trade_attempts_csv", manifest["artifacts"])
+            self.assertIn("factor_scores_csv", manifest["artifacts"])
             self.assertGreater(manifest["metrics"]["periods"], 0)
             self.assertIn("HTML 报告已保存", buffer.getvalue())
             self.assertEqual(0, exit_code)
@@ -235,7 +239,11 @@ rebalance_every_n_days = [5, 10]
                 commission_rate=None,
                 slippage_rate=None,
                 stamp_duty_rate=None,
+                min_commission=None,
+                transfer_fee_rate=None,
                 price_field=None,
+                start_date=None,
+                end_date=None,
                 output_dir=temp_dir,
                 factor_weight=None,
             )
@@ -257,7 +265,11 @@ rebalance_every_n_days = [5, 10]
             commission_rate=None,
             slippage_rate=None,
             stamp_duty_rate=None,
+            min_commission=None,
+            transfer_fee_rate=None,
             price_field=None,
+            start_date=None,
+            end_date=None,
             output_dir=None,
             factor_weight=None,
         )
@@ -265,6 +277,33 @@ rebalance_every_n_days = [5, 10]
         config = _build_backtest_config(args)
 
         self.assertEqual(1, config.lot_size)
+
+    def test_build_backtest_config_accepts_cli_date_range(self) -> None:
+        args = argparse.Namespace(
+            config=None,
+            initial_cash=None,
+            top_n=None,
+            lot_size=None,
+            lookback_momentum=None,
+            lookback_mean_reversion=None,
+            lookback_volatility=None,
+            rebalance_days=None,
+            commission_rate=None,
+            slippage_rate=None,
+            stamp_duty_rate=None,
+            min_commission=None,
+            transfer_fee_rate=None,
+            price_field=None,
+            start_date="2024-01-10",
+            end_date="2024-02-20",
+            output_dir=None,
+            factor_weight=None,
+        )
+
+        config = _build_backtest_config(args)
+
+        self.assertEqual("2024-01-10", config.start_date.isoformat())
+        self.assertEqual("2024-02-20", config.end_date.isoformat())
 
     def test_build_backtest_config_uses_run_directory_when_output_dir_is_implicit(self) -> None:
         args = argparse.Namespace(
@@ -279,7 +318,11 @@ rebalance_every_n_days = [5, 10]
             commission_rate=None,
             slippage_rate=None,
             stamp_duty_rate=None,
+            min_commission=None,
+            transfer_fee_rate=None,
             price_field=None,
+            start_date=None,
+            end_date=None,
             output_dir=None,
             factor_weight=None,
         )
@@ -328,6 +371,8 @@ rebalance_every_n_days = [5, 10]
                         str(price_csv),
                         "--benchmark-csv",
                         str(benchmark_csv),
+                        "--output-dir",
+                        str(temp_path / "quality"),
                     ]
                 )
 
@@ -335,6 +380,9 @@ rebalance_every_n_days = [5, 10]
             output = buffer.getvalue()
             self.assertIn("行情 CSV 校验通过", output)
             self.assertIn("基准 CSV 校验通过", output)
+            self.assertIn("行情数据质量 CSV 已保存", output)
+            self.assertTrue((temp_path / "quality" / "price_data_quality_report.csv").exists())
+            self.assertTrue((temp_path / "quality" / "price_data_quality_report.json").exists())
             self.assertFalse((temp_path / "report.html").exists())
 
     def test_validate_csv_requires_at_least_one_input_file(self) -> None:

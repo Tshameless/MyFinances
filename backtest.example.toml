@@ -9,7 +9,11 @@ rebalance_every_n_days = 5
 commission_rate = 0.0003
 slippage_rate = 0.0005
 stamp_duty_rate = 0.001
+min_commission = 5.0
+transfer_fee_rate = 0.00001
 price_field = "adjusted_close"
+start_date = ""
+end_date = ""
 output_dir = "output/python"
 symbol_name_csv = "symbols.csi300.csv"
 

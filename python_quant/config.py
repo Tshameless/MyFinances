@@ -3,6 +3,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import KeysView
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -26,7 +27,11 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "commission_rate",
         "slippage_rate",
         "stamp_duty_rate",
+        "min_commission",
+        "transfer_fee_rate",
         "price_field",
+        "start_date",
+        "end_date",
     }
 )
 _BACKTEST_PATH_FIELDS = frozenset({"output_dir", "symbol_name_csv"})
@@ -49,9 +54,12 @@ _FLOAT_FIELDS = frozenset(
         "commission_rate",
         "slippage_rate",
         "stamp_duty_rate",
+        "min_commission",
+        "transfer_fee_rate",
     }
 )
 _STRING_FIELDS = frozenset({"price_field"})
+_DATE_FIELDS = frozenset({"start_date", "end_date"})
 
 
 @dataclass(frozen=True)
@@ -66,7 +74,11 @@ class BacktestConfig:
     commission_rate: float = 0.0003
     slippage_rate: float = 0.0005
     stamp_duty_rate: float = 0.0
+    min_commission: float = 0.0
+    transfer_fee_rate: float = 0.0
     price_field: str = "adjusted_close"
+    start_date: date | None = None
+    end_date: date | None = None
     output_dir: Path = OUTPUT_DIR
     symbol_name_csv: Path | None = None
     factor_weights: dict[str, float] = field(
@@ -91,10 +103,19 @@ class BacktestConfig:
             self.lookback_volatility,
         ) <= 0:
             raise ValueError("All lookback windows must be greater than 0.")
-        if min(self.commission_rate, self.slippage_rate, self.stamp_duty_rate) < 0:
+        if min(
+            self.commission_rate,
+            self.slippage_rate,
+            self.stamp_duty_rate,
+            self.min_commission,
+            self.transfer_fee_rate,
+        ) < 0:
             raise ValueError("Cost rates cannot be negative.")
         if self.price_field not in {"close", "adjusted_close"}:
             raise ValueError("price_field must be one of: close, adjusted_close.")
+        if self.start_date is not None and self.end_date is not None:
+            if self.start_date > self.end_date:
+                raise ValueError("start_date must be earlier than or equal to end_date.")
         if not self.factor_weights:
             raise ValueError("factor_weights cannot be empty.")
         unsupported_factors = sorted(set(self.factor_weights) - SUPPORTED_FACTORS)
@@ -163,6 +184,10 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
     for field_name in _STRING_FIELDS:
         if field_name in raw_config:
             normalized[field_name] = _require_str(raw_config[field_name], field_name)
+
+    for field_name in _DATE_FIELDS:
+        if field_name in raw_config and raw_config[field_name] not in ("", None):
+            normalized[field_name] = _require_date(raw_config[field_name], field_name)
 
     if "output_dir" in raw_config:
         output_dir = Path(_require_str(raw_config["output_dir"], "output_dir"))
@@ -263,3 +288,16 @@ def _require_str(value: object, field_name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string.")
     return value
+
+
+def _require_date(value: object, field_name: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a date string.")
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must use YYYY-MM-DD format.") from exc
