@@ -37,6 +37,7 @@ from python_quant.reporting import (
     save_single_run_report_html,
     save_trade_attempts,
     save_trades,
+    save_walk_forward_report_html,
 )
 from python_quant.reporting_csv import (
     save_batch_stability_files,
@@ -662,6 +663,99 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("param_top_n", content)
             self.assertIn("train_test_annualized_gap", content)
             self.assertIn("test_to_train_efficiency", content)
+
+    def test_saves_walk_forward_report_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            report_path = save_walk_forward_report_html(
+                output_dir=output_dir,
+                analysis={
+                    "rows": [
+                        {
+                            "window_id": "window_001",
+                            "start_date": "2024-01-02",
+                            "end_date": "2024-02-02",
+                            "total_return": 0.1,
+                            "annualized_return": 0.2,
+                            "max_drawdown": -0.03,
+                            "sharpe": 1.2,
+                            "win_rate": 0.6,
+                        }
+                    ],
+                    "summary": {
+                        "windows": 1,
+                        "positive_window_rate": 1.0,
+                        "average_total_return": 0.1,
+                        "average_annualized_return": 0.2,
+                        "average_sharpe": 1.2,
+                        "worst_max_drawdown": -0.03,
+                        "best_window_id": "window_001",
+                        "worst_window_id": "window_001",
+                    },
+                },
+            )
+
+            content = report_path.read_text(encoding="utf-8-sig")
+            self.assertIn("A股Walk-forward验证报告", content)
+            self.assertIn("验证结论", content)
+            self.assertIn("正收益窗口占比", content)
+            self.assertIn("window_001", content)
+
+    def test_saves_walk_forward_optimization_report_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            report_path = save_walk_forward_report_html(
+                output_dir=output_dir,
+                optimization=True,
+                analysis={
+                    "rows": [
+                        {
+                            "window_id": "window_001",
+                            "train_start_date": "2024-01-02",
+                            "test_end_date": "2024-03-01",
+                            "train_annualized_return": 0.2,
+                            "test_annualized_return": 0.1,
+                            "train_test_annualized_gap": 0.1,
+                            "test_to_train_efficiency": 0.5,
+                            "is_degraded_out_of_sample": True,
+                            "test_max_drawdown": -0.04,
+                        }
+                    ],
+                    "summary": {
+                        "windows": 1,
+                        "positive_test_window_rate": 1.0,
+                        "degraded_test_window_rate": 1.0,
+                        "parameter_drift_rate": 0.0,
+                        "oos_stability_grade": "mixed",
+                        "overfit_risk": "medium",
+                        "best_test_window_id": "window_001",
+                        "worst_test_window_id": "window_001",
+                        "worst_degradation_window_id": "window_001",
+                        "worst_train_test_annualized_gap": 0.1,
+                        "dominant_parameter_set": "param_top_n=3",
+                        "dominant_parameter_set_rate": 1.0,
+                        "most_drifting_parameter": "param_top_n",
+                        "parameter_drift_counts": {"param_top_n": 1},
+                        "degraded_parameter_sets": [
+                            {
+                                "window_id": "window_001",
+                                "parameter_set": "param_top_n=3",
+                                "train_test_annualized_gap": 0.1,
+                            }
+                        ],
+                    },
+                },
+            )
+
+            content = report_path.read_text(encoding="utf-8-sig")
+            self.assertIn("A股Walk-forward优化报告", content)
+            self.assertIn("样本外稳定等级", content)
+            self.assertIn("过拟合风险", content)
+            self.assertIn("漂移最频繁参数", content)
+            self.assertIn("退化窗口参数组合", content)
+            self.assertIn("param_top_n=3", content)
 
     def test_saves_factor_group_return_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -472,6 +472,7 @@ def build_factor_score_quality_report(
     invalid_date_rows = 0
     invalid_score_rows = 0
     score_values: list[float] = []
+    score_values_by_date: dict[str, list[float]] = {}
     expected_date_strings = {item.isoformat() for item in expected_dates or set()}
 
     with factor_score_path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -492,6 +493,7 @@ def build_factor_score_quality_report(
                     "invalid_date_rows": 0,
                     "invalid_symbol_rows": 0,
                     "invalid_score_rows": 0,
+                    "score_distribution_by_date": [],
                     "missing_expected_symbols": 0,
                     "extra_scored_symbols": 0,
                     "missing_expected_dates": 0,
@@ -522,6 +524,8 @@ def build_factor_score_quality_report(
                 scored_symbols.add(symbol)
             if score_value is not None:
                 score_values.append(score_value)
+                if normalized_date is not None:
+                    score_values_by_date.setdefault(normalized_date, []).append(score_value)
             if is_duplicate:
                 duplicate_keys += 1
             if is_blank_date:
@@ -597,6 +601,7 @@ def build_factor_score_quality_report(
         "unique_score_count": score_distribution["unique_score_count"],
         "duplicate_score_rate": score_distribution["duplicate_score_rate"],
         "extreme_score_count": score_distribution["extreme_score_count"],
+        "score_distribution_by_date": _score_distribution_by_date(score_values_by_date),
         "missing_expected_symbols": len(missing_expected_symbols),
         "extra_scored_symbols": len(extra_scored_symbols),
         "missing_expected_symbol_list": missing_expected_symbols,
@@ -608,6 +613,26 @@ def build_factor_score_quality_report(
         "score_coverage_rate": 0.0 if expected_cells == 0 else len(valid_scored_keys) / expected_cells,
     }
     return MappingQualityReport(summary=summary, rows=rows)
+
+
+def _score_distribution_by_date(score_values_by_date: dict[str, list[float]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for score_date, values in sorted(score_values_by_date.items()):
+        distribution = _score_distribution_summary(values)
+        rows.append(
+            {
+                "date": score_date,
+                "score_count": len(values),
+                "min_score": min(values),
+                "max_score": max(values),
+                "average_score": distribution["average_score"],
+                "score_stddev": distribution["score_stddev"],
+                "unique_score_count": distribution["unique_score_count"],
+                "duplicate_score_rate": distribution["duplicate_score_rate"],
+                "extreme_score_count": distribution["extreme_score_count"],
+            }
+        )
+    return rows
 
 
 def _score_distribution_summary(score_values: list[float]) -> dict[str, object]:
@@ -745,6 +770,7 @@ def save_factor_score_quality_report(
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / f"{prefix}_report.csv"
     json_path = output_dir / f"{prefix}_report.json"
+    distribution_csv_path = output_dir / f"{prefix}_distribution_by_date.csv"
 
     with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.DictWriter(
@@ -777,9 +803,32 @@ def save_factor_score_quality_report(
             indent=2,
         )
 
+    with distribution_csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "date",
+                "score_count",
+                "min_score",
+                "max_score",
+                "average_score",
+                "score_stddev",
+                "unique_score_count",
+                "duplicate_score_rate",
+                "extreme_score_count",
+            ],
+        )
+        writer.writeheader()
+        distribution_rows = report.summary.get("score_distribution_by_date")
+        if isinstance(distribution_rows, list):
+            for row in distribution_rows:
+                if isinstance(row, dict):
+                    writer.writerow(row)
+
     return {
         f"{prefix}_report_csv": csv_path,
         f"{prefix}_report_json": json_path,
+        f"{prefix}_distribution_by_date_csv": distribution_csv_path,
     }
 
 

@@ -50,6 +50,7 @@ from .reporting import (
     save_batch_rankings,
     save_batch_report_html,
     save_batch_summary,
+    save_walk_forward_report_html,
 )
 from .reporting_csv import (
     save_batch_stability_files,
@@ -530,13 +531,20 @@ def _run_walk_forward(
             }
         )
 
-    paths = save_walk_forward_files(
-        build_walk_forward_summary(rows),
-        walk_output_dir,
+    analysis = build_walk_forward_summary(rows)
+    paths = save_walk_forward_files(analysis, walk_output_dir)
+    report_path = save_walk_forward_report_html(
+        output_dir=walk_output_dir,
+        analysis=analysis,
+        artifacts={
+            "walk_forward_csv": paths["walk_forward_csv"],
+            "walk_forward_json": paths["walk_forward_json"],
+        },
     )
     print(f"Walk-forward 验证完成，共运行 {len(rows)} 个窗口。")
     print(f"Walk-forward 汇总 CSV 已保存：{paths['walk_forward_csv']}")
     print(f"Walk-forward 汇总 JSON 已保存：{paths['walk_forward_json']}")
+    print(f"Walk-forward HTML 报告已保存：{report_path}")
 
 
 def _run_walk_forward_optimization(
@@ -690,13 +698,21 @@ def _run_walk_forward_optimization(
             row[f"param_{key}"] = value
         rows.append(row)
 
-    paths = save_walk_forward_optimization_files(
-        build_walk_forward_optimization_summary(rows),
-        optimize_output_dir,
+    analysis = build_walk_forward_optimization_summary(rows)
+    paths = save_walk_forward_optimization_files(analysis, optimize_output_dir)
+    report_path = save_walk_forward_report_html(
+        output_dir=optimize_output_dir,
+        analysis=analysis,
+        optimization=True,
+        artifacts={
+            "walk_forward_optimization_csv": paths["walk_forward_optimization_csv"],
+            "walk_forward_optimization_json": paths["walk_forward_optimization_json"],
+        },
     )
     print(f"Walk-forward 优化完成，共运行 {len(rows)} 个训练/测试窗口。")
     print(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
     print(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
+    print(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
 
 
 def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[PriceBar]:
@@ -840,6 +856,7 @@ def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentPars
         )
         print(f"外部因子评分质量 CSV 已保存：{score_report_paths['factor_score_quality_report_csv']}")
         print(f"外部因子评分质量 JSON 已保存：{score_report_paths['factor_score_quality_report_json']}")
+        print(f"外部因子评分每日分布 CSV 已保存：{score_report_paths['factor_score_quality_distribution_by_date_csv']}")
     if not loaded_any:
         parser.error("--validate-csv 需要配合 --csv、--benchmark-csv、--stock-pool-csv、--symbol-group-csv 或 --factor-score-csv 使用。")
 

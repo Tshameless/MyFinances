@@ -287,9 +287,11 @@ factor_score_csv = "{factor_score_csv.as_posix()}"
             self.assertEqual(0, exit_code)
             self.assertTrue((output_dir / "walk_forward" / "walk_forward.csv").exists())
             self.assertTrue((output_dir / "walk_forward" / "walk_forward.json").exists())
+            self.assertTrue((output_dir / "walk_forward" / "walk_forward_report.html").exists())
             payload = json.loads((output_dir / "walk_forward" / "walk_forward.json").read_text(encoding="utf-8"))
             self.assertGreater(payload["summary"]["windows"], 0)
             self.assertIn("Walk-forward 验证完成", buffer.getvalue())
+            self.assertIn("Walk-forward HTML 报告已保存", buffer.getvalue())
 
     def test_demo_walk_forward_optimization_writes_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -338,6 +340,9 @@ rebalance_every_n_days = [2, 3]
             self.assertEqual(0, exit_code)
             summary_path = output_dir / "walk_forward_optimization" / "walk_forward_optimization.json"
             self.assertTrue(summary_path.exists())
+            self.assertTrue(
+                (output_dir / "walk_forward_optimization" / "walk_forward_optimization_report.html").exists()
+            )
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertGreater(payload["summary"]["windows"], 0)
             self.assertEqual("gate_pass_first_then_metric", payload["summary"]["selection_policy"])
@@ -348,6 +353,7 @@ rebalance_every_n_days = [2, 3]
             self.assertIn("train_gate_status", first_row)
             self.assertIn("train_health_score", first_row)
             self.assertIn("Walk-forward 优化完成", buffer.getvalue())
+            self.assertIn("Walk-forward 优化 HTML 报告已保存", buffer.getvalue())
 
     def test_expands_sweep_combinations(self) -> None:
         combinations = _expand_sweep_combinations(
@@ -1274,6 +1280,8 @@ rebalance_every_n_days = [5, 10]
             self.assertIn("外部因子评分 CSV 校验完成", buffer.getvalue())
             self.assertTrue((output_dir / "factor_score_quality_report.csv").exists())
             self.assertTrue((output_dir / "factor_score_quality_report.json").exists())
+            self.assertTrue((output_dir / "factor_score_quality_distribution_by_date.csv").exists())
+            self.assertIn("外部因子评分每日分布 CSV 已保存", buffer.getvalue())
 
 
 def _write_price_csv(path: Path) -> None:

@@ -283,6 +283,14 @@ class DataQualityTests(unittest.TestCase):
             self.assertEqual(5, report.summary["unique_score_count"])
             self.assertEqual(0.0, report.summary["duplicate_score_rate"])
             self.assertEqual(0, report.summary["extreme_score_count"])
+            self.assertEqual(
+                ["2024-01-02", "2024-01-03", "2024-01-04"],
+                [row["date"] for row in report.summary["score_distribution_by_date"]],
+            )
+            first_date_distribution = report.summary["score_distribution_by_date"][0]
+            self.assertEqual(2, first_date_distribution["score_count"])
+            self.assertAlmostEqual(1.75, first_date_distribution["average_score"])
+            self.assertEqual(0.0, first_date_distribution["duplicate_score_rate"])
 
     def test_saves_factor_score_quality_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -298,8 +306,12 @@ class DataQualityTests(unittest.TestCase):
 
             self.assertTrue(paths["factor_score_quality_report_csv"].exists())
             self.assertTrue(paths["factor_score_quality_report_json"].exists())
+            self.assertTrue(paths["factor_score_quality_distribution_by_date_csv"].exists())
             content = paths["factor_score_quality_report_csv"].read_text(encoding="utf-8-sig")
             self.assertIn("invalid_score", content)
+            distribution_content = paths["factor_score_quality_distribution_by_date_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("date,score_count", distribution_content)
+            self.assertIn("2024-01-02,1", distribution_content)
 
 
 if __name__ == "__main__":

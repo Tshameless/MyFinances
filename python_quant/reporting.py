@@ -200,6 +200,12 @@ _ZH_LABELS = {
     "batch_stability_csv": "参数稳定性CSV",
     "batch_stability_json": "参数稳定性JSON",
     "parameter_sensitivity_csv": "参数敏感度CSV",
+    "walk_forward_csv": "Walk-forward汇总CSV",
+    "walk_forward_json": "Walk-forward汇总JSON",
+    "walk_forward_report_html": "Walk-forward报告",
+    "walk_forward_optimization_csv": "Walk-forward优化CSV",
+    "walk_forward_optimization_json": "Walk-forward优化JSON",
+    "walk_forward_optimization_report_html": "Walk-forward优化报告",
 }
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
@@ -1092,6 +1098,116 @@ def save_batch_report_html(
     return target_path
 
 
+def save_walk_forward_report_html(
+    *,
+    output_dir: Path,
+    analysis: dict[str, object],
+    optimization: bool = False,
+    artifacts: dict[str, Path] | None = None,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_name = "walk_forward_optimization_report.html" if optimization else "walk_forward_report.html"
+    target_path = output_dir / target_name
+    rows = _analysis_rows(analysis)
+    summary = _analysis_summary_dict(analysis)
+    title = "A股Walk-forward优化报告" if optimization else "A股Walk-forward验证报告"
+    conclusion = (
+        _build_walk_forward_optimization_conclusion(summary)
+        if optimization
+        else _build_walk_forward_conclusion(summary)
+    )
+    summary_cards = (
+        _build_walk_forward_optimization_summary_cards(summary)
+        if optimization
+        else _build_walk_forward_summary_cards(summary)
+    )
+    observation_rows = (
+        _build_walk_forward_optimization_observation_rows(summary)
+        if optimization
+        else _build_walk_forward_observation_rows(summary)
+    )
+    headers = (
+        [
+            "window_id",
+            "train_start_date",
+            "test_end_date",
+            "train_annualized_return",
+            "test_annualized_return",
+            "train_test_annualized_gap",
+            "test_to_train_efficiency",
+            "is_degraded_out_of_sample",
+            "test_max_drawdown",
+        ]
+        if optimization
+        else [
+            "window_id",
+            "start_date",
+            "end_date",
+            "total_return",
+            "annualized_return",
+            "max_drawdown",
+            "sharpe",
+            "win_rate",
+        ]
+    )
+    table_rows = _build_analysis_preview_rows(rows, headers)
+    artifact_links = _build_artifact_links(artifacts or {})
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>{escape(title)}</title>
+  <style>
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
+    h1, h2 {{ margin: 0 0 16px; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }}
+    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef2f7; font-size: 14px; }}
+    th {{ color: #52606d; font-weight: 600; }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    .muted {{ color: #52606d; margin-bottom: 16px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }}
+    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
+    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
+    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
+    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+  </style>
+</head>
+<body>
+  <h1>{escape(title)}</h1>
+  <p class="muted">生成时间：{escape(datetime.now().isoformat(timespec="seconds"))}。</p>
+  <div class="grid">
+    <div class="card wide hero">
+      <h2>验证结论</h2>
+      <p class="lead">{escape(conclusion)}</p>
+      <div class="summary-grid">{summary_cards}</div>
+    </div>
+    <div class="card">
+      <h2>结果观察</h2>
+      <table>{observation_rows}</table>
+    </div>
+    <div class="card">
+      <h2>产物清单</h2>
+      <ul>{artifact_links}</ul>
+    </div>
+    <div class="card wide">
+      <h2>窗口预览</h2>
+      <table>
+        <thead><tr>{"".join(f"<th>{escape(_display_label(header))}</th>" for header in headers)}</tr></thead>
+        <tbody>{table_rows}</tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
+"""
+    target_path.write_text(html, encoding=_HUMAN_READABLE_ENCODING)
+    return target_path
+
+
 def _build_batch_conclusion(
     best_row: dict[str, object] | None,
     rank_by: str,
@@ -1106,6 +1222,136 @@ def _build_batch_conclusion(
         f"本次共完成 {run_count} 组 A 股参数试验，当前最佳方案为 {run_label}（{run_id}），"
         f"排序指标 {_display_label(rank_by)} 为 {best_value}。"
     )
+
+
+def _build_walk_forward_conclusion(summary: dict[str, object]) -> str:
+    windows = _coerce_float(summary.get("windows", 0.0))
+    positive_rate = _coerce_float(summary.get("positive_window_rate", 0.0))
+    average_return = _coerce_float(summary.get("average_annualized_return", 0.0))
+    worst_drawdown = _coerce_float(summary.get("worst_max_drawdown", 0.0))
+    return (
+        f"本次共完成 {windows:.0f} 个滚动验证窗口，正收益窗口占比 {positive_rate:.2%}，"
+        f"平均年化收益 {average_return:.2%}，最差最大回撤 {worst_drawdown:.2%}。"
+    )
+
+
+def _build_walk_forward_optimization_conclusion(summary: dict[str, object]) -> str:
+    windows = _coerce_float(summary.get("windows", 0.0))
+    grade = _format_summary_field(summary, "oos_stability_grade")
+    risk = _format_summary_field(summary, "overfit_risk")
+    degraded_rate = _coerce_float(summary.get("degraded_test_window_rate", 0.0))
+    drift_rate = _coerce_float(summary.get("parameter_drift_rate", 0.0))
+    return (
+        f"本次共完成 {windows:.0f} 个训练/测试窗口，样本外稳定等级为 {grade}，"
+        f"过拟合风险为 {risk}，退化窗口占比 {degraded_rate:.2%}，参数漂移率 {drift_rate:.2%}。"
+    )
+
+
+def _build_walk_forward_summary_cards(summary: dict[str, object]) -> str:
+    cards = [
+        ("窗口数", _format_summary_number(summary, "windows", decimals=0)),
+        ("正收益窗口占比", _format_summary_pct(summary, "positive_window_rate")),
+        ("平均年化收益", _format_summary_pct(summary, "average_annualized_return")),
+        ("平均夏普", _format_summary_number(summary, "average_sharpe")),
+        ("最差最大回撤", _format_summary_pct(summary, "worst_max_drawdown")),
+        ("最佳窗口", _format_summary_field(summary, "best_window_id")),
+    ]
+    return "".join(_summary_card(label, value) for label, value in cards)
+
+
+def _build_walk_forward_optimization_summary_cards(summary: dict[str, object]) -> str:
+    cards = [
+        ("窗口数", _format_summary_number(summary, "windows", decimals=0)),
+        ("样本外稳定等级", _format_summary_field(summary, "oos_stability_grade")),
+        ("过拟合风险", _format_summary_field(summary, "overfit_risk")),
+        ("正测试窗口占比", _format_summary_pct(summary, "positive_test_window_rate")),
+        ("退化窗口占比", _format_summary_pct(summary, "degraded_test_window_rate")),
+        ("参数漂移率", _format_summary_pct(summary, "parameter_drift_rate")),
+    ]
+    return "".join(_summary_card(label, value) for label, value in cards)
+
+
+def _build_walk_forward_observation_rows(summary: dict[str, object]) -> str:
+    rows = [
+        ("最佳窗口", _format_summary_field(summary, "best_window_id")),
+        ("最弱窗口", _format_summary_field(summary, "worst_window_id")),
+        ("平均总收益", _format_summary_pct(summary, "average_total_return")),
+        ("平均夏普", _format_summary_number(summary, "average_sharpe")),
+        ("最差最大回撤", _format_summary_pct(summary, "worst_max_drawdown")),
+    ]
+    return _build_html_table_rows(rows)
+
+
+def _build_walk_forward_optimization_observation_rows(summary: dict[str, object]) -> str:
+    rows = [
+        ("最佳测试窗口", _format_summary_field(summary, "best_test_window_id")),
+        ("最弱测试窗口", _format_summary_field(summary, "worst_test_window_id")),
+        ("最严重退化窗口", _format_summary_field(summary, "worst_degradation_window_id")),
+        ("最严重年化差距", _format_summary_pct(summary, "worst_train_test_annualized_gap")),
+        ("主导参数组合", _format_summary_field(summary, "dominant_parameter_set")),
+        ("主导参数组合占比", _format_summary_pct(summary, "dominant_parameter_set_rate")),
+        ("漂移最频繁参数", _format_summary_field(summary, "most_drifting_parameter")),
+        ("参数漂移明细", _format_count_map(summary, "parameter_drift_counts")),
+        ("退化窗口参数组合", _format_degraded_parameter_sets(summary)),
+    ]
+    return _build_html_table_rows(rows)
+
+
+def _build_analysis_preview_rows(rows: list[dict[str, object]], headers: list[str]) -> str:
+    preview_rows = rows[:20]
+    if not preview_rows:
+        return f'<tr><td colspan="{len(headers)}">暂无窗口结果</td></tr>'
+    return "\n".join(
+        "<tr>"
+        + "".join(
+            f"<td>{escape(_format_analysis_cell(header, row.get(header)))}</td>"
+            for header in headers
+        )
+        + "</tr>"
+        for row in preview_rows
+    )
+
+
+def _format_analysis_cell(header: str, value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    if header.startswith("is_"):
+        return "是" if bool(value) else "否"
+    return _format_metric_value(header, value)
+
+
+def _format_count_map(summary: dict[str, object], key: str) -> str:
+    counts = summary.get(key)
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    return "; ".join(f"{name}: {count}" for name, count in sorted(counts.items()))
+
+
+def _format_degraded_parameter_sets(summary: dict[str, object]) -> str:
+    values = summary.get("degraded_parameter_sets")
+    if not isinstance(values, list) or not values:
+        return "-"
+    parts = []
+    for item in values[:3]:
+        if not isinstance(item, dict):
+            continue
+        parts.append(
+            f"{item.get('window_id', '-')}: {item.get('parameter_set', '-')} "
+            f"({ _coerce_float(item.get('train_test_annualized_gap', 0.0)):.2%})"
+        )
+    return "; ".join(parts) if parts else "-"
+
+
+def _analysis_rows(analysis: dict[str, object]) -> list[dict[str, object]]:
+    rows = analysis.get("rows")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _analysis_summary_dict(analysis: dict[str, object]) -> dict[str, object]:
+    summary = analysis.get("summary")
+    return summary if isinstance(summary, dict) else {}
 
 
 def _build_batch_summary_cards(
