@@ -1,38 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import logging
-import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
-from itertools import product
+from collections.abc import Mapping, Sequence
+from datetime import date
 from pathlib import Path
-from typing import TypedDict, cast
 
-from .analysis import (
-    build_batch_stability_analysis,
-    build_walk_forward_optimization_summary,
-    build_walk_forward_summary,
-    build_walk_forward_train_test_windows,
-    build_walk_forward_windows,
-)
 from .backtest import run_backtest
-from .config import (
-    BacktestConfig,
-    load_config_overrides_from_toml,
-    load_sweep_overrides_from_toml,
-)
-from .console_output import (
-    print_single_run_artifacts,
-    print_walk_forward_optimization_artifacts,
-)
+from .cli_config import build_backtest_config as _build_backtest_config
+from .cli_config import build_config_sources as _build_config_sources
+from .cli_config import config_hash
+from .console_output import print_single_run_artifacts
 from .data_loader import (
     load_benchmark_bars_from_csv,
-    load_factor_scores_from_csv,
     load_price_bars_from_csv,
     load_stock_pool_from_csv,
 )
@@ -48,33 +29,41 @@ from .data_quality import (
     save_mapping_quality_report,
     save_stock_pool_quality_report,
 )
-from .models import BacktestResult, PriceBar
-from .reporting import (
-    load_symbol_group_mapping,
-    save_batch_chart_svg,
-    save_batch_heatmap_svg,
-    save_batch_rankings,
-    save_batch_report_html,
-    save_batch_summary,
-    save_walk_forward_report_html,
-)
-from .reporting_csv import (
-    save_batch_stability_files,
-    save_walk_forward_files,
-    save_walk_forward_optimization_files,
-)
+from .models import PriceBar
 from .run_outputs import persist_run_outputs
 from .sample_data import generate_demo_bars
 from .trading_rules import apply_inferred_limit_flags
+from .workflows import (
+    _build_batch_row as _build_batch_row,
+)
+from .workflows import (
+    _expand_sweep_combinations as _expand_sweep_combinations,
+)
+from .workflows import (
+    _health_aware_rank_key as _health_aware_rank_key,
+)
+from .workflows import (
+    build_input_metadata as _build_input_metadata,
+)
+from .workflows import (
+    filter_bars_by_date_range as _filter_bars_by_date_range,
+)
+from .workflows import (
+    load_factor_scores as _load_factor_scores,
+)
+from .workflows import (
+    load_stock_pool as _load_stock_pool,
+)
+from .workflows import (
+    load_symbol_groups as _load_symbol_groups,
+)
+from .workflows import (
+    run_sweep,
+    run_walk_forward,
+    run_walk_forward_optimization,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class _TrainCandidateResult(TypedDict):
-    result: BacktestResult
-    artifacts: dict[str, Path]
-    health_summary: dict[str, object]
-    overrides: dict[str, object]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -318,18 +307,36 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         if not args.config:
             parser.error("--sweep 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
             return
-        _run_sweep(args, bars, benchmark_bars, base_config=backtest_config)
+        run_sweep(
+            args,
+            bars,
+            benchmark_bars,
+            base_config=backtest_config,
+            build_config_sources=_build_config_sources,
+        )
         return
 
     if args.walk_forward:
-        _run_walk_forward(args, bars, benchmark_bars, base_config=backtest_config)
+        run_walk_forward(
+            args,
+            bars,
+            benchmark_bars,
+            base_config=backtest_config,
+            build_config_sources=_build_config_sources,
+        )
         return
 
     if args.walk_optimize:
         if not args.config:
             parser.error("--walk-optimize 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
             return
-        _run_walk_forward_optimization(args, bars, benchmark_bars, base_config=backtest_config)
+        run_walk_forward_optimization(
+            args,
+            bars,
+            benchmark_bars,
+            base_config=backtest_config,
+            build_config_sources=_build_config_sources,
+        )
         return
 
     result = run_backtest(
@@ -351,465 +358,6 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     print_single_run_artifacts(artifact_paths)
 
 
-def _run_sweep(
-    args: argparse.Namespace,
-    bars: list[PriceBar],
-    benchmark_bars: list[PriceBar] | None,
-    *,
-    base_config: BacktestConfig | None = None,
-) -> None:
-    base_config = base_config or _build_backtest_config(args)
-    sweep_overrides = load_sweep_overrides_from_toml(args.config)
-    if not sweep_overrides:
-        raise ValueError("配置文件中未找到 [sweep] 配置段。")
-
-    batch_output_dir = base_config.output_dir / "batch_runs"
-    rows: list[dict[str, object]] = []
-    combinations = _expand_sweep_combinations(sweep_overrides)
-
-    rows = _map_jobs(
-        [
-            (run_number, override_values)
-            for run_number, override_values in enumerate(combinations, start=1)
-        ],
-        lambda item: _run_sweep_case(
-            args=args,
-            bars=bars,
-            benchmark_bars=benchmark_bars,
-            base_config=base_config,
-            batch_output_dir=batch_output_dir,
-            run_number=item[0],
-            override_values=item[1],
-        ),
-        jobs=args.jobs,
-    )
-
-    summary_csv_path, summary_json_path = save_batch_summary(rows, batch_output_dir)
-    stability_analysis = build_batch_stability_analysis(rows, rank_by=args.rank_by)
-    stability_paths = save_batch_stability_files(stability_analysis, batch_output_dir)
-    stability_summary = stability_analysis.get("summary")
-    recommended_parameters = (
-        stability_summary.get("best_parameter_values", {})
-        if isinstance(stability_summary, dict)
-        else {}
-    )
-    leaderboard_csv_path, leaderboard_json_path, best_run_path = save_batch_rankings(
-        rows,
-        batch_output_dir,
-        rank_by=args.rank_by,
-        recommended_parameters=(
-            recommended_parameters if isinstance(recommended_parameters, dict) else {}
-        ),
-    )
-    batch_chart_path = save_batch_chart_svg(
-        rows,
-        batch_output_dir,
-        metric=args.rank_by,
-    )
-    heatmap_path = None
-    if len(sweep_overrides) == 2:
-        heatmap_path = save_batch_heatmap_svg(
-            rows,
-            batch_output_dir,
-            x_field=f"param_{list(sweep_overrides.keys())[0]}",
-            y_field=f"param_{list(sweep_overrides.keys())[1]}",
-            metric=args.rank_by,
-        )
-    batch_artifacts = {
-        "batch_summary_csv": summary_csv_path,
-        "batch_summary_json": summary_json_path,
-        "batch_leaderboard_csv": leaderboard_csv_path,
-        "batch_leaderboard_json": leaderboard_json_path,
-        "best_run_json": best_run_path,
-        "batch_chart_svg": batch_chart_path,
-        "batch_stability_csv": stability_paths["batch_stability_csv"],
-        "batch_stability_json": stability_paths["batch_stability_json"],
-        "parameter_sensitivity_csv": stability_paths["parameter_sensitivity_csv"],
-    }
-    if heatmap_path is not None:
-        batch_artifacts["batch_heatmap_svg"] = heatmap_path
-    batch_report_path = save_batch_report_html(
-        output_dir=batch_output_dir,
-        rows=rows,
-        rank_by=args.rank_by,
-        artifacts=batch_artifacts,
-    )
-    print(f"批量参数扫描完成，共运行 {len(rows)} 组方案。")
-    print(f"批量汇总 CSV 已保存：{summary_csv_path}")
-    print(f"批量汇总 JSON 已保存：{summary_json_path}")
-    print(f"排行榜 CSV 已保存：{leaderboard_csv_path}")
-    print(f"排行榜 JSON 已保存：{leaderboard_json_path}")
-    print(f"最佳方案摘要已保存：{best_run_path}")
-    print(f"参数稳定性 CSV 已保存：{stability_paths['batch_stability_csv']}")
-    print(f"参数稳定性 JSON 已保存：{stability_paths['batch_stability_json']}")
-    print(f"参数敏感度 CSV 已保存：{stability_paths['parameter_sensitivity_csv']}")
-    print(f"批量对比图已保存：{batch_chart_path}")
-    if heatmap_path is not None:
-        print(f"热力图已保存：{heatmap_path}")
-    print(f"批量 HTML 报告已保存：{batch_report_path}")
-
-
-def _run_walk_forward(
-    args: argparse.Namespace,
-    bars: list[PriceBar],
-    benchmark_bars: list[PriceBar] | None,
-    *,
-    base_config: BacktestConfig,
-) -> None:
-    dates = sorted({bar.date for bar in bars})
-    windows = build_walk_forward_windows(
-        dates,
-        window_size=args.walk_window,
-        step_size=args.walk_step,
-    )
-    if not windows:
-        raise ValueError("walk-forward window settings produced no windows.")
-
-    walk_output_dir = base_config.output_dir / "walk_forward"
-    rows: list[dict[str, object]] = []
-    for window_number, (start_date, end_date) in enumerate(windows, start=1):
-        window_id = f"window_{window_number:03d}"
-        run_output_dir = walk_output_dir / window_id
-        config_kwargs = base_config.to_dict()
-        config_kwargs["start_date"] = start_date
-        config_kwargs["end_date"] = end_date
-        config_kwargs["output_dir"] = run_output_dir
-        run_config = BacktestConfig.from_dict(config_kwargs)
-        window_bars = _filter_bars_by_date_range(
-            bars,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        window_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else _filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        )
-        result = run_backtest(
-            window_bars,
-            run_config,
-            benchmark_bars=window_benchmark_bars,
-            stock_pool_by_date=_load_stock_pool(run_config),
-            symbol_groups=_load_symbol_groups(run_config),
-            factor_scores_by_date=_load_factor_scores(run_config),
-        )
-        artifact_paths = persist_run_outputs(
-            output_dir=run_output_dir,
-            result=result,
-            config=run_config,
-            inputs=_build_input_metadata(args, run_config),
-            print_console=False,
-            config_sources=_build_config_sources(args),
-        )
-        rows.append(
-            {
-                "window_id": window_id,
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "periods": result.metrics.periods,
-                "total_return": result.metrics.total_return,
-                "annualized_return": result.metrics.annualized_return,
-                "max_drawdown": result.metrics.max_drawdown,
-                "sharpe": result.metrics.sharpe,
-                "win_rate": result.metrics.win_rate,
-                "total_cost": result.metrics.total_cost,
-                "run_manifest_json": str(artifact_paths["run_manifest_json"]),
-            }
-        )
-
-    analysis = build_walk_forward_summary(rows)
-    paths = save_walk_forward_files(analysis, walk_output_dir)
-    report_path = save_walk_forward_report_html(
-        output_dir=walk_output_dir,
-        analysis=analysis,
-        artifacts={
-            "walk_forward_csv": paths["walk_forward_csv"],
-            "walk_forward_json": paths["walk_forward_json"],
-        },
-    )
-    print(f"Walk-forward 验证完成，共运行 {len(rows)} 个窗口。")
-    print(f"Walk-forward 汇总 CSV 已保存：{paths['walk_forward_csv']}")
-    print(f"Walk-forward 汇总 JSON 已保存：{paths['walk_forward_json']}")
-    print(f"Walk-forward HTML 报告已保存：{report_path}")
-
-
-def _run_sweep_case(
-    *,
-    args: argparse.Namespace,
-    bars: list[PriceBar],
-    benchmark_bars: list[PriceBar] | None,
-    base_config: BacktestConfig,
-    batch_output_dir: Path,
-    run_number: int,
-    override_values: dict[str, object],
-) -> dict[str, object]:
-    run_id = f"run_{run_number:03d}"
-    run_output_dir = batch_output_dir / run_id
-    config_kwargs = base_config.to_dict()
-    config_kwargs.update(override_values)
-    config_kwargs["output_dir"] = run_output_dir
-    run_config = BacktestConfig.from_dict(config_kwargs)
-    result = run_backtest(
-        bars,
-        run_config,
-        benchmark_bars=benchmark_bars,
-        stock_pool_by_date=_load_stock_pool(run_config),
-        symbol_groups=_load_symbol_groups(run_config),
-        factor_scores_by_date=_load_factor_scores(run_config),
-    )
-    artifact_paths = persist_run_outputs(
-        output_dir=run_output_dir,
-        result=result,
-        config=run_config,
-        inputs=_build_input_metadata(args, run_config),
-        print_console=False,
-        config_sources=_build_config_sources(args, sweep_overrides=override_values),
-    )
-    return _build_batch_row(
-        run_id=run_id,
-        config=run_config,
-        overrides=override_values,
-        result=result,
-        artifact_paths=artifact_paths,
-    )
-
-
-def _map_jobs[T, R](
-    items: list[T],
-    worker: Callable[[T], R],
-    *,
-    jobs: int,
-) -> list[R]:
-    if jobs <= 1 or len(items) <= 1:
-        return [worker(item) for item in items]
-    with ThreadPoolExecutor(max_workers=jobs) as executor:
-        return list(executor.map(worker, items))
-
-
-def _run_walk_forward_optimization(
-    args: argparse.Namespace,
-    bars: list[PriceBar],
-    benchmark_bars: list[PriceBar] | None,
-    *,
-    base_config: BacktestConfig,
-) -> None:
-    sweep_overrides = load_sweep_overrides_from_toml(args.config)
-    if not sweep_overrides:
-        raise ValueError("配置文件中未找到 [sweep] 配置段。")
-    combinations = _expand_sweep_combinations(sweep_overrides)
-    dates = sorted({bar.date for bar in bars})
-    windows = build_walk_forward_train_test_windows(
-        dates,
-        train_size=args.walk_train_window,
-        test_size=args.walk_test_window,
-        step_size=args.walk_step,
-    )
-    if not windows:
-        raise ValueError("walk-forward optimization window settings produced no windows.")
-
-    optimize_output_dir = base_config.output_dir / "walk_forward_optimization"
-    rows: list[dict[str, object]] = []
-    for window in windows:
-        window_id = str(window["window_id"])
-        train_start = cast(date, window["train_start_date"])
-        train_end = cast(date, window["train_end_date"])
-        test_start = cast(date, window["test_start_date"])
-        test_end = cast(date, window["test_end_date"])
-        train_bars = _filter_bars_by_date_range(
-            bars,
-            start_date=train_start,
-            end_date=train_end,
-        )
-        test_bars = _filter_bars_by_date_range(
-            bars,
-            start_date=test_start,
-            end_date=test_end,
-        )
-        train_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else _filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=train_start,
-                end_date=train_end,
-            )
-        )
-        test_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else _filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=test_start,
-                end_date=test_end,
-            )
-        )
-        best_train_result: BacktestResult | None = None
-        best_train_artifacts: dict[str, Path] | None = None
-        best_train_health_summary: dict[str, object] = {}
-        best_overrides: dict[str, object] | None = None
-        best_metric = float("-inf")
-        best_candidate_key: tuple[float, float, float, float, float, float] | None = None
-        def run_train_candidate(
-            item: tuple[int, dict[str, object]],
-            *,
-            train_bars: list[PriceBar] = train_bars,
-            train_benchmark_bars: list[PriceBar] | None = train_benchmark_bars,
-            window_id: str = window_id,
-            train_start: date = train_start,
-            train_end: date = train_end,
-        ) -> _TrainCandidateResult:
-            return _run_walk_forward_train_candidate(
-                args=args,
-                train_bars=train_bars,
-                train_benchmark_bars=train_benchmark_bars,
-                base_config=base_config,
-                train_output_dir=optimize_output_dir / window_id / "train_candidates" / f"candidate_{item[0]:03d}",
-                train_start=train_start,
-                train_end=train_end,
-                override_values=item[1],
-            )
-
-        candidate_results: list[_TrainCandidateResult] = _map_jobs(
-            [
-                (combo_number, override_values)
-                for combo_number, override_values in enumerate(combinations, start=1)
-            ],
-            run_train_candidate,
-            jobs=args.jobs,
-        )
-        for candidate in candidate_results:
-            train_result = candidate["result"]
-            train_artifacts = candidate["artifacts"]
-            health_summary = candidate["health_summary"]
-            override_values = candidate["overrides"]
-            metric_value = _metric_value_for_rank(train_result, args.rank_by)
-            candidate_key = _health_aware_rank_key(metric_value, health_summary)
-            if best_candidate_key is None or candidate_key > best_candidate_key:
-                best_metric = metric_value
-                best_candidate_key = candidate_key
-                best_train_result = train_result
-                best_train_artifacts = train_artifacts
-                best_train_health_summary = health_summary
-                best_overrides = dict(override_values)
-
-        if best_train_result is None or best_train_artifacts is None or best_overrides is None:
-            raise ValueError(f"No train candidate completed for {window_id}.")
-
-        test_output_dir = optimize_output_dir / window_id / "test"
-        test_config_kwargs = base_config.to_dict()
-        test_config_kwargs.update(best_overrides)
-        test_config_kwargs["start_date"] = test_start
-        test_config_kwargs["end_date"] = test_end
-        test_config_kwargs["output_dir"] = test_output_dir
-        test_config = BacktestConfig.from_dict(test_config_kwargs)
-        test_result = run_backtest(
-            test_bars,
-            test_config,
-            benchmark_bars=test_benchmark_bars,
-            stock_pool_by_date=_load_stock_pool(test_config),
-            symbol_groups=_load_symbol_groups(test_config),
-            factor_scores_by_date=_load_factor_scores(test_config),
-        )
-        test_artifacts = persist_run_outputs(
-            output_dir=test_output_dir,
-            result=test_result,
-            config=test_config,
-            inputs=_build_input_metadata(args, test_config),
-            print_console=False,
-            config_sources=_build_config_sources(args, sweep_overrides=best_overrides),
-        )
-        row: dict[str, object] = {
-            "window_id": window_id,
-            "train_start_date": train_start.isoformat(),
-            "train_end_date": train_end.isoformat(),
-            "test_start_date": test_start.isoformat(),
-            "test_end_date": test_end.isoformat(),
-            "selection_policy": "gate_pass_first_then_metric",
-            "train_rank_metric": args.rank_by,
-            "train_rank_metric_value": best_metric,
-            "train_annualized_return": best_train_result.metrics.annualized_return,
-            "train_sharpe": best_train_result.metrics.sharpe,
-            "train_health_score": _summary_value(best_train_health_summary, "score"),
-            "train_health_grade": _summary_value(best_train_health_summary, "grade"),
-            "train_gate_status": _summary_value(best_train_health_summary, "gate_status"),
-            "train_gate_failures": _summary_value(best_train_health_summary, "gate_failures"),
-            "train_health_warnings": _summary_value(best_train_health_summary, "warnings"),
-            "train_critical_warnings": _summary_value(best_train_health_summary, "critical_warnings"),
-            "test_total_return": test_result.metrics.total_return,
-            "test_annualized_return": test_result.metrics.annualized_return,
-            "test_max_drawdown": test_result.metrics.max_drawdown,
-            "test_sharpe": test_result.metrics.sharpe,
-            "test_win_rate": test_result.metrics.win_rate,
-            "train_run_manifest_json": str(best_train_artifacts["run_manifest_json"]),
-            "test_run_manifest_json": str(test_artifacts["run_manifest_json"]),
-        }
-        for key, value in best_overrides.items():
-            row[f"param_{key}"] = value
-        rows.append(row)
-
-    analysis = build_walk_forward_optimization_summary(rows)
-    paths = save_walk_forward_optimization_files(analysis, optimize_output_dir)
-    report_path = save_walk_forward_report_html(
-        output_dir=optimize_output_dir,
-        analysis=analysis,
-        optimization=True,
-        artifacts={
-            "walk_forward_optimization_csv": paths["walk_forward_optimization_csv"],
-            "walk_forward_optimization_json": paths["walk_forward_optimization_json"],
-        },
-    )
-    print_walk_forward_optimization_artifacts(
-        row_count=len(rows),
-        paths=paths,
-        report_path=report_path,
-    )
-
-
-def _run_walk_forward_train_candidate(
-    *,
-    args: argparse.Namespace,
-    train_bars: list[PriceBar],
-    train_benchmark_bars: list[PriceBar] | None,
-    base_config: BacktestConfig,
-    train_output_dir: Path,
-    train_start: date,
-    train_end: date,
-    override_values: dict[str, object],
-) -> _TrainCandidateResult:
-    config_kwargs = base_config.to_dict()
-    config_kwargs.update(override_values)
-    config_kwargs["start_date"] = train_start
-    config_kwargs["end_date"] = train_end
-    config_kwargs["output_dir"] = train_output_dir
-    train_config = BacktestConfig.from_dict(config_kwargs)
-    train_result = run_backtest(
-        train_bars,
-        train_config,
-        benchmark_bars=train_benchmark_bars,
-        stock_pool_by_date=_load_stock_pool(train_config),
-        symbol_groups=_load_symbol_groups(train_config),
-        factor_scores_by_date=_load_factor_scores(train_config),
-    )
-    train_artifacts = persist_run_outputs(
-        output_dir=train_output_dir,
-        result=train_result,
-        config=train_config,
-        inputs=_build_input_metadata(args, train_config),
-        print_console=False,
-        config_sources=_build_config_sources(args, sweep_overrides=override_values),
-    )
-    return {
-        "result": train_result,
-        "artifacts": train_artifacts,
-        "health_summary": _load_json_summary(train_artifacts.get("strategy_health_json")),
-        "overrides": override_values,
-    }
-
-
 def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[PriceBar]:
     if args.demo:
         return generate_demo_bars()
@@ -823,43 +371,6 @@ def _load_benchmark_bars(args: argparse.Namespace) -> list[PriceBar] | None:
     if args.benchmark_csv:
         return load_benchmark_bars_from_csv(args.benchmark_csv)
     return None
-
-
-def _load_stock_pool(config: BacktestConfig) -> dict[date, set[str]] | None:
-    if config.stock_pool_csv is None:
-        return None
-    return load_stock_pool_from_csv(config.stock_pool_csv)
-
-
-def _load_symbol_groups(config: BacktestConfig) -> dict[str, str] | None:
-    if config.symbol_group_csv is None:
-        return None
-    return load_symbol_group_mapping(config.symbol_group_csv)
-
-
-def _load_factor_scores(config: BacktestConfig) -> dict[date, dict[str, float]] | None:
-    if config.factor_score_csv is None:
-        return None
-    return load_factor_scores_from_csv(config.factor_score_csv)
-
-
-def _filter_bars_by_date_range(
-    bars: list[PriceBar],
-    *,
-    start_date: date | None,
-    end_date: date | None,
-) -> list[PriceBar]:
-    if start_date is None and end_date is None:
-        return bars
-    filtered = [
-        bar
-        for bar in bars
-        if (start_date is None or bar.date >= start_date)
-        and (end_date is None or bar.date <= end_date)
-    ]
-    if not filtered:
-        raise ValueError("No price data remains after applying date range filters.")
-    return filtered
 
 
 def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -956,520 +467,8 @@ def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentPars
         parser.error("--validate-csv 需要配合 --csv、--benchmark-csv、--stock-pool-csv、--symbol-group-csv 或 --factor-score-csv 使用。")
 
 
-def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
-    default_config = BacktestConfig()
-    config_kwargs: dict[str, object] = {
-        "initial_cash": default_config.initial_cash,
-        "top_n": default_config.top_n,
-        "selection_mode": default_config.selection_mode,
-        "score_source": default_config.score_source,
-        "lot_size": default_config.lot_size,
-        "max_group_positions": default_config.max_group_positions,
-        "lookback_momentum": default_config.lookback_momentum,
-        "lookback_mean_reversion": default_config.lookback_mean_reversion,
-        "lookback_volatility": default_config.lookback_volatility,
-        "rolling_risk_window": default_config.rolling_risk_window,
-        "execution_delay_days": default_config.execution_delay_days,
-        "max_allowed_drawdown": default_config.max_allowed_drawdown,
-        "max_allowed_daily_var": default_config.max_allowed_daily_var,
-        "min_allowed_rolling_return": default_config.min_allowed_rolling_return,
-        "min_allowed_information_ratio": default_config.min_allowed_information_ratio,
-        "min_allowed_fill_rate": default_config.min_allowed_fill_rate,
-        "min_allowed_execution_price_coverage": default_config.min_allowed_execution_price_coverage,
-        "min_allowed_factor_score_coverage": default_config.min_allowed_factor_score_coverage,
-        "max_allowed_market_constraint_rate": default_config.max_allowed_market_constraint_rate,
-        "max_allowed_position_weight": default_config.max_allowed_position_weight,
-        "max_allowed_group_weight": default_config.max_allowed_group_weight,
-        "max_allowed_attribution_residual": default_config.max_allowed_attribution_residual,
-        "max_allowed_factor_correlation": default_config.max_allowed_factor_correlation,
-        "max_allowed_rebalance_changes": default_config.max_allowed_rebalance_changes,
-        "min_allowed_holding_days": default_config.min_allowed_holding_days,
-        "rebalance_every_n_days": default_config.rebalance_every_n_days,
-        "commission_rate": default_config.commission_rate,
-        "buy_commission_rate": default_config.buy_commission_rate,
-        "sell_commission_rate": default_config.sell_commission_rate,
-        "slippage_rate": default_config.slippage_rate,
-        "market_impact_coefficient": default_config.market_impact_coefficient,
-        "market_impact_exponent": default_config.market_impact_exponent,
-        "stamp_duty_rate": default_config.stamp_duty_rate,
-        "min_commission": default_config.min_commission,
-        "transfer_fee_rate": default_config.transfer_fee_rate,
-        "target_cash_weight": default_config.target_cash_weight,
-        "max_position_weight": default_config.max_position_weight,
-        "limit_up_down_rate": default_config.limit_up_down_rate,
-        "st_limit_up_down_rate": default_config.st_limit_up_down_rate,
-        "growth_limit_up_down_rate": default_config.growth_limit_up_down_rate,
-        "bse_limit_up_down_rate": default_config.bse_limit_up_down_rate,
-        "infer_limit_rate_by_symbol": default_config.infer_limit_rate_by_symbol,
-        "max_volume_participation": default_config.max_volume_participation,
-        "infer_limit_flags": default_config.infer_limit_flags,
-        "forward_fill_suspended_bars": default_config.forward_fill_suspended_bars,
-        "price_field": default_config.price_field,
-        "execution_price_field": default_config.execution_price_field,
-        "start_date": default_config.start_date,
-        "end_date": default_config.end_date,
-        "output_dir": default_config.output_dir,
-        "symbol_name_csv": default_config.symbol_name_csv,
-        "stock_pool_csv": default_config.stock_pool_csv,
-        "symbol_group_csv": default_config.symbol_group_csv,
-        "factor_score_csv": default_config.factor_score_csv,
-        "factor_weights": default_config.factor_weights.copy(),
-    }
-
-    has_explicit_output_dir = False
-    if args.config:
-        config_overrides = load_config_overrides_from_toml(args.config)
-        has_explicit_output_dir = "output_dir" in config_overrides
-        config_kwargs.update(config_overrides)
-
-    cli_overrides = _cli_config_overrides(args)
-    for key, value in cli_overrides.items():
-        if value is not None:
-            config_kwargs[key] = value
-
-    if args.output_dir is not None:
-        config_kwargs["output_dir"] = Path(args.output_dir)
-        has_explicit_output_dir = True
-
-    if args.stock_pool_csv is not None:
-        config_kwargs["stock_pool_csv"] = Path(args.stock_pool_csv)
-
-    if args.symbol_group_csv is not None:
-        config_kwargs["symbol_group_csv"] = Path(args.symbol_group_csv)
-
-    factor_score_csv = getattr(args, "factor_score_csv", None)
-    if factor_score_csv is not None:
-        config_kwargs["factor_score_csv"] = Path(factor_score_csv)
-
-    if args.factor_weight:
-        factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
-        factor_weights.update(_parse_factor_weight_overrides(args.factor_weight))
-        config_kwargs["factor_weights"] = factor_weights
-
-    if not has_explicit_output_dir:
-        config_kwargs["output_dir"] = _build_default_run_output_dir(config_kwargs)
-
-    return BacktestConfig.from_dict(config_kwargs)
-
-
-def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
-    parsed: dict[str, float] = {}
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(
-                f"无效的因子权重配置：'{entry}'。请使用 factor_name=value 格式。"
-            )
-        name, raw_value = entry.split("=", 1)
-        factor_name = name.strip()
-        if not factor_name:
-            raise ValueError("因子权重名称不能为空。")
-        parsed[factor_name] = float(raw_value.strip())
-    return parsed
-
-
-def _cli_config_overrides(args: argparse.Namespace) -> dict[str, object | None]:
-    return {
-        "initial_cash": args.initial_cash,
-        "top_n": args.top_n,
-        "selection_mode": getattr(args, "selection_mode", None),
-        "score_source": getattr(args, "score_source", None),
-        "lot_size": args.lot_size,
-        "max_group_positions": args.max_group_positions,
-        "lookback_momentum": args.lookback_momentum,
-        "lookback_mean_reversion": args.lookback_mean_reversion,
-        "lookback_volatility": args.lookback_volatility,
-        "rolling_risk_window": args.rolling_risk_window,
-        "execution_delay_days": args.execution_delay_days,
-        "max_allowed_drawdown": args.max_allowed_drawdown,
-        "max_allowed_daily_var": getattr(args, "max_allowed_daily_var", None),
-        "min_allowed_rolling_return": args.min_allowed_rolling_return,
-        "min_allowed_information_ratio": getattr(args, "min_allowed_information_ratio", None),
-        "min_allowed_fill_rate": args.min_allowed_fill_rate,
-        "min_allowed_execution_price_coverage": getattr(args, "min_allowed_execution_price_coverage", None),
-        "min_allowed_factor_score_coverage": getattr(args, "min_allowed_factor_score_coverage", None),
-        "max_allowed_market_constraint_rate": getattr(args, "max_allowed_market_constraint_rate", None),
-        "max_allowed_position_weight": args.max_allowed_position_weight,
-        "max_allowed_group_weight": getattr(args, "max_allowed_group_weight", None),
-        "max_allowed_attribution_residual": args.max_allowed_attribution_residual,
-        "max_allowed_factor_correlation": getattr(args, "max_allowed_factor_correlation", None),
-        "max_allowed_rebalance_changes": getattr(args, "max_allowed_rebalance_changes", None),
-        "min_allowed_holding_days": getattr(args, "min_allowed_holding_days", None),
-        "rebalance_every_n_days": args.rebalance_days,
-        "commission_rate": args.commission_rate,
-        "buy_commission_rate": args.buy_commission_rate,
-        "sell_commission_rate": args.sell_commission_rate,
-        "slippage_rate": args.slippage_rate,
-        "market_impact_coefficient": getattr(args, "market_impact_coefficient", None),
-        "market_impact_exponent": getattr(args, "market_impact_exponent", None),
-        "stamp_duty_rate": args.stamp_duty_rate,
-        "min_commission": args.min_commission,
-        "transfer_fee_rate": args.transfer_fee_rate,
-        "target_cash_weight": args.target_cash_weight,
-        "max_position_weight": args.max_position_weight,
-        "limit_up_down_rate": args.limit_up_down_rate,
-        "st_limit_up_down_rate": args.st_limit_up_down_rate,
-        "growth_limit_up_down_rate": args.growth_limit_up_down_rate,
-        "bse_limit_up_down_rate": args.bse_limit_up_down_rate,
-        "infer_limit_rate_by_symbol": True if args.infer_limit_rate_by_symbol else None,
-        "max_volume_participation": args.max_volume_participation,
-        "infer_limit_flags": True if args.infer_limit_flags else None,
-        "forward_fill_suspended_bars": True if args.forward_fill_suspended_bars else None,
-        "price_field": args.price_field,
-        "execution_price_field": args.execution_price_field,
-        "start_date": _parse_cli_date(args.start_date, "start_date"),
-        "end_date": _parse_cli_date(args.end_date, "end_date"),
-    }
-
-
-def _build_config_sources(
-    args: argparse.Namespace,
-    *,
-    sweep_overrides: dict[str, object] | None = None,
-) -> dict[str, object]:
-    toml_overrides = load_config_overrides_from_toml(args.config) if args.config else {}
-    cli_overrides = {
-        key
-        for key, value in _cli_config_overrides(args).items()
-        if value is not None
-    }
-    if args.output_dir is not None:
-        cli_overrides.add("output_dir")
-    if args.stock_pool_csv is not None:
-        cli_overrides.add("stock_pool_csv")
-    if args.symbol_group_csv is not None:
-        cli_overrides.add("symbol_group_csv")
-    if getattr(args, "factor_score_csv", None) is not None:
-        cli_overrides.add("factor_score_csv")
-    if args.factor_weight:
-        cli_overrides.add("factor_weights")
-
-    field_sources: dict[str, str] = {}
-    field_names = sorted(set(BacktestConfig().to_dict().keys()) | set(toml_overrides) | cli_overrides)
-    for field_name in field_names:
-        if sweep_overrides and field_name in sweep_overrides:
-            field_sources[field_name] = "sweep_override"
-        elif field_name in cli_overrides:
-            field_sources[field_name] = "cli"
-        elif field_name in toml_overrides:
-            field_sources[field_name] = "toml"
-        else:
-            field_sources[field_name] = "default"
-    if args.output_dir is None and "output_dir" not in toml_overrides:
-        field_sources["output_dir"] = "derived_default"
-    return {
-        "config_file": args.config,
-        "field_sources": field_sources,
-    }
-
-
-def _parse_cli_date(raw_value: str | None, field_name: str) -> date | None:
-    if raw_value in ("", None):
-        return None
-    value = str(raw_value)
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must use YYYY-MM-DD format.") from exc
-
-
-def _expand_sweep_combinations(sweep_overrides: dict[str, list[object]]) -> list[dict[str, object]]:
-    field_names = list(sweep_overrides.keys())
-    combinations = []
-    for values in product(*(sweep_overrides[field_name] for field_name in field_names)):
-        combinations.append(dict(zip(field_names, values, strict=True)))
-    return combinations
-
-
-def _build_batch_row(
-    *,
-    run_id: str,
-    config: BacktestConfig,
-    overrides: dict[str, object],
-    result: BacktestResult,
-    artifact_paths: dict[str, Path],
-) -> dict[str, object]:
-    health_payload = _load_json_payload(artifact_paths.get("strategy_health_json"))
-    health_summary = _summary_from_payload(health_payload)
-    failed_gates = _failed_gates_from_payload(health_payload)
-    row: dict[str, object] = {
-        "run_id": run_id,
-        "output_dir": str(config.output_dir),
-        "total_return": result.metrics.total_return,
-        "annualized_return": result.metrics.annualized_return,
-        "max_drawdown": result.metrics.max_drawdown,
-        "sharpe": result.metrics.sharpe,
-        "sortino": result.metrics.sortino,
-        "calmar": result.metrics.calmar,
-        "win_rate": result.metrics.win_rate,
-        "total_cost": result.metrics.total_cost,
-        "health_score": _summary_value(health_summary, "score"),
-        "health_grade": _summary_value(health_summary, "grade"),
-        "gate_status": _summary_value(health_summary, "gate_status"),
-        "gate_failures": _summary_value(health_summary, "gate_failures"),
-        "health_warnings": _summary_value(health_summary, "warnings"),
-        "critical_warnings": _summary_value(health_summary, "critical_warnings"),
-        "failed_gate_categories": ";".join(_gate_field_values(failed_gates, "category")),
-        "failed_gate_names": ";".join(_gate_field_values(failed_gates, "name")),
-        "equity_curve_csv": str(artifact_paths["equity_curve_csv"]),
-        "run_manifest_json": str(artifact_paths["run_manifest_json"]),
-    }
-    for key, value in overrides.items():
-        row[f"param_{key}"] = value
-    return row
-
-
-def _load_json_summary(path: Path | None) -> dict[str, object]:
-    return _summary_from_payload(_load_json_payload(path))
-
-
-def _load_json_payload(path: Path | None) -> dict[str, object]:
-    if path is None or not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return payload
-
-
-def _summary_from_payload(payload: dict[str, object]) -> dict[str, object]:
-    summary = payload.get("summary")
-    return summary if isinstance(summary, dict) else {}
-
-
-def _failed_gates_from_payload(payload: dict[str, object]) -> list[dict[str, object]]:
-    gates = payload.get("gates")
-    if not isinstance(gates, list):
-        return []
-    return [
-        gate
-        for gate in gates
-        if isinstance(gate, dict) and gate.get("passed") is False
-    ]
-
-
-def _gate_field_values(gates: list[dict[str, object]], field: str) -> list[str]:
-    return [
-        str(gate[field])
-        for gate in gates
-        if field in gate and gate[field] not in (None, "")
-    ]
-
-
-def _summary_value(summary: dict[str, object], key: str) -> object:
-    return summary.get(key, "")
-
-
-def _health_aware_rank_key(
-    metric_value: float,
-    health_summary: dict[str, object],
-) -> tuple[float, float, float, float, float, float]:
-    gate_status = str(health_summary.get("gate_status", "")).lower()
-    if gate_status == "pass":
-        gate_score = 1.0
-    elif gate_status:
-        gate_score = 0.0
-    else:
-        gate_score = 0.5
-    health_score = _numeric_summary_value(health_summary, "score")
-    gate_failures = _numeric_summary_value(health_summary, "gate_failures")
-    critical_warnings = _numeric_summary_value(health_summary, "critical_warnings")
-    warnings = _numeric_summary_value(health_summary, "warnings")
-    return (
-        gate_score,
-        -gate_failures,
-        -critical_warnings,
-        -warnings,
-        health_score,
-        metric_value,
-    )
-
-
-def _numeric_summary_value(summary: dict[str, object], key: str) -> float:
-    value = summary.get(key, 0.0)
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(str(value))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _metric_value_for_rank(result: BacktestResult, rank_by: str) -> float:
-    value = getattr(result.metrics, rank_by, None)
-    if value is None:
-        raise ValueError(f"Rank metric '{rank_by}' is not available on backtest metrics.")
-    if not isinstance(value, (int, float)):
-        raise ValueError(f"Rank metric '{rank_by}' must be numeric.")
-    return float(value)
-
-
-def _build_input_metadata(
-    args: argparse.Namespace,
-    config: BacktestConfig,
-) -> dict[str, str | bool | None]:
-    return {
-        "demo": bool(args.demo),
-        "csv": args.csv,
-        "benchmark_csv": args.benchmark_csv,
-        "stock_pool_csv": None if config.stock_pool_csv is None else str(config.stock_pool_csv),
-        "symbol_group_csv": None if config.symbol_group_csv is None else str(config.symbol_group_csv),
-        "factor_score_csv": None if config.factor_score_csv is None else str(config.factor_score_csv),
-        "config": args.config,
-        "sweep": bool(args.sweep),
-    }
-
-
-def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestConfig:
-    return BacktestConfig(
-        initial_cash=cast(float, config_kwargs["initial_cash"]),
-        top_n=cast(int, config_kwargs["top_n"]),
-        selection_mode=cast(str, config_kwargs["selection_mode"]),
-        score_source=cast(str, config_kwargs["score_source"]),
-        lot_size=cast(int, config_kwargs["lot_size"]),
-        max_group_positions=cast(int | None, config_kwargs["max_group_positions"]),
-        lookback_momentum=cast(int, config_kwargs["lookback_momentum"]),
-        lookback_mean_reversion=cast(int, config_kwargs["lookback_mean_reversion"]),
-        lookback_volatility=cast(int, config_kwargs["lookback_volatility"]),
-        rolling_risk_window=cast(int, config_kwargs["rolling_risk_window"]),
-        execution_delay_days=cast(int, config_kwargs["execution_delay_days"]),
-        max_allowed_drawdown=cast(float, config_kwargs["max_allowed_drawdown"]),
-        max_allowed_daily_var=cast(float, config_kwargs["max_allowed_daily_var"]),
-        min_allowed_rolling_return=cast(float, config_kwargs["min_allowed_rolling_return"]),
-        min_allowed_information_ratio=cast(float, config_kwargs["min_allowed_information_ratio"]),
-        min_allowed_fill_rate=cast(float, config_kwargs["min_allowed_fill_rate"]),
-        min_allowed_execution_price_coverage=cast(float, config_kwargs["min_allowed_execution_price_coverage"]),
-        min_allowed_factor_score_coverage=cast(float, config_kwargs["min_allowed_factor_score_coverage"]),
-        max_allowed_market_constraint_rate=cast(float, config_kwargs["max_allowed_market_constraint_rate"]),
-        max_allowed_position_weight=cast(float, config_kwargs["max_allowed_position_weight"]),
-        max_allowed_group_weight=cast(float, config_kwargs["max_allowed_group_weight"]),
-        max_allowed_attribution_residual=cast(float, config_kwargs["max_allowed_attribution_residual"]),
-        max_allowed_factor_correlation=cast(float, config_kwargs["max_allowed_factor_correlation"]),
-        max_allowed_rebalance_changes=cast(float, config_kwargs["max_allowed_rebalance_changes"]),
-        min_allowed_holding_days=cast(float, config_kwargs["min_allowed_holding_days"]),
-        rebalance_every_n_days=cast(int, config_kwargs["rebalance_every_n_days"]),
-        commission_rate=cast(float, config_kwargs["commission_rate"]),
-        buy_commission_rate=cast(float | None, config_kwargs["buy_commission_rate"]),
-        sell_commission_rate=cast(float | None, config_kwargs["sell_commission_rate"]),
-        slippage_rate=cast(float, config_kwargs["slippage_rate"]),
-        market_impact_coefficient=cast(float, config_kwargs["market_impact_coefficient"]),
-        market_impact_exponent=cast(float, config_kwargs["market_impact_exponent"]),
-        stamp_duty_rate=cast(float, config_kwargs["stamp_duty_rate"]),
-        min_commission=cast(float, config_kwargs["min_commission"]),
-        transfer_fee_rate=cast(float, config_kwargs["transfer_fee_rate"]),
-        target_cash_weight=cast(float, config_kwargs["target_cash_weight"]),
-        max_position_weight=cast(float, config_kwargs["max_position_weight"]),
-        limit_up_down_rate=cast(float, config_kwargs["limit_up_down_rate"]),
-        st_limit_up_down_rate=cast(float, config_kwargs["st_limit_up_down_rate"]),
-        growth_limit_up_down_rate=cast(float, config_kwargs["growth_limit_up_down_rate"]),
-        bse_limit_up_down_rate=cast(float, config_kwargs["bse_limit_up_down_rate"]),
-        infer_limit_rate_by_symbol=cast(bool, config_kwargs["infer_limit_rate_by_symbol"]),
-        max_volume_participation=cast(float, config_kwargs["max_volume_participation"]),
-        infer_limit_flags=cast(bool, config_kwargs["infer_limit_flags"]),
-        forward_fill_suspended_bars=cast(bool, config_kwargs["forward_fill_suspended_bars"]),
-        price_field=cast(str, config_kwargs["price_field"]),
-        execution_price_field=cast(str | None, config_kwargs["execution_price_field"]),
-        start_date=cast(date | None, config_kwargs["start_date"]),
-        end_date=cast(date | None, config_kwargs["end_date"]),
-        output_dir=cast(Path, config_kwargs["output_dir"]),
-        symbol_name_csv=cast(Path | None, config_kwargs["symbol_name_csv"]),
-        stock_pool_csv=cast(Path | None, config_kwargs["stock_pool_csv"]),
-        symbol_group_csv=cast(Path | None, config_kwargs["symbol_group_csv"]),
-        factor_score_csv=cast(Path | None, config_kwargs["factor_score_csv"]),
-        factor_weights=cast(dict[str, float], config_kwargs["factor_weights"]).copy(),
-    )
-
-
-def _build_default_run_output_dir(config_kwargs: Mapping[str, object]) -> Path:
-    timestamp = os.environ.get("MYFINANCES_RUN_TIMESTAMP")
-    if timestamp is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return Path("output") / "runs" / f"{timestamp}-{_config_hash(config_kwargs)}"
-
-
 def _config_hash(config_kwargs: Mapping[str, object]) -> str:
-    payload = {
-        key: _jsonable_config_value(value)
-        for key, value in sorted(config_kwargs.items())
-        if key != "output_dir"
-    }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:10]
-
-
-def _jsonable_config_value(value: object) -> object:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {
-            str(key): _jsonable_config_value(item)
-            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
-        }
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
-    return {
-        "initial_cash": config.initial_cash,
-        "top_n": config.top_n,
-        "selection_mode": config.selection_mode,
-        "score_source": config.score_source,
-        "lot_size": config.lot_size,
-        "max_group_positions": config.max_group_positions,
-        "lookback_momentum": config.lookback_momentum,
-        "lookback_mean_reversion": config.lookback_mean_reversion,
-        "lookback_volatility": config.lookback_volatility,
-        "rolling_risk_window": config.rolling_risk_window,
-        "execution_delay_days": config.execution_delay_days,
-        "max_allowed_drawdown": config.max_allowed_drawdown,
-        "max_allowed_daily_var": config.max_allowed_daily_var,
-        "min_allowed_rolling_return": config.min_allowed_rolling_return,
-        "min_allowed_information_ratio": config.min_allowed_information_ratio,
-        "min_allowed_fill_rate": config.min_allowed_fill_rate,
-        "min_allowed_execution_price_coverage": config.min_allowed_execution_price_coverage,
-        "min_allowed_factor_score_coverage": config.min_allowed_factor_score_coverage,
-        "max_allowed_market_constraint_rate": config.max_allowed_market_constraint_rate,
-        "max_allowed_position_weight": config.max_allowed_position_weight,
-        "max_allowed_group_weight": config.max_allowed_group_weight,
-        "max_allowed_attribution_residual": config.max_allowed_attribution_residual,
-        "max_allowed_factor_correlation": config.max_allowed_factor_correlation,
-        "max_allowed_rebalance_changes": config.max_allowed_rebalance_changes,
-        "min_allowed_holding_days": config.min_allowed_holding_days,
-        "rebalance_every_n_days": config.rebalance_every_n_days,
-        "commission_rate": config.commission_rate,
-        "buy_commission_rate": config.buy_commission_rate,
-        "sell_commission_rate": config.sell_commission_rate,
-        "slippage_rate": config.slippage_rate,
-        "market_impact_coefficient": config.market_impact_coefficient,
-        "market_impact_exponent": config.market_impact_exponent,
-        "stamp_duty_rate": config.stamp_duty_rate,
-        "min_commission": config.min_commission,
-        "transfer_fee_rate": config.transfer_fee_rate,
-        "target_cash_weight": config.target_cash_weight,
-        "max_position_weight": config.max_position_weight,
-        "limit_up_down_rate": config.limit_up_down_rate,
-        "st_limit_up_down_rate": config.st_limit_up_down_rate,
-        "growth_limit_up_down_rate": config.growth_limit_up_down_rate,
-        "bse_limit_up_down_rate": config.bse_limit_up_down_rate,
-        "infer_limit_rate_by_symbol": config.infer_limit_rate_by_symbol,
-        "max_volume_participation": config.max_volume_participation,
-        "infer_limit_flags": config.infer_limit_flags,
-        "forward_fill_suspended_bars": config.forward_fill_suspended_bars,
-        "price_field": config.price_field,
-        "execution_price_field": config.execution_price_field,
-        "start_date": config.start_date,
-        "end_date": config.end_date,
-        "output_dir": config.output_dir,
-        "symbol_name_csv": config.symbol_name_csv,
-        "stock_pool_csv": config.stock_pool_csv,
-        "symbol_group_csv": config.symbol_group_csv,
-        "factor_score_csv": config.factor_score_csv,
-        "factor_weights": config.factor_weights.copy(),
-    }
+    return config_hash(config_kwargs)
 
 
 if __name__ == "__main__":
