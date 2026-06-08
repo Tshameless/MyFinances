@@ -106,6 +106,7 @@ _ZH_LABELS = {
     "rank": "名次",
     "initial_cash": "初始资金",
     "top_n": "持仓数量TopN",
+    "selection_mode": "选股方向",
     "lot_size": "每手股数",
     "max_group_positions": "单组最多入选数",
     "rebalance_every_n_days": "调仓间隔天数",
@@ -676,6 +677,7 @@ def save_single_run_report_html(
       <table>
         <tr><th>{_display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
         <tr><th>{_display_label("top_n")}</th><td>{config.top_n}</td></tr>
+        <tr><th>{_display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
         <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
         <tr><th>{_display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
         <tr><th>{_display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
@@ -1645,6 +1647,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
+        "selection_mode": config.selection_mode,
         "lot_size": config.lot_size,
         "max_group_positions": config.max_group_positions,
         "lookback_momentum": config.lookback_momentum,
@@ -1690,6 +1693,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "symbol_name_csv": None if config.symbol_name_csv is None else str(config.symbol_name_csv),
         "stock_pool_csv": None if config.stock_pool_csv is None else str(config.stock_pool_csv),
         "symbol_group_csv": None if config.symbol_group_csv is None else str(config.symbol_group_csv),
+        "factor_score_csv": None if config.factor_score_csv is None else str(config.factor_score_csv),
         "factor_weights": config.factor_weights,
     }
 
@@ -1698,7 +1702,7 @@ def _build_input_file_metadata(
     inputs: dict[str, str | bool | None],
 ) -> dict[str, dict[str, object]]:
     metadata: dict[str, dict[str, object]] = {}
-    for key in ("csv", "benchmark_csv", "stock_pool_csv", "symbol_group_csv", "config"):
+    for key in ("csv", "benchmark_csv", "stock_pool_csv", "symbol_group_csv", "factor_score_csv", "config"):
         raw_path = inputs.get(key)
         if not isinstance(raw_path, str) or not raw_path:
             continue

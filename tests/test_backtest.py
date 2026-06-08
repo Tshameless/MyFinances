@@ -39,6 +39,38 @@ class BacktestTests(unittest.TestCase):
             places=6,
         )
 
+    def test_can_select_holdings_from_external_factor_scores(self) -> None:
+        bars = _build_a_share_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        result = run_backtest(
+            bars,
+            config,
+            factor_scores_by_date={
+                date(2024, 1, 4): {
+                    "000001": -1.0,
+                    "600519": 3.0,
+                    "000002": 0.0,
+                }
+            },
+        )
+
+        self.assertEqual(("600519",), result.rebalance_records[0].holdings)
+        selected_record = next(record for record in result.factor_scores or [] if record.selected)
+        self.assertEqual("600519", selected_record.symbol)
+        self.assertEqual(3.0, selected_record.total_score)
+
     def test_intersection_calendar_drops_missing_dates_without_misalignment(self) -> None:
         bars = [
             PriceBar(date=date(2024, 1, 2), symbol="AAA", close=10),
@@ -489,6 +521,31 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(("AAA", "CCC"), target)
 
+    def test_target_holdings_can_select_lowest_scores_for_factor_direction_checks(self) -> None:
+        bars = _build_aligned_bars()
+        aligned_history = {
+            "AAA": [bar for bar in bars if bar.symbol == "AAA"],
+            "BBB": [bar for bar in bars if bar.symbol == "BBB"],
+            "CCC": [bar for bar in bars if bar.symbol == "CCC"],
+        }
+        config = BacktestConfig(
+            top_n=2,
+            selection_mode="bottom",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+        )
+
+        target = _build_target_holdings(
+            scores={"AAA": 3.0, "BBB": 2.0, "CCC": 1.0},
+            aligned_history=aligned_history,
+            index=1,
+            current_holdings=(),
+            config=config,
+        )
+
+        self.assertEqual(("CCC", "BBB"), target)
+
     def test_stock_pool_limits_new_entries(self) -> None:
         bars = _build_aligned_bars()
         config = BacktestConfig(
@@ -637,6 +694,15 @@ def _build_aligned_bars() -> list[PriceBar]:
         for current_date, close in zip(dates, symbol_closes, strict=True):
             bars.append(PriceBar(date=current_date, symbol=symbol, close=close))
     return bars
+
+
+def _build_a_share_aligned_bars() -> list[PriceBar]:
+    source = _build_aligned_bars()
+    symbol_map = {"AAA": "000001", "BBB": "600519", "CCC": "000002"}
+    return [
+        PriceBar(date=bar.date, symbol=symbol_map[bar.symbol], close=bar.close)
+        for bar in source
+    ]
 
 
 def _build_adjusted_price_bars() -> list[PriceBar]:

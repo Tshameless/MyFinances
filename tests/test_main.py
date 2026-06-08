@@ -188,12 +188,24 @@ top_n = "2"
             price_csv = temp_path / "prices.csv"
             benchmark_csv = temp_path / "benchmark.csv"
             stock_pool_csv = temp_path / "stock_pool.csv"
+            factor_score_csv = temp_path / "factor_scores.csv"
             config_path = temp_path / "backtest.toml"
             output_dir = temp_path / "reports"
 
             _write_price_csv(price_csv)
             _write_benchmark_csv(benchmark_csv)
             _write_stock_pool_csv(stock_pool_csv)
+            factor_score_csv.write_text(
+                """date,symbol,score
+2024-01-04,000001,-1
+2024-01-04,600519,3
+2024-01-04,000333,0
+2024-01-08,000001,-1
+2024-01-08,600519,3
+2024-01-08,000333,0
+""",
+                encoding="utf-8",
+            )
             config_path.write_text(
                 f"""
 [backtest]
@@ -209,6 +221,7 @@ stamp_duty_rate = 0
 price_field = "adjusted_close"
 output_dir = "{output_dir.as_posix()}"
 stock_pool_csv = "{stock_pool_csv.as_posix()}"
+factor_score_csv = "{factor_score_csv.as_posix()}"
 """.strip(),
                 encoding="utf-8",
             )
@@ -237,7 +250,12 @@ stock_pool_csv = "{stock_pool_csv.as_posix()}"
                 str(stock_pool_csv.resolve()),
                 manifest["input_files"]["stock_pool_csv"]["path"],
             )
+            self.assertEqual(
+                str(factor_score_csv.resolve()),
+                manifest["input_files"]["factor_score_csv"]["path"],
+            )
             self.assertEqual(str(stock_pool_csv.resolve()), manifest["config"]["stock_pool_csv"])
+            self.assertEqual(str(factor_score_csv.resolve()), manifest["config"]["factor_score_csv"])
             self.assertIsNotNone(manifest["metrics"]["benchmark_total_return"])
             equity_content = (output_dir / "equity_curve.csv").read_text(encoding="utf-8-sig")
             self.assertIn("基准权益 / benchmark_equity", equity_content)
@@ -610,6 +628,62 @@ rebalance_every_n_days = [5, 10]
         config = _build_backtest_config(args)
 
         self.assertEqual(1, config.lot_size)
+
+    def test_build_backtest_config_accepts_cli_selection_mode(self) -> None:
+        args = argparse.Namespace(
+            config=None,
+            initial_cash=None,
+            top_n=None,
+            selection_mode="bottom",
+            lot_size=None,
+            max_group_positions=None,
+            lookback_momentum=None,
+            lookback_mean_reversion=None,
+            lookback_volatility=None,
+            rolling_risk_window=None,
+            max_allowed_drawdown=None,
+            min_allowed_rolling_return=None,
+            min_allowed_fill_rate=None,
+            max_allowed_position_weight=None,
+            max_allowed_attribution_residual=None,
+            rebalance_days=None,
+            commission_rate=None,
+            buy_commission_rate=None,
+            sell_commission_rate=None,
+            slippage_rate=None,
+            stamp_duty_rate=None,
+            min_commission=None,
+            transfer_fee_rate=None,
+            limit_up_down_rate=None,
+            st_limit_up_down_rate=None,
+            growth_limit_up_down_rate=None,
+            bse_limit_up_down_rate=None,
+            infer_limit_rate_by_symbol=False,
+            max_volume_participation=None,
+            target_cash_weight=None,
+            max_position_weight=None,
+            infer_limit_flags=False,
+            forward_fill_suspended_bars=False,
+            price_field=None,
+            execution_price_field=None,
+            execution_delay_days=None,
+            start_date=None,
+            end_date=None,
+            output_dir=None,
+            stock_pool_csv=None,
+            symbol_group_csv=None,
+            walk_optimize=False,
+            walk_forward=False,
+            walk_window=30,
+            walk_step=10,
+            walk_train_window=40,
+            walk_test_window=20,
+            factor_weight=None,
+        )
+
+        config = _build_backtest_config(args)
+
+        self.assertEqual("bottom", config.selection_mode)
 
     def test_build_backtest_config_accepts_execution_price_field(self) -> None:
         args = argparse.Namespace(

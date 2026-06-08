@@ -7,6 +7,7 @@ from pathlib import Path
 
 from python_quant.data_loader import (
     load_benchmark_bars_from_csv,
+    load_factor_scores_from_csv,
     load_price_bars_from_csv,
     load_stock_pool_from_csv,
 )
@@ -118,6 +119,39 @@ class DataLoaderTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "unsupported A-share symbol format"):
             load_stock_pool_from_csv(path)
+
+    def test_loads_external_factor_scores(self) -> None:
+        csv_content = """date,symbol,score
+2024-01-02,000001,1.5
+2024-01-02,600519,-0.2
+2024/01/03,000001,0
+"""
+        path = _write_temp_csv(csv_content)
+
+        scores = load_factor_scores_from_csv(path)
+
+        self.assertEqual(1.5, scores[date(2024, 1, 2)]["000001"])
+        self.assertEqual(-0.2, scores[date(2024, 1, 2)]["600519"])
+        self.assertEqual(0.0, scores[date(2024, 1, 3)]["000001"])
+
+    def test_rejects_duplicate_external_factor_score(self) -> None:
+        csv_content = """date,symbol,score
+2024-01-02,000001,1
+2024-01-02,000001,2
+"""
+        path = _write_temp_csv(csv_content)
+
+        with self.assertRaisesRegex(ValueError, "duplicate factor score"):
+            load_factor_scores_from_csv(path)
+
+    def test_rejects_non_finite_external_factor_score(self) -> None:
+        csv_content = """date,symbol,score
+2024-01-02,000001,nan
+"""
+        path = _write_temp_csv(csv_content)
+
+        with self.assertRaisesRegex(ValueError, "score must be finite"):
+            load_factor_scores_from_csv(path)
 
 
 def _write_temp_csv(content: str) -> Path:

@@ -26,6 +26,7 @@ from .config import (
 )
 from .data_loader import (
     load_benchmark_bars_from_csv,
+    load_factor_scores_from_csv,
     load_price_bars_from_csv,
     load_stock_pool_from_csv,
 )
@@ -90,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--symbol-group-csv",
         type=str,
         help="可选代码分组 CSV 路径。必填列为 symbol、group；用于行业/板块暴露分析。",
+    )
+    parser.add_argument(
+        "--factor-score-csv",
+        type=str,
+        help="可选外部因子评分 CSV 路径。必填列为 date、symbol、score；调仓日优先使用外部分数选股。",
     )
     parser.add_argument(
         "--validate-csv",
@@ -157,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="选择回测使用的价格字段，可选 close 或 adjusted_close。",
     )
     parser.add_argument("--top-n", type=int, help="每次调仓选取的股票数量。")
+    parser.add_argument(
+        "--selection-mode",
+        choices=["top", "bottom"],
+        help="选股方向：top 选择高分标的，bottom 选择低分标的，默认 top。",
+    )
     parser.add_argument("--max-group-positions", type=int, help="每个代码分组最多入选股票数量；需配合 symbol_group_csv。")
     parser.add_argument("--lot-size", type=int, help="每手股数，A 股默认使用 100。")
     parser.add_argument("--rebalance-days", type=int, help="调仓间隔天数。")
@@ -261,6 +272,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     benchmark_bars = _load_benchmark_bars(args)
     stock_pool_by_date = _load_stock_pool(backtest_config)
     symbol_groups = _load_symbol_groups(backtest_config)
+    factor_scores_by_date = _load_factor_scores(backtest_config)
     if benchmark_bars is not None:
         benchmark_bars = _filter_bars_by_date_range(
             benchmark_bars,
@@ -292,6 +304,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         benchmark_bars=benchmark_bars,
         stock_pool_by_date=stock_pool_by_date,
         symbol_groups=symbol_groups,
+        factor_scores_by_date=factor_scores_by_date,
     )
     artifact_paths = persist_run_outputs(
         output_dir=backtest_config.output_dir,
@@ -360,6 +373,7 @@ def _run_sweep(
             benchmark_bars=benchmark_bars,
             stock_pool_by_date=_load_stock_pool(run_config),
             symbol_groups=_load_symbol_groups(run_config),
+            factor_scores_by_date=_load_factor_scores(run_config),
         )
         artifact_paths = persist_run_outputs(
             output_dir=run_output_dir,
@@ -480,6 +494,7 @@ def _run_walk_forward(
             benchmark_bars=window_benchmark_bars,
             stock_pool_by_date=_load_stock_pool(run_config),
             symbol_groups=_load_symbol_groups(run_config),
+            factor_scores_by_date=_load_factor_scores(run_config),
         )
         artifact_paths = persist_run_outputs(
             output_dir=run_output_dir,
@@ -590,6 +605,7 @@ def _run_walk_forward_optimization(
                 benchmark_bars=train_benchmark_bars,
                 stock_pool_by_date=_load_stock_pool(train_config),
                 symbol_groups=_load_symbol_groups(train_config),
+                factor_scores_by_date=_load_factor_scores(train_config),
             )
             train_artifacts = persist_run_outputs(
                 output_dir=train_output_dir,
@@ -625,6 +641,7 @@ def _run_walk_forward_optimization(
             benchmark_bars=test_benchmark_bars,
             stock_pool_by_date=_load_stock_pool(test_config),
             symbol_groups=_load_symbol_groups(test_config),
+            factor_scores_by_date=_load_factor_scores(test_config),
         )
         test_artifacts = persist_run_outputs(
             output_dir=test_output_dir,
@@ -696,6 +713,12 @@ def _load_symbol_groups(config: BacktestConfig) -> dict[str, str] | None:
     if config.symbol_group_csv is None:
         return None
     return load_symbol_group_mapping(config.symbol_group_csv)
+
+
+def _load_factor_scores(config: BacktestConfig) -> dict[date, dict[str, float]] | None:
+    if config.factor_score_csv is None:
+        return None
+    return load_factor_scores_from_csv(config.factor_score_csv)
 
 
 def _filter_bars_by_date_range(
@@ -799,6 +822,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     config_kwargs: dict[str, object] = {
         "initial_cash": default_config.initial_cash,
         "top_n": default_config.top_n,
+        "selection_mode": default_config.selection_mode,
         "lot_size": default_config.lot_size,
         "max_group_positions": default_config.max_group_positions,
         "lookback_momentum": default_config.lookback_momentum,
@@ -847,6 +871,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "symbol_name_csv": default_config.symbol_name_csv,
         "stock_pool_csv": default_config.stock_pool_csv,
         "symbol_group_csv": default_config.symbol_group_csv,
+        "factor_score_csv": default_config.factor_score_csv,
         "factor_weights": default_config.factor_weights.copy(),
     }
 
@@ -859,6 +884,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     cli_overrides = {
         "initial_cash": args.initial_cash,
         "top_n": args.top_n,
+        "selection_mode": getattr(args, "selection_mode", None),
         "lot_size": args.lot_size,
         "max_group_positions": args.max_group_positions,
         "lookback_momentum": args.lookback_momentum,
@@ -917,6 +943,10 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
 
     if args.symbol_group_csv is not None:
         config_kwargs["symbol_group_csv"] = Path(args.symbol_group_csv)
+
+    factor_score_csv = getattr(args, "factor_score_csv", None)
+    if factor_score_csv is not None:
+        config_kwargs["factor_score_csv"] = Path(factor_score_csv)
 
     if args.factor_weight:
         factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
@@ -1098,6 +1128,7 @@ def _build_input_metadata(
         "benchmark_csv": args.benchmark_csv,
         "stock_pool_csv": None if config.stock_pool_csv is None else str(config.stock_pool_csv),
         "symbol_group_csv": None if config.symbol_group_csv is None else str(config.symbol_group_csv),
+        "factor_score_csv": None if config.factor_score_csv is None else str(config.factor_score_csv),
         "config": args.config,
         "sweep": bool(args.sweep),
     }
@@ -1107,6 +1138,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
     return BacktestConfig(
         initial_cash=cast(float, config_kwargs["initial_cash"]),
         top_n=cast(int, config_kwargs["top_n"]),
+        selection_mode=cast(str, config_kwargs["selection_mode"]),
         lot_size=cast(int, config_kwargs["lot_size"]),
         max_group_positions=cast(int | None, config_kwargs["max_group_positions"]),
         lookback_momentum=cast(int, config_kwargs["lookback_momentum"]),
@@ -1155,6 +1187,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
         symbol_name_csv=cast(Path | None, config_kwargs["symbol_name_csv"]),
         stock_pool_csv=cast(Path | None, config_kwargs["stock_pool_csv"]),
         symbol_group_csv=cast(Path | None, config_kwargs["symbol_group_csv"]),
+        factor_score_csv=cast(Path | None, config_kwargs["factor_score_csv"]),
         factor_weights=cast(dict[str, float], config_kwargs["factor_weights"]).copy(),
     )
 
@@ -1193,6 +1226,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
     return {
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
+        "selection_mode": config.selection_mode,
         "lot_size": config.lot_size,
         "max_group_positions": config.max_group_positions,
         "lookback_momentum": config.lookback_momentum,
@@ -1241,6 +1275,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "symbol_name_csv": config.symbol_name_csv,
         "stock_pool_csv": config.stock_pool_csv,
         "symbol_group_csv": config.symbol_group_csv,
+        "factor_score_csv": config.factor_score_csv,
         "factor_weights": config.factor_weights.copy(),
     }
 

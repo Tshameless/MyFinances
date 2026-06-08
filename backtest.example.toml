@@ -1,6 +1,7 @@
 [backtest]
 initial_cash = 1000000
 top_n = 3
+selection_mode = "top"
 max_group_positions = ""
 lot_size = 100
 lookback_momentum = 20
@@ -48,6 +49,7 @@ output_dir = "output/python"
 symbol_name_csv = "symbols.csi300.csv"
 stock_pool_csv = ""
 symbol_group_csv = ""
+factor_score_csv = ""
 
 [backtest.factor_weights]
 momentum = 0.5

@@ -12,6 +12,7 @@
 - 支持信号日和成交日分离，可配置延迟若干个交易 bar 后执行，便于模拟收盘后出信号、次日开盘或 VWAP 成交。
 - 支持动态股票池 CSV，调仓时只在当前有效股票池内开新仓，便于模拟指数成分、行业池或自定义可投池。
 - 支持等权选股、固定周期调仓、现金/股数持仓账本、A 股整手买入和基于实际成交的交易成本扣减。
+- 支持内置因子评分或外部 `date,symbol,score` 评分 CSV，并可选择高分优先或低分优先。
 - 支持目标现金权重，便于模拟保留现金缓冲或降低整体仓位。
 - 支持单票目标权重上限，降低可买标的不足或高集中组合导致的风险暴露。
 - 支持每个行业/分组最多入选数量，降低同一板块过度集中。
@@ -92,6 +93,8 @@ python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/be
 python -m python_quant.main --stock-pool-csv data/stock_pool.csv --validate-csv
 python -m python_quant.main --symbol-group-csv data/symbol_groups.csv --validate-csv
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
+python -m python_quant.main --csv data/sample_prices.csv --selection-mode bottom
+python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data/factor_scores.csv
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
 python -m python_quant.main --csv data/sample_prices.csv --lot-size 1 --initial-cash 10000
 python -m python_quant.main --csv data/sample_prices.csv --start-date 2020-01-01 --end-date 2024-12-31
@@ -124,6 +127,37 @@ lot_size = 100
 ```bash
 python -m python_quant.main --demo --lot-size 1
 ```
+
+默认策略会按因子总分从高到低选择 `top_n` 只股票。如果要做因子方向压力测试或反向信号对照，可以把选股方向改成低分优先：
+
+```toml
+selection_mode = "bottom"
+```
+
+```bash
+python -m python_quant.main --demo --selection-mode bottom
+```
+
+`selection_mode` 可选 `top` 或 `bottom`，默认 `top`。这个字段也可以放进 `[sweep]`，用于批量比较高分组合和低分组合的表现差异。
+
+如果你已经在外部完成因子工程或模型打分，可以提供一个评分 CSV，让回测直接使用外部分数：
+
+```csv
+date,symbol,score
+2024-01-04,000001,0.82
+2024-01-04,600519,1.15
+2024-01-04,000333,-0.20
+```
+
+```toml
+factor_score_csv = "data/factor_scores.csv"
+```
+
+```bash
+python -m python_quant.main --csv prices.csv --factor-score-csv data/factor_scores.csv
+```
+
+外部评分只在存在对应调仓日期时生效；没有外部分数的调仓日会回退到内置三因子评分。`selection_mode = "top"` 会选择高分标的，`selection_mode = "bottom"` 会选择低分标的，便于做 alpha 方向验证。运行清单会记录 `factor_score_csv` 的路径、大小和 SHA256。
 
 费用模型支持比例费率、最低佣金和过户费：
 

@@ -39,6 +39,7 @@ def run_backtest(
     benchmark_bars: list[PriceBar] | None = None,
     stock_pool_by_date: dict[date, set[str]] | None = None,
     symbol_groups: dict[str, str] | None = None,
+    factor_scores_by_date: dict[date, dict[str, float]] | None = None,
 ) -> BacktestResult:
     config = config or BacktestConfig()
     history_by_symbol = group_prices_by_symbol(bars)
@@ -78,7 +79,12 @@ def run_backtest(
 
         should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
         if should_rebalance:
-            factor_records = calculate_factor_score_records(aligned_history, index, config)
+            factor_records = _factor_records_for_date(
+                aligned_history,
+                index,
+                config,
+                external_scores_by_date=factor_scores_by_date,
+            )
             scores = {symbol: record.total_score for symbol, record in factor_records.items()}
             allowed_symbols = _resolve_stock_pool_for_date(stock_pool_by_date, current_date)
             selected = _build_target_holdings(
@@ -93,10 +99,11 @@ def run_backtest(
                 symbol_groups=symbol_groups,
             )
             factor_score_records.extend(
-                calculate_factor_score_records(
+                _factor_records_for_date(
                     aligned_history,
                     index,
                     config,
+                    external_scores_by_date=factor_scores_by_date,
                     selected_symbols=set(selected),
                 ).values()
             )
@@ -166,6 +173,7 @@ def run_backtest(
         total_cost=total_cost,
         rebalance_count=len(rebalance_records),
     )
+
     benchmark_curve = None
     if benchmark_bars:
         benchmark_curve = _build_benchmark_curve(
@@ -191,6 +199,43 @@ def run_backtest(
             for bar in aligned_history[symbol]
         ],
     )
+
+
+def _factor_records_for_date(
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+    *,
+    external_scores_by_date: dict[date, dict[str, float]] | None = None,
+    selected_symbols: set[str] | None = None,
+) -> dict[str, FactorScoreRecord]:
+    current_date = next(iter(aligned_history.values()))[index].date
+    external_scores = None if external_scores_by_date is None else external_scores_by_date.get(current_date)
+    if external_scores is None:
+        return calculate_factor_score_records(
+            aligned_history,
+            index,
+            config,
+            selected_symbols=selected_symbols,
+        )
+
+    selected_symbols = selected_symbols or set()
+    return {
+        symbol: FactorScoreRecord(
+            date=current_date,
+            symbol=symbol,
+            momentum=score,
+            mean_reversion=0.0,
+            low_volatility=0.0,
+            normalized_momentum=score,
+            normalized_mean_reversion=0.0,
+            normalized_low_volatility=0.0,
+            total_score=score,
+            selected=symbol in selected_symbols,
+        )
+        for symbol, score in external_scores.items()
+        if symbol in aligned_history and index < len(aligned_history[symbol])
+    }
 
 
 def _build_position_points(
@@ -271,7 +316,11 @@ def _build_target_holdings(
     }
     ranked_symbols: list[str] = []
     if candidate_scores:
-        ranked_symbols = select_symbols(candidate_scores, min(len(candidate_scores), target_size))
+        ranked_symbols = select_symbols(
+            candidate_scores,
+            min(len(candidate_scores), target_size),
+            mode=config.selection_mode,
+        )
 
     target_holdings: list[str] = list(locked_holdings)
     group_counts = _build_group_counts(target_holdings, symbol_groups)

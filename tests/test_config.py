@@ -19,6 +19,7 @@ class ConfigTests(unittest.TestCase):
                 """
 [backtest]
 top_n = 5
+selection_mode = "bottom"
 max_group_positions = 1
 rolling_risk_window = 15
 execution_delay_days = 1
@@ -40,6 +41,7 @@ output_dir = "reports"
 symbol_name_csv = "a_share_symbols.csv"
 stock_pool_csv = "stock_pool.csv"
 symbol_group_csv = "symbol_groups.csv"
+factor_score_csv = "factor_scores.csv"
 infer_limit_rate_by_symbol = true
 forward_fill_suspended_bars = true
 growth_limit_up_down_rate = 0.2
@@ -60,6 +62,7 @@ low_volatility = 0.3
             overrides = load_config_overrides_from_toml(config_path)
 
             self.assertEqual(5, overrides["top_n"])
+            self.assertEqual("bottom", overrides["selection_mode"])
             self.assertEqual(1, overrides["max_group_positions"])
             self.assertEqual(15, overrides["rolling_risk_window"])
             self.assertEqual(1, overrides["execution_delay_days"])
@@ -81,6 +84,7 @@ low_volatility = 0.3
             self.assertEqual((config_path.parent / "a_share_symbols.csv").resolve(), overrides["symbol_name_csv"])
             self.assertEqual((config_path.parent / "stock_pool.csv").resolve(), overrides["stock_pool_csv"])
             self.assertEqual((config_path.parent / "symbol_groups.csv").resolve(), overrides["symbol_group_csv"])
+            self.assertEqual((config_path.parent / "factor_scores.csv").resolve(), overrides["factor_score_csv"])
             self.assertTrue(overrides["infer_limit_rate_by_symbol"])
             self.assertTrue(overrides["forward_fill_suspended_bars"])
             self.assertEqual(0.2, overrides["growth_limit_up_down_rate"])
@@ -269,6 +273,10 @@ rebalance_every_n_days = [5, "10"]
     def test_rejects_invalid_execution_price_field(self) -> None:
         with self.assertRaisesRegex(ValueError, "execution_price_field"):
             BacktestConfig(execution_price_field="high")
+
+    def test_rejects_invalid_selection_mode(self) -> None:
+        with self.assertRaisesRegex(ValueError, "selection_mode"):
+            BacktestConfig(selection_mode="middle")
 
 
 if __name__ == "__main__":

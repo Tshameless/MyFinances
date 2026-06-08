@@ -19,6 +19,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
     {
         "initial_cash",
         "top_n",
+        "selection_mode",
         "lot_size",
         "max_group_positions",
         "lookback_momentum",
@@ -65,7 +66,9 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "end_date",
     }
 )
-_BACKTEST_PATH_FIELDS = frozenset({"output_dir", "symbol_name_csv", "stock_pool_csv", "symbol_group_csv"})
+_BACKTEST_PATH_FIELDS = frozenset(
+    {"output_dir", "symbol_name_csv", "stock_pool_csv", "symbol_group_csv", "factor_score_csv"}
+)
 _BACKTEST_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS | _BACKTEST_PATH_FIELDS | {"factor_weights"}
 _CONFIG_ALLOWED_TOP_LEVEL_TABLES = frozenset({"backtest", "sweep"})
 _SWEEP_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS - {"initial_cash"}
@@ -118,7 +121,7 @@ _FLOAT_FIELDS = frozenset(
     }
 )
 _OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate"})
-_STRING_FIELDS = frozenset({"price_field", "execution_price_field"})
+_STRING_FIELDS = frozenset({"selection_mode", "price_field", "execution_price_field"})
 _OPTIONAL_STRING_FIELDS = frozenset({"execution_price_field"})
 _DATE_FIELDS = frozenset({"start_date", "end_date"})
 _BOOL_FIELDS = frozenset({"infer_limit_flags", "infer_limit_rate_by_symbol", "forward_fill_suspended_bars"})
@@ -128,6 +131,7 @@ _BOOL_FIELDS = frozenset({"infer_limit_flags", "infer_limit_rate_by_symbol", "fo
 class BacktestConfig:
     initial_cash: float = 1_000_000.0
     top_n: int = 3
+    selection_mode: str = "top"
     lot_size: int = 100
     max_group_positions: int | None = None
     lookback_momentum: int = 20
@@ -176,6 +180,7 @@ class BacktestConfig:
     symbol_name_csv: Path | None = None
     stock_pool_csv: Path | None = None
     symbol_group_csv: Path | None = None
+    factor_score_csv: Path | None = None
     factor_weights: dict[str, float] = field(
         default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
     )
@@ -188,10 +193,14 @@ class BacktestConfig:
             object.__setattr__(self, "stock_pool_csv", self.stock_pool_csv.resolve())
         if self.symbol_group_csv is not None:
             object.__setattr__(self, "symbol_group_csv", self.symbol_group_csv.resolve())
+        if self.factor_score_csv is not None:
+            object.__setattr__(self, "factor_score_csv", self.factor_score_csv.resolve())
         if self.initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
             raise ValueError("top_n must be greater than 0.")
+        if self.selection_mode not in {"top", "bottom"}:
+            raise ValueError("selection_mode must be one of: top, bottom.")
         if self.lot_size <= 0:
             raise ValueError("lot_size must be greater than 0.")
         if self.max_group_positions is not None and self.max_group_positions <= 0:
@@ -413,6 +422,12 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
         if not symbol_group_csv.is_absolute():
             symbol_group_csv = (path.parent / symbol_group_csv).resolve()
         normalized["symbol_group_csv"] = symbol_group_csv
+
+    if "factor_score_csv" in raw_config and raw_config["factor_score_csv"] not in ("", None):
+        factor_score_csv = Path(_require_str(raw_config["factor_score_csv"], "factor_score_csv"))
+        if not factor_score_csv.is_absolute():
+            factor_score_csv = (path.parent / factor_score_csv).resolve()
+        normalized["factor_score_csv"] = factor_score_csv
 
     if "factor_weights" in raw_config:
         factor_weights = raw_config["factor_weights"]

@@ -2,6 +2,7 @@
 
 import csv
 from datetime import date, datetime
+from math import isfinite
 from pathlib import Path
 
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
@@ -201,6 +202,49 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
     return dict(sorted(stock_pool.items()))
 
 
+def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, float]]:
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Factor score CSV file not found: {path}")
+
+    scores: dict[date, dict[str, float]] = {}
+    seen_keys: set[tuple[date, str]] = set()
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"date", "symbol", "score"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            raise ValueError(f"Factor score CSV missing required columns: {missing_str}")
+
+        for line_number, row in enumerate(reader, start=2):
+            parsed_date = _parse_date(row.get("date"), line_number)
+            symbol = (row.get("symbol") or "").strip()
+            if not symbol:
+                raise ValueError(f"Line {line_number}: symbol is empty.")
+            if not is_a_share_symbol(symbol):
+                raise ValueError(
+                    f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
+                )
+            key = (parsed_date, symbol)
+            if key in seen_keys:
+                raise ValueError(
+                    "Line "
+                    f"{line_number}: duplicate factor score for {symbol} "
+                    f"on {parsed_date.isoformat()}."
+                )
+            seen_keys.add(key)
+            scores.setdefault(parsed_date, {})[symbol] = _parse_float(
+                row.get("score"),
+                "score",
+                line_number,
+            )
+
+    if not scores:
+        raise ValueError("Factor score CSV does not contain any scores.")
+    return dict(sorted(scores.items()))
+
+
 def _parse_date(raw_value: str | None, line_number: int) -> date:
     value = (raw_value or "").strip()
     for fmt in _DATE_FORMATS:
@@ -232,6 +276,26 @@ def _parse_positive_float(
             raise ValueError(f"Line {line_number}: {field_name} must be >= 0.")
     elif parsed <= 0:
         raise ValueError(f"Line {line_number}: {field_name} must be > 0.")
+    if not isfinite(parsed):
+        raise ValueError(f"Line {line_number}: {field_name} must be finite.")
+    return parsed
+
+
+def _parse_float(
+    raw_value: str | None,
+    field_name: str,
+    line_number: int,
+) -> float:
+    value = (raw_value or "").strip()
+    if not value:
+        raise ValueError(f"Line {line_number}: {field_name} is empty.")
+
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"Line {line_number}: invalid {field_name} '{value}'.") from exc
+    if not isfinite(parsed):
+        raise ValueError(f"Line {line_number}: {field_name} must be finite.")
     return parsed
 
 
