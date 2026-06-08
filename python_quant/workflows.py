@@ -67,7 +67,7 @@ def run_sweep(
         raise ValueError("配置文件中未找到 [sweep] 配置段。")
 
     batch_output_dir = base_config.output_dir / "batch_runs"
-    combinations = _expand_sweep_combinations(sweep_overrides)
+    combinations = expand_sweep_combinations(sweep_overrides)
 
     rows = _map_jobs(
         [
@@ -252,7 +252,7 @@ def run_walk_forward_optimization(
     sweep_overrides = load_sweep_overrides_from_toml(args.config)
     if not sweep_overrides:
         raise ValueError("配置文件中未找到 [sweep] 配置段。")
-    combinations = _expand_sweep_combinations(sweep_overrides)
+    combinations = expand_sweep_combinations(sweep_overrides)
     dates = sorted({bar.date for bar in bars})
     windows = build_walk_forward_train_test_windows(
         dates,
@@ -346,7 +346,7 @@ def run_walk_forward_optimization(
             health_summary = candidate["health_summary"]
             override_values = candidate["overrides"]
             metric_value = _metric_value_for_rank(train_result, args.rank_by)
-            candidate_key = _health_aware_rank_key(metric_value, health_summary)
+            candidate_key = health_aware_rank_key(metric_value, health_summary)
             if best_candidate_key is None or candidate_key > best_candidate_key:
                 best_metric = metric_value
                 best_candidate_key = candidate_key
@@ -470,7 +470,7 @@ def _run_sweep_case(
         print_console=False,
         config_sources=build_config_sources(args, sweep_overrides=override_values),
     )
-    return _build_batch_row(
+    return build_batch_row(
         run_id=run_id,
         config=run_config,
         overrides=override_values,
@@ -570,7 +570,7 @@ def filter_bars_by_date_range(
     return filtered
 
 
-def _expand_sweep_combinations(
+def expand_sweep_combinations(
     sweep_overrides: dict[str, list[object]],
 ) -> list[dict[str, object]]:
     field_names = list(sweep_overrides.keys())
@@ -580,7 +580,7 @@ def _expand_sweep_combinations(
     return combinations
 
 
-def _build_batch_row(
+def build_batch_row(
     *,
     run_id: str,
     config: BacktestConfig,
@@ -662,7 +662,7 @@ def _summary_value(summary: dict[str, object], key: str) -> object:
     return summary.get(key, "")
 
 
-def _health_aware_rank_key(
+def health_aware_rank_key(
     metric_value: float,
     health_summary: dict[str, object],
 ) -> tuple[float, float, float, float, float, float]:

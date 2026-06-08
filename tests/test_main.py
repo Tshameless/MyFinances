@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import contextlib
@@ -10,17 +10,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from python_quant.cli_config import build_backtest_config, config_hash
 from python_quant.config import load_sweep_overrides_from_toml
-from python_quant.main import (
-    _build_backtest_config,
-    _build_batch_row,
-    _config_hash,
-    _expand_sweep_combinations,
-    _health_aware_rank_key,
-    main,
-)
+from python_quant.main import main
 from python_quant.models import BacktestMetrics, BacktestResult
 from python_quant.sample_data import generate_demo_bars
+from python_quant.workflows import (
+    build_batch_row,
+    expand_sweep_combinations,
+    health_aware_rank_key,
+)
 from scripts.dev_check import _check_manifest_artifacts
 
 
@@ -356,7 +355,7 @@ rebalance_every_n_days = [2, 3]
             self.assertIn("Walk-forward 优化 HTML 报告已保存", buffer.getvalue())
 
     def test_expands_sweep_combinations(self) -> None:
-        combinations = _expand_sweep_combinations(
+        combinations = expand_sweep_combinations(
             {
                 "top_n": [2, 3],
                 "rebalance_every_n_days": [5, 10],
@@ -410,7 +409,7 @@ rebalance_every_n_days = [5, 10]
         )
         output_dir = Path("D:/project/MyFinances/output/python/batch_runs/run_001")
 
-        row = _build_batch_row(
+        row = build_batch_row(
             run_id="run_001",
             config=type("ConfigLike", (), {"output_dir": output_dir})(),
             overrides={"top_n": 2},
@@ -480,7 +479,7 @@ rebalance_every_n_days = [5, 10]
                 ),
             )
 
-            row = _build_batch_row(
+            row = build_batch_row(
                 run_id="run_001",
                 config=type("ConfigLike", (), {"output_dir": output_dir})(),
                 overrides={},
@@ -501,7 +500,7 @@ rebalance_every_n_days = [5, 10]
             self.assertEqual("Max drawdown;Factor correlation", row["failed_gate_names"])
 
     def test_health_aware_rank_key_prefers_gate_passing_candidate(self) -> None:
-        passing_key = _health_aware_rank_key(
+        passing_key = health_aware_rank_key(
             0.05,
             {
                 "score": 70,
@@ -511,7 +510,7 @@ rebalance_every_n_days = [5, 10]
                 "critical_warnings": 0,
             },
         )
-        failing_key = _health_aware_rank_key(
+        failing_key = health_aware_rank_key(
             0.50,
             {
                 "score": 95,
@@ -576,7 +575,7 @@ rebalance_every_n_days = [5, 10]
                 factor_weight=None,
             )
 
-            config = _build_backtest_config(args)
+            config = build_backtest_config(args)
 
             self.assertTrue(config.output_dir.is_absolute())
 
@@ -631,7 +630,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual(1, config.lot_size)
 
@@ -687,7 +686,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual("bottom", config.selection_mode)
 
@@ -745,7 +744,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual("external", config.score_source)
 
@@ -800,7 +799,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual("open", config.execution_price_field)
 
@@ -855,7 +854,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual(1, config.execution_delay_days)
 
@@ -910,7 +909,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual(12, config.rolling_risk_window)
 
@@ -970,7 +969,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual(0.25, config.max_allowed_drawdown)
         self.assertEqual(0.04, config.max_allowed_daily_var)
@@ -1034,7 +1033,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertTrue(config.forward_fill_suspended_bars)
 
@@ -1089,7 +1088,7 @@ rebalance_every_n_days = [5, 10]
             factor_weight=None,
         )
 
-        config = _build_backtest_config(args)
+        config = build_backtest_config(args)
 
         self.assertEqual("2024-01-10", config.start_date.isoformat())
         self.assertEqual("2024-02-20", config.end_date.isoformat())
@@ -1146,7 +1145,7 @@ rebalance_every_n_days = [5, 10]
         )
 
         with patch.dict(os.environ, {"MYFINANCES_RUN_TIMESTAMP": "20260102-030405"}):
-            config = _build_backtest_config(args)
+            config = build_backtest_config(args)
 
         self.assertIn("output", config.output_dir.parts)
         self.assertIn("runs", config.output_dir.parts)
@@ -1169,8 +1168,8 @@ rebalance_every_n_days = [5, 10]
             "top_n": 4,
         }
 
-        self.assertEqual(_config_hash(base), _config_hash(changed_output))
-        self.assertNotEqual(_config_hash(base), _config_hash(changed_parameter))
+        self.assertEqual(config_hash(base), config_hash(changed_output))
+        self.assertNotEqual(config_hash(base), config_hash(changed_parameter))
 
     def test_validate_csv_cli_checks_inputs_without_writing_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

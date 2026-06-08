@@ -3,14 +3,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
 from .backtest import run_backtest
-from .cli_config import build_backtest_config as _build_backtest_config
-from .cli_config import build_config_sources as _build_config_sources
-from .cli_config import config_hash
+from .cli_config import build_backtest_config, build_config_sources
 from .console_output import print_single_run_artifacts
 from .data_loader import (
     load_benchmark_bars_from_csv,
@@ -33,15 +31,6 @@ from .models import PriceBar
 from .run_outputs import persist_run_outputs
 from .sample_data import generate_demo_bars
 from .trading_rules import apply_inferred_limit_flags
-from .workflows import (
-    _build_batch_row as _build_batch_row,
-)
-from .workflows import (
-    _expand_sweep_combinations as _expand_sweep_combinations,
-)
-from .workflows import (
-    _health_aware_rank_key as _health_aware_rank_key,
-)
 from .workflows import (
     build_input_metadata as _build_input_metadata,
 )
@@ -285,7 +274,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         _validate_csv_inputs(args, parser)
         return
 
-    backtest_config = _build_backtest_config(args)
+    backtest_config = build_backtest_config(args)
     bars = _filter_bars_by_date_range(
         _load_bars(args, parser),
         start_date=backtest_config.start_date,
@@ -312,7 +301,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             bars,
             benchmark_bars,
             base_config=backtest_config,
-            build_config_sources=_build_config_sources,
+            build_config_sources=build_config_sources,
         )
         return
 
@@ -322,7 +311,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             bars,
             benchmark_bars,
             base_config=backtest_config,
-            build_config_sources=_build_config_sources,
+            build_config_sources=build_config_sources,
         )
         return
 
@@ -335,7 +324,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             bars,
             benchmark_bars,
             base_config=backtest_config,
-            build_config_sources=_build_config_sources,
+            build_config_sources=build_config_sources,
         )
         return
 
@@ -353,7 +342,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         config=backtest_config,
         inputs=_build_input_metadata(args, backtest_config),
         print_console=True,
-        config_sources=_build_config_sources(args),
+        config_sources=build_config_sources(args),
     )
     print_single_run_artifacts(artifact_paths)
 
@@ -465,10 +454,6 @@ def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentPars
         print(f"外部因子评分每日分布 CSV 已保存：{score_report_paths['factor_score_quality_distribution_by_date_csv']}")
     if not loaded_any:
         parser.error("--validate-csv 需要配合 --csv、--benchmark-csv、--stock-pool-csv、--symbol-group-csv 或 --factor-score-csv 使用。")
-
-
-def _config_hash(config_kwargs: Mapping[str, object]) -> str:
-    return config_hash(config_kwargs)
 
 
 if __name__ == "__main__":
