@@ -349,7 +349,7 @@ symbol,group
 300750,新能源
 ```
 
-如果配置文件包含 `[sweep]`，可以配合 `--sweep` 一次运行多组参数。批量结果默认输出到 `output_dir/batch_runs/`。
+如果配置文件包含 `[sweep]`，可以配合 `--sweep` 一次运行多组参数。批量结果默认输出到 `output_dir/batch_runs/`。参数网格较大时可加 `--jobs 4` 并行运行多个候选。
 
 也可以执行 walk-forward 滚动窗口验证：
 
@@ -365,7 +365,7 @@ python -m python_quant.main --demo --walk-forward --walk-window 30 --walk-step 1
 python -m python_quant.main --demo --config backtest.example.toml --walk-optimize --walk-train-window 40 --walk-test-window 20 --walk-step 20 --rank-by annualized_return
 ```
 
-该流程会在每个训练窗口内运行 `[sweep]` 参数网格，按 `--rank-by` 选择最佳参数，再把该参数应用到紧随其后的测试窗口。结果默认输出到 `output_dir/walk_forward_optimization/`。
+该流程会在每个训练窗口内运行 `[sweep]` 参数网格，按 `--rank-by` 选择最佳参数，再把该参数应用到紧随其后的测试窗口。结果默认输出到 `output_dir/walk_forward_optimization/`。训练候选同样支持 `--jobs` 并行。
 
 也可以安装后直接运行：
 
@@ -433,6 +433,7 @@ python -m pip install -e .[dev]
 - `performance_summary.csv`：核心绩效指标和基准对比。
 - `performance_summary.json`：机器可读的绩效摘要，包含样本内/样本外切分表现。
 - `config_effective.json`：本次运行最终生效配置快照，包含配置文件、CLI 覆盖和默认值合并后的结果，便于复现实验。
+- `config_sources.json`：配置来源追踪，按字段标记来自默认值、TOML、CLI、sweep override 或派生默认输出目录。
 - `drawdown.csv` / `drawdown.json`：逐日回撤序列，包含当前权益、历史峰值、峰值日期、回撤、水下标记、连续水下天数、最长回撤持续期、95% 日 VaR、Expected Shortfall 和最差单日收益；JSON 摘要会标出最终是否已修复回撤。
 - `monthly_returns.csv` / `monthly_returns.json`：月度收益表，包含每月起止日期、月度收益和最佳/最差月份摘要。
 - `rolling_risk.csv` / `rolling_risk.json`：默认 20 期滚动风险分析，可通过 `rolling_risk_window` 或 `--rolling-risk-window` 调整，包含窗口收益、年化收益、年化波动、滚动夏普、窗口最大回撤、窗口胜率和最差窗口摘要。
@@ -442,24 +443,24 @@ python -m pip install -e .[dev]
 - `report.html`：单次回测网页报告。
 - `batch_runs/batch_summary.csv`：批量扫描汇总表。
 - `batch_runs/batch_summary.json`：批量扫描汇总 JSON。
-- `batch_runs/batch_leaderboard.csv`：按指标排序的批量排行榜。
+- `batch_runs/batch_leaderboard.csv`：按指标排序的批量排行榜，包含失败闸门摘要、主要失败闸门类别/名称，以及是否匹配推荐参数档位。
 - `batch_runs/best_run.json`：当前批量结果中的最佳运行。
 - `batch_runs/batch_annualized_return.svg`：批量结果对比图。
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
 - `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、推荐依据、推荐总结、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
 - `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率、最差回撤、推荐档位标记，以及“排序指标最优 / 综合分最优”标记。
 - `batch_runs/batch_report.html`：批量扫描网页报告。
-- `walk_forward/walk_forward.csv/json` 和 `walk_forward/walk_forward_report.html`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要；HTML 报告会展示验证结论、核心指标卡片和窗口预览。
-- `walk_forward_optimization/walk_forward_optimization.csv/json` 和 `walk_forward_optimization/walk_forward_optimization_report.html`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、漂移最频繁参数、退化窗口参数组合、主导参数集、样本外稳定等级和过拟合风险摘要；HTML 报告会集中展示过拟合风险、参数漂移和退化窗口参数组合。
+- `walk_forward/walk_forward.csv/json` 和 `walk_forward/walk_forward_report.html`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要；HTML 报告会展示验证结论、核心指标卡片、窗口预览、窗口年化收益图和最大回撤图。
+- `walk_forward_optimization/walk_forward_optimization.csv/json` 和 `walk_forward_optimization/walk_forward_optimization_report.html`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、漂移最频繁参数、退化窗口参数组合、主导参数集、样本外稳定等级和过拟合风险摘要；HTML 报告会集中展示过拟合风险、参数漂移、退化窗口参数组合、测试年化收益图、训练/测试差距图和参数漂移图。
 - `price_data_quality_report.csv/json`：`--validate-csv` 生成的行情数据质量报告，JSON 摘要会按本次 `execution_price_field` 统计缺失执行价行数和覆盖率。
 - `benchmark_quality_report.csv/json`：`--validate-csv --benchmark-csv ...` 生成的基准数据质量报告，检查基准日期是否覆盖行情日期、复权价缺失、异常日收益和最大单日波动。
 - `stock_pool_quality_report.csv/json`：`--validate-csv --stock-pool-csv ...` 生成的股票池质量报告，检查空日期、空代码、非法代码、重复日期-代码组合，以及在同时提供行情 CSV 时的缺失/多余股票池标的。
 - `symbol_group_quality_report.csv/json`：`--validate-csv --symbol-group-csv ...` 生成的分组映射质量报告，检查缺列、空代码、空分组、重复代码，以及在同时提供行情 CSV 时的缺失/多余映射。
-- `factor_score_quality_report.csv/json` 和 `factor_score_quality_distribution_by_date.csv`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合、整体与按日期的评分均值/标准差/重复率/极端值数量，以及在同时提供行情 CSV 时的评分日期/标的覆盖率；每日分布 CSV 便于用表格筛查异常评分日期。
+- `factor_score_quality_report.csv/json` 和 `factor_score_quality_distribution_by_date.csv`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合、整体与按日期的评分均值/标准差/重复率/极端值数量、异常评分日期摘要，以及在同时提供行情 CSV 时的评分日期/标的覆盖率；每日分布 CSV 便于用表格筛查异常评分日期。
 
 当前版本的输出风格已经按 A 股中文阅读场景做过收缩：
 
 - CSV 表头默认使用“中文 / 英文代码”顺序，例如 `日期 / date`、`方案编号 / scheme_label`、`内部编号 / run_id`。
 - 单次网页报告会展示核心结论、当前持仓、调仓摘要、基准复盘和持仓代码说明。
-- 批量网页报告会展示研究结论、最优参数、结果观察、最优结果和中文图表。
+- 批量网页报告会展示研究结论、最优参数、推荐参数匹配率、结果观察、最优结果和中文图表。
 - 批量 JSON 会额外提供 `reader_friendly` 摘要块，方便直接读取最佳方案、最弱方案和排序指标。

@@ -87,6 +87,12 @@ _ZH_LABELS = {
     "gate_failures": "策略闸门失败数",
     "health_warnings": "策略预警数",
     "critical_warnings": "严重预警数",
+    "failed_gate_count": "失败闸门数",
+    "primary_failed_gate_category": "主要失败闸门类别",
+    "primary_failed_gate_name": "主要失败闸门",
+    "failed_gate_summary": "失败闸门摘要",
+    "matches_recommended_parameters": "匹配推荐参数",
+    "recommended_parameter_mismatch": "推荐参数差异",
     "periods": "周期数",
     "benchmark_total_return": "基准总收益",
     "benchmark_annualized_return": "基准年化收益",
@@ -149,6 +155,7 @@ _ZH_LABELS = {
     "end_date": "结束日期",
     "equity_curve_csv": "净值曲线CSV",
     "config_effective_json": "最终生效配置JSON",
+    "config_sources_json": "配置来源JSON",
     "run_manifest_json": "运行清单JSON",
     "equity_curve_svg": "净值曲线图",
     "positions_csv": "每日持仓账本CSV",
@@ -567,6 +574,18 @@ def save_effective_config(
     return target_path
 
 
+def save_config_sources(
+    *,
+    output_dir: Path,
+    config_sources: dict[str, object],
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_path = output_dir / "config_sources.json"
+    with target_path.open("w", encoding="utf-8") as handle:
+        json.dump(config_sources, handle, ensure_ascii=False, indent=2)
+    return target_path
+
+
 def save_single_run_report_html(
     *,
     output_dir: Path,
@@ -819,12 +838,14 @@ def save_batch_rankings(
     output_dir: Path,
     *,
     rank_by: str = "annualized_return",
+    recommended_parameters: dict[str, object] | None = None,
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     _validate_rank_metric(rows, rank_by)
     ranked_rows = _sort_rows_by_metric(rows, rank_by)
     for index, row in enumerate(ranked_rows, start=1):
         row["rank"] = index
+        _attach_batch_leaderboard_diagnostics(row, recommended_parameters or {})
 
     csv_path = output_dir / "batch_leaderboard.csv"
     json_path = output_dir / "batch_leaderboard.json"
@@ -865,6 +886,59 @@ def _build_batch_export_headers(headers: list[str]) -> list[str]:
     insert_at = ordered_headers.index("rank") + 1 if "rank" in ordered_headers else 0
     ordered_headers[insert_at:insert_at] = ["scheme_label", "run_id"]
     return ordered_headers
+
+
+def _attach_batch_leaderboard_diagnostics(
+    row: dict[str, object],
+    recommended_parameters: dict[str, object],
+) -> None:
+    failed_categories = _split_delimited_text(row.get("failed_gate_categories"))
+    failed_names = _split_delimited_text(row.get("failed_gate_names"))
+    row["failed_gate_count"] = max(len(failed_names), _float_metric(row, "gate_failures", default=0.0))
+    row["primary_failed_gate_category"] = failed_categories[0] if failed_categories else ""
+    row["primary_failed_gate_name"] = failed_names[0] if failed_names else ""
+    row["failed_gate_summary"] = _failed_gate_summary(failed_categories, failed_names)
+    matches, mismatches = _recommended_parameter_match(row, recommended_parameters)
+    row["matches_recommended_parameters"] = matches
+    row["recommended_parameter_mismatch"] = "; ".join(mismatches)
+
+
+def _split_delimited_text(value: object) -> list[str]:
+    if value in (None, ""):
+        return []
+    return [
+        item.strip()
+        for item in str(value).split(";")
+        if item.strip()
+    ]
+
+
+def _failed_gate_summary(categories: list[str], names: list[str]) -> str:
+    if not categories and not names:
+        return ""
+    category_text = ",".join(categories) if categories else "-"
+    name_text = ",".join(names) if names else "-"
+    return f"{category_text} | {name_text}"
+
+
+def _recommended_parameter_match(
+    row: dict[str, object],
+    recommended_parameters: dict[str, object],
+) -> tuple[bool, list[str]]:
+    if not recommended_parameters:
+        return False, []
+    mismatches = []
+    matched_any = False
+    for parameter, recommended_value in sorted(recommended_parameters.items()):
+        row_value = row.get(parameter)
+        if row_value is None:
+            mismatches.append(f"{parameter}=<missing> expected {recommended_value}")
+            continue
+        if str(row_value) == str(recommended_value):
+            matched_any = True
+            continue
+        mismatches.append(f"{parameter}={row_value} expected {recommended_value}")
+    return matched_any and not mismatches, mismatches
 
 
 def _build_batch_json_summary(rows: list[dict[str, object]]) -> dict[str, object]:
@@ -1041,25 +1115,7 @@ def save_batch_report_html(
 <head>
   <meta charset="utf-8" />
   <title>A股参数研究报告</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
-    h1, h2 {{ margin: 0 0 16px; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }}
-    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef2f7; font-size: 14px; }}
-    th {{ color: #52606d; font-weight: 600; }}
-    ul {{ margin: 0; padding-left: 20px; }}
-    img {{ width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }}
-    .muted {{ color: #52606d; margin-bottom: 16px; }}
-    .wide {{ grid-column: 1 / -1; }}
-    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
-    .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }}
-    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
-    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
-    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
-    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
-  </style>
+  <style>{_report_base_css(include_images=True)}</style>
 </head>
 <body>
   <h1>A股参数扫描报告</h1>
@@ -1152,29 +1208,13 @@ def save_walk_forward_report_html(
     )
     table_rows = _build_analysis_preview_rows(rows, headers)
     artifact_links = _build_artifact_links(artifacts or {})
+    chart_blocks = _build_walk_forward_chart_blocks(rows, summary, optimization=optimization)
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <title>{escape(title)}</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
-    h1, h2 {{ margin: 0 0 16px; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }}
-    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef2f7; font-size: 14px; }}
-    th {{ color: #52606d; font-weight: 600; }}
-    ul {{ margin: 0; padding-left: 20px; }}
-    .muted {{ color: #52606d; margin-bottom: 16px; }}
-    .wide {{ grid-column: 1 / -1; }}
-    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
-    .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }}
-    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
-    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
-    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
-    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
-  </style>
+  <style>{_report_base_css(include_images=False)}</style>
 </head>
 <body>
   <h1>{escape(title)}</h1>
@@ -1193,6 +1233,7 @@ def save_walk_forward_report_html(
       <h2>产物清单</h2>
       <ul>{artifact_links}</ul>
     </div>
+    {"".join(chart_blocks)}
     <div class="card wide">
       <h2>窗口预览</h2>
       <table>
@@ -1222,6 +1263,32 @@ def _build_batch_conclusion(
         f"本次共完成 {run_count} 组 A 股参数试验，当前最佳方案为 {run_label}（{run_id}），"
         f"排序指标 {_display_label(rank_by)} 为 {best_value}。"
     )
+
+
+def _report_base_css(*, include_images: bool) -> str:
+    image_css = (
+        "img { width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }\n"
+        if include_images
+        else ""
+    )
+    return f"""
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
+    h1, h2 {{ margin: 0 0 16px; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }}
+    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef2f7; font-size: 14px; }}
+    th {{ color: #52606d; font-weight: 600; }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    {image_css}    .muted {{ color: #52606d; margin-bottom: 16px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }}
+    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
+    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
+    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
+    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+    """
 
 
 def _build_walk_forward_conclusion(summary: dict[str, object]) -> str:
@@ -1295,6 +1362,80 @@ def _build_walk_forward_optimization_observation_rows(summary: dict[str, object]
         ("退化窗口参数组合", _format_degraded_parameter_sets(summary)),
     ]
     return _build_html_table_rows(rows)
+
+
+def _build_walk_forward_chart_blocks(
+    rows: list[dict[str, object]],
+    summary: dict[str, object],
+    *,
+    optimization: bool,
+) -> list[str]:
+    if optimization:
+        chart_specs = [
+            (
+                "测试窗口年化收益",
+                _chart_points(rows, "window_id", "test_annualized_return"),
+                "#2f9e44",
+                "年化收益",
+            ),
+            (
+                "训练/测试年化差距",
+                _chart_points(rows, "window_id", "train_test_annualized_gap"),
+                "#f08c00",
+                "年化差距",
+            ),
+            (
+                "参数漂移次数",
+                _count_chart_points(summary, "parameter_drift_counts"),
+                "#5c7cfa",
+                "漂移次数",
+            ),
+        ]
+    else:
+        chart_specs = [
+            (
+                "Walk-forward窗口年化收益",
+                _chart_points(rows, "window_id", "annualized_return"),
+                "#2f9e44",
+                "年化收益",
+            ),
+            (
+                "Walk-forward窗口最大回撤",
+                _chart_points(rows, "window_id", "max_drawdown"),
+                "#e03131",
+                "最大回撤",
+            ),
+        ]
+    return [
+        f'<div class="card wide"><h2>{escape(title)}</h2>{svg}</div>'
+        for title, points, color, y_label in chart_specs
+        for svg in [
+            _build_bar_chart_svg(
+                title=title,
+                points=points,
+                bar_color=color,
+                y_axis_label=y_label,
+            )
+        ]
+    ]
+
+
+def _chart_points(rows: list[dict[str, object]], label_key: str, value_key: str) -> list[tuple[str, float]]:
+    return [
+        (str(row.get(label_key, index + 1)), _coerce_float(row.get(value_key, 0.0)))
+        for index, row in enumerate(rows)
+        if row.get(value_key) not in (None, "")
+    ]
+
+
+def _count_chart_points(summary: dict[str, object], key: str) -> list[tuple[str, float]]:
+    counts = summary.get(key)
+    if not isinstance(counts, dict):
+        return []
+    return [
+        (str(name), _coerce_float(count))
+        for name, count in sorted(counts.items())
+    ]
 
 
 def _build_analysis_preview_rows(rows: list[dict[str, object]], headers: list[str]) -> str:
@@ -1428,6 +1569,9 @@ def _build_batch_observation_rows(
                 ("推荐参数档位", _format_best_parameter_values(stability_summary)),
                 ("参数推荐依据", _format_parameter_recommendation_rationale(stability_summary)),
                 ("参数推荐总结", _format_parameter_recommendation_summary(stability_summary)),
+                ("推荐参数匹配方案数", _format_recommended_match_count(sorted_rows)),
+                ("推荐参数匹配率", _format_recommended_match_rate(sorted_rows)),
+                ("最佳推荐参数匹配方案", _format_best_recommended_match(sorted_rows)),
                 ("建议动作", _format_recommended_action_first(stability_summary)),
                 ("建议动作数量", _format_list_count(stability_summary, "recommended_actions")),
             ]
@@ -1436,6 +1580,33 @@ def _build_batch_observation_rows(
         f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
         for label, value in rows
     )
+
+
+def _recommended_match_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        row
+        for row in rows
+        if row.get("matches_recommended_parameters") is True
+    ]
+
+
+def _format_recommended_match_count(rows: list[dict[str, object]]) -> str:
+    if not rows or not any("matches_recommended_parameters" in row for row in rows):
+        return "-"
+    return str(len(_recommended_match_rows(rows)))
+
+
+def _format_recommended_match_rate(rows: list[dict[str, object]]) -> str:
+    if not rows or not any("matches_recommended_parameters" in row for row in rows):
+        return "-"
+    return f"{len(_recommended_match_rows(rows)) / len(rows):.2%}"
+
+
+def _format_best_recommended_match(rows: list[dict[str, object]]) -> str:
+    matched_rows = _recommended_match_rows(rows)
+    if not matched_rows:
+        return "-"
+    return _format_run_label(matched_rows[0], rows.index(matched_rows[0]) + 1)
 
 
 def _format_metric_value(metric: str, value: object) -> str:

@@ -130,10 +130,12 @@ class RunOutputsTests(unittest.TestCase):
                 config=config,
                 inputs={"demo": True, "csv": None, "benchmark_csv": None, "stock_pool_csv": None, "symbol_group_csv": str(symbol_group_csv), "config": None, "sweep": False},
                 print_console=False,
+                config_sources={"field_sources": {"top_n": "default", "price_field": "cli"}},
             )
 
             self.assertTrue(paths["run_manifest_json"].exists())
             self.assertTrue(paths["config_effective_json"].exists())
+            self.assertTrue(paths["config_sources_json"].exists())
             self.assertTrue(paths["price_data_quality_report_csv"].exists())
             self.assertTrue(paths["price_data_quality_report_json"].exists())
             self.assertTrue(paths["factor_ic_csv"].exists())
@@ -158,6 +160,7 @@ class RunOutputsTests(unittest.TestCase):
             self.assertTrue(paths["strategy_health_gates_csv"].exists())
             manifest = json.loads(paths["run_manifest_json"].read_text(encoding="utf-8"))
             self.assertIn("config_effective_json", manifest["artifacts"])
+            self.assertIn("config_sources_json", manifest["artifacts"])
             self.assertIn("factor_group_returns_csv", manifest["artifacts"])
             self.assertIn("factor_decay_csv", manifest["artifacts"])
             self.assertIn("factor_decay_json", manifest["artifacts"])
@@ -185,6 +188,8 @@ class RunOutputsTests(unittest.TestCase):
             effective_config = json.loads(paths["config_effective_json"].read_text(encoding="utf-8"))
             self.assertEqual(config.top_n, effective_config["top_n"])
             self.assertEqual(config.execution_price_field_effective, effective_config["execution_price_field_effective"])
+            config_sources = json.loads(paths["config_sources_json"].read_text(encoding="utf-8"))
+            self.assertEqual("cli", config_sources["field_sources"]["price_field"])
             rolling_risk = json.loads(paths["rolling_risk_json"].read_text(encoding="utf-8"))
             self.assertEqual(2, rolling_risk["summary"]["window"])
             strategy_health = json.loads(paths["strategy_health_json"].read_text(encoding="utf-8"))

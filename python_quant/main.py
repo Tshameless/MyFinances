@@ -5,11 +5,12 @@ import hashlib
 import json
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from itertools import product
 from pathlib import Path
-from typing import Mapping, cast
+from typing import Mapping, TypedDict, TypeVar, cast
 
 from .analysis import (
     build_batch_stability_analysis,
@@ -60,6 +61,16 @@ from .reporting_csv import (
 from .run_outputs import persist_run_outputs
 from .sample_data import generate_demo_bars
 from .trading_rules import apply_inferred_limit_flags
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+class _TrainCandidateResult(TypedDict):
+    result: BacktestResult
+    artifacts: dict[str, Path]
+    health_summary: dict[str, object]
+    overrides: dict[str, object]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="annualized_return",
         help="批量扫描结果的排序指标，默认值为 annualized_return。",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="批量扫描和 walk-forward 优化的并行任务数，默认 1 表示串行。",
     )
     parser.add_argument(
         "--output-dir",
@@ -321,6 +338,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         config=backtest_config,
         inputs=_build_input_metadata(args, backtest_config),
         print_console=True,
+        config_sources=_build_config_sources(args),
     )
     print(f"净值曲线 CSV 已保存：{artifact_paths['equity_curve_csv']}")
     print(f"调仓日志 CSV 已保存：{artifact_paths['rebalance_log_csv']}")
@@ -347,6 +365,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
     print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
     print(f"最终生效配置 JSON 已保存：{artifact_paths['config_effective_json']}")
+    print(f"配置来源 JSON 已保存：{artifact_paths['config_sources_json']}")
     print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
     print(f"净值图 SVG 已保存：{artifact_paths['equity_curve_svg']}")
     print(f"HTML 报告已保存：{artifact_paths['report_html']}")
@@ -370,47 +389,39 @@ def _run_sweep(
     rows: list[dict[str, object]] = []
     combinations = _expand_sweep_combinations(sweep_overrides)
 
-    for run_number, override_values in enumerate(combinations, start=1):
-        run_id = f"run_{run_number:03d}"
-        run_output_dir = batch_output_dir / run_id
-        config_kwargs = _config_to_kwargs(base_config)
-        config_kwargs.update(override_values)
-        config_kwargs["output_dir"] = run_output_dir
-        run_config = _build_config_from_mapping(config_kwargs)
-        result = run_backtest(
-            bars,
-            run_config,
+    rows = _map_jobs(
+        [
+            (run_number, override_values)
+            for run_number, override_values in enumerate(combinations, start=1)
+        ],
+        lambda item: _run_sweep_case(
+            args=args,
+            bars=bars,
             benchmark_bars=benchmark_bars,
-            stock_pool_by_date=_load_stock_pool(run_config),
-            symbol_groups=_load_symbol_groups(run_config),
-            factor_scores_by_date=_load_factor_scores(run_config),
-        )
-        artifact_paths = persist_run_outputs(
-            output_dir=run_output_dir,
-            result=result,
-            config=run_config,
-            inputs=_build_input_metadata(args, run_config),
-            print_console=False,
-        )
-        rows.append(
-            _build_batch_row(
-                run_id=run_id,
-                config=run_config,
-                overrides=override_values,
-                result=result,
-                artifact_paths=artifact_paths,
-            )
-        )
+            base_config=base_config,
+            batch_output_dir=batch_output_dir,
+            run_number=item[0],
+            override_values=item[1],
+        ),
+        jobs=args.jobs,
+    )
 
     summary_csv_path, summary_json_path = save_batch_summary(rows, batch_output_dir)
-    stability_paths = save_batch_stability_files(
-        build_batch_stability_analysis(rows, rank_by=args.rank_by),
-        batch_output_dir,
+    stability_analysis = build_batch_stability_analysis(rows, rank_by=args.rank_by)
+    stability_paths = save_batch_stability_files(stability_analysis, batch_output_dir)
+    stability_summary = stability_analysis.get("summary")
+    recommended_parameters = (
+        stability_summary.get("best_parameter_values", {})
+        if isinstance(stability_summary, dict)
+        else {}
     )
     leaderboard_csv_path, leaderboard_json_path, best_run_path = save_batch_rankings(
         rows,
         batch_output_dir,
         rank_by=args.rank_by,
+        recommended_parameters=(
+            recommended_parameters if isinstance(recommended_parameters, dict) else {}
+        ),
     )
     batch_chart_path = save_batch_chart_svg(
         rows,
@@ -514,6 +525,7 @@ def _run_walk_forward(
             config=run_config,
             inputs=_build_input_metadata(args, run_config),
             print_console=False,
+            config_sources=_build_config_sources(args),
         )
         rows.append(
             {
@@ -545,6 +557,59 @@ def _run_walk_forward(
     print(f"Walk-forward 汇总 CSV 已保存：{paths['walk_forward_csv']}")
     print(f"Walk-forward 汇总 JSON 已保存：{paths['walk_forward_json']}")
     print(f"Walk-forward HTML 报告已保存：{report_path}")
+
+
+def _run_sweep_case(
+    *,
+    args: argparse.Namespace,
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+    base_config: BacktestConfig,
+    batch_output_dir: Path,
+    run_number: int,
+    override_values: dict[str, object],
+) -> dict[str, object]:
+    run_id = f"run_{run_number:03d}"
+    run_output_dir = batch_output_dir / run_id
+    config_kwargs = _config_to_kwargs(base_config)
+    config_kwargs.update(override_values)
+    config_kwargs["output_dir"] = run_output_dir
+    run_config = _build_config_from_mapping(config_kwargs)
+    result = run_backtest(
+        bars,
+        run_config,
+        benchmark_bars=benchmark_bars,
+        stock_pool_by_date=_load_stock_pool(run_config),
+        symbol_groups=_load_symbol_groups(run_config),
+        factor_scores_by_date=_load_factor_scores(run_config),
+    )
+    artifact_paths = persist_run_outputs(
+        output_dir=run_output_dir,
+        result=result,
+        config=run_config,
+        inputs=_build_input_metadata(args, run_config),
+        print_console=False,
+        config_sources=_build_config_sources(args, sweep_overrides=override_values),
+    )
+    return _build_batch_row(
+        run_id=run_id,
+        config=run_config,
+        overrides=override_values,
+        result=result,
+        artifact_paths=artifact_paths,
+    )
+
+
+def _map_jobs(
+    items: list[T],
+    worker: Callable[[T], R],
+    *,
+    jobs: int,
+) -> list[R]:
+    if jobs <= 1 or len(items) <= 1:
+        return [worker(item) for item in items]
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        return list(executor.map(worker, items))
 
 
 def _run_walk_forward_optimization(
@@ -610,31 +675,29 @@ def _run_walk_forward_optimization(
         best_overrides: dict[str, object] | None = None
         best_metric = float("-inf")
         best_candidate_key: tuple[float, float, float, float, float, float] | None = None
-        for combo_number, override_values in enumerate(combinations, start=1):
-            train_output_dir = optimize_output_dir / window_id / "train_candidates" / f"candidate_{combo_number:03d}"
-            config_kwargs = _config_to_kwargs(base_config)
-            config_kwargs.update(override_values)
-            config_kwargs["start_date"] = train_start
-            config_kwargs["end_date"] = train_end
-            config_kwargs["output_dir"] = train_output_dir
-            train_config = _build_config_from_mapping(config_kwargs)
-            train_result = run_backtest(
-                train_bars,
-                train_config,
-                benchmark_bars=train_benchmark_bars,
-                stock_pool_by_date=_load_stock_pool(train_config),
-                symbol_groups=_load_symbol_groups(train_config),
-                factor_scores_by_date=_load_factor_scores(train_config),
-            )
-            train_artifacts = persist_run_outputs(
-                output_dir=train_output_dir,
-                result=train_result,
-                config=train_config,
-                inputs=_build_input_metadata(args, train_config),
-                print_console=False,
-            )
+        candidate_results: list[_TrainCandidateResult] = _map_jobs(
+            [
+                (combo_number, override_values)
+                for combo_number, override_values in enumerate(combinations, start=1)
+            ],
+            lambda item: _run_walk_forward_train_candidate(
+                args=args,
+                train_bars=train_bars,
+                train_benchmark_bars=train_benchmark_bars,
+                base_config=base_config,
+                train_output_dir=optimize_output_dir / window_id / "train_candidates" / f"candidate_{item[0]:03d}",
+                train_start=train_start,
+                train_end=train_end,
+                override_values=item[1],
+            ),
+            jobs=args.jobs,
+        )
+        for candidate in candidate_results:
+            train_result = candidate["result"]
+            train_artifacts = candidate["artifacts"]
+            health_summary = candidate["health_summary"]
+            override_values = candidate["overrides"]
             metric_value = _metric_value_for_rank(train_result, args.rank_by)
-            health_summary = _load_json_summary(train_artifacts.get("strategy_health_json"))
             candidate_key = _health_aware_rank_key(metric_value, health_summary)
             if best_candidate_key is None or candidate_key > best_candidate_key:
                 best_metric = metric_value
@@ -668,6 +731,7 @@ def _run_walk_forward_optimization(
             config=test_config,
             inputs=_build_input_metadata(args, test_config),
             print_console=False,
+            config_sources=_build_config_sources(args, sweep_overrides=best_overrides),
         )
         row: dict[str, object] = {
             "window_id": window_id,
@@ -713,6 +777,47 @@ def _run_walk_forward_optimization(
     print(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
     print(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
     print(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
+
+
+def _run_walk_forward_train_candidate(
+    *,
+    args: argparse.Namespace,
+    train_bars: list[PriceBar],
+    train_benchmark_bars: list[PriceBar] | None,
+    base_config: BacktestConfig,
+    train_output_dir: Path,
+    train_start: date,
+    train_end: date,
+    override_values: dict[str, object],
+) -> _TrainCandidateResult:
+    config_kwargs = _config_to_kwargs(base_config)
+    config_kwargs.update(override_values)
+    config_kwargs["start_date"] = train_start
+    config_kwargs["end_date"] = train_end
+    config_kwargs["output_dir"] = train_output_dir
+    train_config = _build_config_from_mapping(config_kwargs)
+    train_result = run_backtest(
+        train_bars,
+        train_config,
+        benchmark_bars=train_benchmark_bars,
+        stock_pool_by_date=_load_stock_pool(train_config),
+        symbol_groups=_load_symbol_groups(train_config),
+        factor_scores_by_date=_load_factor_scores(train_config),
+    )
+    train_artifacts = persist_run_outputs(
+        output_dir=train_output_dir,
+        result=train_result,
+        config=train_config,
+        inputs=_build_input_metadata(args, train_config),
+        print_console=False,
+        config_sources=_build_config_sources(args, sweep_overrides=override_values),
+    )
+    return {
+        "result": train_result,
+        "artifacts": train_artifacts,
+        "health_summary": _load_json_summary(train_artifacts.get("strategy_health_json")),
+        "overrides": override_values,
+    }
 
 
 def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[PriceBar]:
@@ -927,7 +1032,53 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         has_explicit_output_dir = "output_dir" in config_overrides
         config_kwargs.update(config_overrides)
 
-    cli_overrides = {
+    cli_overrides = _cli_config_overrides(args)
+    for key, value in cli_overrides.items():
+        if value is not None:
+            config_kwargs[key] = value
+
+    if args.output_dir is not None:
+        config_kwargs["output_dir"] = Path(args.output_dir)
+        has_explicit_output_dir = True
+
+    if args.stock_pool_csv is not None:
+        config_kwargs["stock_pool_csv"] = Path(args.stock_pool_csv)
+
+    if args.symbol_group_csv is not None:
+        config_kwargs["symbol_group_csv"] = Path(args.symbol_group_csv)
+
+    factor_score_csv = getattr(args, "factor_score_csv", None)
+    if factor_score_csv is not None:
+        config_kwargs["factor_score_csv"] = Path(factor_score_csv)
+
+    if args.factor_weight:
+        factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
+        factor_weights.update(_parse_factor_weight_overrides(args.factor_weight))
+        config_kwargs["factor_weights"] = factor_weights
+
+    if not has_explicit_output_dir:
+        config_kwargs["output_dir"] = _build_default_run_output_dir(config_kwargs)
+
+    return _build_config_from_mapping(config_kwargs)
+
+
+def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
+    parsed: dict[str, float] = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"无效的因子权重配置：'{entry}'。请使用 factor_name=value 格式。"
+            )
+        name, raw_value = entry.split("=", 1)
+        factor_name = name.strip()
+        if not factor_name:
+            raise ValueError("因子权重名称不能为空。")
+        parsed[factor_name] = float(raw_value.strip())
+    return parsed
+
+
+def _cli_config_overrides(args: argparse.Namespace) -> dict[str, object | None]:
+    return {
         "initial_cash": args.initial_cash,
         "top_n": args.top_n,
         "selection_mode": getattr(args, "selection_mode", None),
@@ -978,48 +1129,47 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "start_date": _parse_cli_date(args.start_date, "start_date"),
         "end_date": _parse_cli_date(args.end_date, "end_date"),
     }
-    for key, value in cli_overrides.items():
-        if value is not None:
-            config_kwargs[key] = value
 
+
+def _build_config_sources(
+    args: argparse.Namespace,
+    *,
+    sweep_overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    toml_overrides = load_config_overrides_from_toml(args.config) if args.config else {}
+    cli_overrides = {
+        key
+        for key, value in _cli_config_overrides(args).items()
+        if value is not None
+    }
     if args.output_dir is not None:
-        config_kwargs["output_dir"] = Path(args.output_dir)
-        has_explicit_output_dir = True
-
+        cli_overrides.add("output_dir")
     if args.stock_pool_csv is not None:
-        config_kwargs["stock_pool_csv"] = Path(args.stock_pool_csv)
-
+        cli_overrides.add("stock_pool_csv")
     if args.symbol_group_csv is not None:
-        config_kwargs["symbol_group_csv"] = Path(args.symbol_group_csv)
-
-    factor_score_csv = getattr(args, "factor_score_csv", None)
-    if factor_score_csv is not None:
-        config_kwargs["factor_score_csv"] = Path(factor_score_csv)
-
+        cli_overrides.add("symbol_group_csv")
+    if getattr(args, "factor_score_csv", None) is not None:
+        cli_overrides.add("factor_score_csv")
     if args.factor_weight:
-        factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
-        factor_weights.update(_parse_factor_weight_overrides(args.factor_weight))
-        config_kwargs["factor_weights"] = factor_weights
+        cli_overrides.add("factor_weights")
 
-    if not has_explicit_output_dir:
-        config_kwargs["output_dir"] = _build_default_run_output_dir(config_kwargs)
-
-    return _build_config_from_mapping(config_kwargs)
-
-
-def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
-    parsed: dict[str, float] = {}
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(
-                f"无效的因子权重配置：'{entry}'。请使用 factor_name=value 格式。"
-            )
-        name, raw_value = entry.split("=", 1)
-        factor_name = name.strip()
-        if not factor_name:
-            raise ValueError("因子权重名称不能为空。")
-        parsed[factor_name] = float(raw_value.strip())
-    return parsed
+    field_sources: dict[str, str] = {}
+    field_names = sorted(set(_config_to_kwargs(BacktestConfig()).keys()) | set(toml_overrides) | cli_overrides)
+    for field_name in field_names:
+        if sweep_overrides and field_name in sweep_overrides:
+            field_sources[field_name] = "sweep_override"
+        elif field_name in cli_overrides:
+            field_sources[field_name] = "cli"
+        elif field_name in toml_overrides:
+            field_sources[field_name] = "toml"
+        else:
+            field_sources[field_name] = "default"
+    if args.output_dir is None and "output_dir" not in toml_overrides:
+        field_sources["output_dir"] = "derived_default"
+    return {
+        "config_file": args.config,
+        "field_sources": field_sources,
+    }
 
 
 def _parse_cli_date(raw_value: str | None, field_name: str) -> date | None:

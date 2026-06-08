@@ -582,6 +582,7 @@ def build_factor_score_quality_report(
         and (expected_symbols is None or str(row["symbol"]) in expected_symbols)
     }
     score_distribution = _score_distribution_summary(score_values)
+    score_distribution_by_date = _score_distribution_by_date(score_values_by_date)
     summary = {
         "row_count": len(rows),
         "date_count": len(dates),
@@ -601,7 +602,8 @@ def build_factor_score_quality_report(
         "unique_score_count": score_distribution["unique_score_count"],
         "duplicate_score_rate": score_distribution["duplicate_score_rate"],
         "extreme_score_count": score_distribution["extreme_score_count"],
-        "score_distribution_by_date": _score_distribution_by_date(score_values_by_date),
+        "score_distribution_by_date": score_distribution_by_date,
+        "score_distribution_warnings": _score_distribution_warnings(score_distribution_by_date),
         "missing_expected_symbols": len(missing_expected_symbols),
         "extra_scored_symbols": len(extra_scored_symbols),
         "missing_expected_symbol_list": missing_expected_symbols,
@@ -633,6 +635,45 @@ def _score_distribution_by_date(score_values_by_date: dict[str, list[float]]) ->
             }
         )
     return rows
+
+
+def _score_distribution_warnings(distribution_rows: list[dict[str, object]]) -> dict[str, object]:
+    high_duplicate_dates = [
+        str(row["date"])
+        for row in distribution_rows
+        if _summary_float(row, "duplicate_score_rate") >= 0.80
+    ]
+    low_stddev_dates = [
+        str(row["date"])
+        for row in distribution_rows
+        if _summary_int(row, "score_count") > 1 and _summary_float(row, "score_stddev") <= 1e-12
+    ]
+    extreme_score_dates = [
+        str(row["date"])
+        for row in distribution_rows
+        if _summary_int(row, "extreme_score_count") > 0
+    ]
+    return {
+        "high_duplicate_score_dates": high_duplicate_dates,
+        "low_stddev_score_dates": low_stddev_dates,
+        "extreme_score_dates": extreme_score_dates,
+        "warning_date_count": len(set(high_duplicate_dates + low_stddev_dates + extreme_score_dates)),
+    }
+
+
+def _summary_float(row: dict[str, object], key: str) -> float:
+    value = row.get(key)
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        return float(value)
+    return 0.0
+
+
+def _summary_int(row: dict[str, object], key: str) -> int:
+    return int(_summary_float(row, key))
 
 
 def _score_distribution_summary(score_values: list[float]) -> dict[str, object]:

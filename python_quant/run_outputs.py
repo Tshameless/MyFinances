@@ -26,6 +26,7 @@ from .reporting import (
     load_symbol_group_mapping,
     load_symbol_name_mapping,
     print_summary,
+    save_config_sources,
     save_effective_config,
     save_equity_chart_svg,
     save_equity_curve,
@@ -76,6 +77,7 @@ def persist_run_outputs(
     config: BacktestConfig,
     inputs: dict[str, str | bool | None],
     print_console: bool,
+    config_sources: dict[str, object] | None = None,
 ) -> dict[str, Path]:
     symbol_names = load_symbol_name_mapping(config.symbol_name_csv)
     symbol_groups = load_symbol_group_mapping(config.symbol_group_csv)
@@ -272,6 +274,11 @@ def persist_run_outputs(
         result.benchmark_curve,
     )
     effective_config_path = save_effective_config(output_dir=output_dir, config=config)
+    config_sources_path = (
+        None
+        if config_sources is None
+        else save_config_sources(output_dir=output_dir, config_sources=config_sources)
+    )
     artifact_paths = {
         "equity_curve_csv": equity_path,
         "equity_curve_svg": equity_chart_path,
@@ -323,6 +330,8 @@ def persist_run_outputs(
         "performance_summary_json": summary_json_path,
         "config_effective_json": effective_config_path,
     }
+    if config_sources_path is not None:
+        artifact_paths["config_sources_json"] = config_sources_path
     artifact_paths.update(factor_score_quality_paths)
     manifest_path = save_run_manifest(
         output_dir=output_dir,

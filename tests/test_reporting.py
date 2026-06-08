@@ -431,12 +431,18 @@ class ReportingTests(unittest.TestCase):
                 {
                     "run_id": "run_001",
                     "annualized_return": 0.2,
+                    "gate_status": "fail",
+                    "gate_failures": 2,
+                    "failed_gate_categories": "risk;factor",
+                    "failed_gate_names": "Max drawdown;Factor correlation",
                     "param_top_n": 2,
                     "param_rebalance_every_n_days": 5,
                 },
                 {
                     "run_id": "run_002",
                     "annualized_return": 0.3,
+                    "gate_status": "pass",
+                    "gate_failures": 0,
                     "param_top_n": 3,
                     "param_rebalance_every_n_days": 5,
                 },
@@ -446,6 +452,10 @@ class ReportingTests(unittest.TestCase):
                 rows,
                 output_dir,
                 rank_by="annualized_return",
+                recommended_parameters={
+                    "param_top_n": "3",
+                    "param_rebalance_every_n_days": "5",
+                },
             )
             chart_path = save_batch_chart_svg(rows, output_dir, metric="annualized_return")
             heatmap_path = save_batch_heatmap_svg(
@@ -466,12 +476,21 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual("方案2", leaderboard_payload["reader_friendly"]["best_scheme"])
             self.assertEqual("run_002", leaderboard_payload["reader_friendly"]["best_internal_id"])
             self.assertEqual("run_002", leaderboard_payload["rows"][0]["run_id"])
+            self.assertTrue(leaderboard_payload["rows"][0]["matches_recommended_parameters"])
+            self.assertEqual("", leaderboard_payload["rows"][0]["recommended_parameter_mismatch"])
+            self.assertEqual("risk", leaderboard_payload["rows"][1]["primary_failed_gate_category"])
+            self.assertEqual("Max drawdown", leaderboard_payload["rows"][1]["primary_failed_gate_name"])
+            self.assertEqual(2, leaderboard_payload["rows"][1]["failed_gate_count"])
+            self.assertFalse(leaderboard_payload["rows"][1]["matches_recommended_parameters"])
+            self.assertIn("param_top_n=2 expected 3", leaderboard_payload["rows"][1]["recommended_parameter_mismatch"])
             self.assertEqual("run_002", best_payload["best_run"]["run_id"])
             self.assertEqual("方案2", best_payload["reader_friendly"]["best_scheme"])
             self.assertEqual("run_002", best_payload["reader_friendly"]["best_internal_id"])
             leaderboard_content = leaderboard_csv.read_text(encoding="utf-8-sig")
             self.assertIn("方案编号 / scheme_label", leaderboard_content)
             self.assertIn("内部编号 / run_id", leaderboard_content)
+            self.assertIn("失败闸门摘要 / failed_gate_summary", leaderboard_content)
+            self.assertIn("匹配推荐参数 / matches_recommended_parameters", leaderboard_content)
             self.assertIn("方案1", leaderboard_content)
             self.assertIn("run_002", leaderboard_content)
             chart_content = chart_path.read_text(encoding="utf-8-sig")
@@ -700,6 +719,8 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("A股Walk-forward验证报告", content)
             self.assertIn("验证结论", content)
             self.assertIn("正收益窗口占比", content)
+            self.assertIn("Walk-forward窗口年化收益", content)
+            self.assertIn("Walk-forward窗口最大回撤", content)
             self.assertIn("window_001", content)
 
     def test_saves_walk_forward_optimization_report_html(self) -> None:
@@ -753,6 +774,9 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("A股Walk-forward优化报告", content)
             self.assertIn("样本外稳定等级", content)
             self.assertIn("过拟合风险", content)
+            self.assertIn("测试窗口年化收益", content)
+            self.assertIn("训练/测试年化差距", content)
+            self.assertIn("参数漂移次数", content)
             self.assertIn("漂移最频繁参数", content)
             self.assertIn("退化窗口参数组合", content)
             self.assertIn("param_top_n=3", content)
@@ -1557,6 +1581,7 @@ class ReportingTests(unittest.TestCase):
                     "health_score": 80.0,
                     "gate_status": "pass",
                     "gate_failures": 0,
+                    "matches_recommended_parameters": True,
                 },
                 {
                     "run_id": "run_002",
@@ -1568,6 +1593,7 @@ class ReportingTests(unittest.TestCase):
                     "health_score": 60.0,
                     "gate_status": "fail",
                     "gate_failures": 2,
+                    "matches_recommended_parameters": False,
                 },
             ]
             stability_path = output_dir / "batch_stability.json"
@@ -1647,6 +1673,10 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("参数推荐总结", content)
             self.assertIn("按平均综合分推荐参数", content)
             self.assertIn("排序指标最优与综合分推荐不一致", content)
+            self.assertIn("推荐参数匹配方案数", content)
+            self.assertIn("推荐参数匹配率", content)
+            self.assertIn("最佳推荐参数匹配方案", content)
+            self.assertIn("50.00%", content)
             self.assertIn("建议动作", content)
             self.assertIn("风险闸门频繁失败", content)
             self.assertIn("建议动作数量", content)

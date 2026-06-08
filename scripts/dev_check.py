@@ -12,6 +12,7 @@ SMOKE_OUTPUT_DIR = PROJECT_ROOT / "output" / "dev_check_smoke"
 SMOKE_ARTIFACTS = (
     "run_manifest.json",
     "config_effective.json",
+    "config_sources.json",
     "report.html",
     "equity_curve.csv",
     "rolling_risk.csv",
@@ -129,6 +130,7 @@ def _run_smoke() -> None:
         "strategy_health_csv",
         "strategy_health_gates_csv",
         "config_effective_json",
+        "config_sources_json",
         "suspension_analysis_csv",
         "suspension_daily_csv",
         "turnover_analysis_csv",

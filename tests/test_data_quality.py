@@ -313,6 +313,26 @@ class DataQualityTests(unittest.TestCase):
             self.assertIn("date,score_count", distribution_content)
             self.assertIn("2024-01-02,1", distribution_content)
 
+    def test_factor_score_quality_flags_suspicious_score_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            score_path = Path(temp_dir) / "factor_scores.csv"
+            score_path.write_text(
+                "date,symbol,score\n"
+                "2024-01-02,000001,1\n"
+                "2024-01-02,000002,1\n"
+                "2024-01-02,000003,1\n"
+                "2024-01-02,000004,1\n"
+                "2024-01-02,000005,1\n",
+                encoding="utf-8",
+            )
+
+            report = build_factor_score_quality_report(score_path)
+
+            warnings = report.summary["score_distribution_warnings"]
+            self.assertEqual(["2024-01-02"], warnings["low_stddev_score_dates"])
+            self.assertEqual(["2024-01-02"], warnings["high_duplicate_score_dates"])
+            self.assertEqual(1, warnings["warning_date_count"])
+
 
 if __name__ == "__main__":
     unittest.main()
