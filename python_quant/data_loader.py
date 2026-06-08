@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import os
+import pickle
 from datetime import date, datetime
 from math import isfinite
 from pathlib import Path
+from typing import Any
 
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
@@ -16,16 +20,130 @@ _DATE_FORMATS = (
 )
 
 
+def _get_cache_path(csv_path: Path) -> Path:
+    stat = csv_path.stat()
+    key = f"{csv_path.absolute()}_{stat.st_size}_{stat.st_mtime}"
+    hash_str = hashlib.md5(key.encode("utf-8")).hexdigest()
+    cache_dir = csv_path.parent / ".cache" / "data_loader"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{csv_path.name}_{hash_str}.pkl"
+
+
+def _load_from_cache(cache_path: Path) -> Any | None:
+    try:
+        if cache_path.exists():
+            with cache_path.open("rb") as f:
+                return pickle.load(f)
+    except Exception:
+        pass
+    return None
+
+
+def _save_to_cache(cache_path: Path, data: Any) -> None:
+    try:
+        with cache_path.open("wb") as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception:
+        pass
+
+
 def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"CSV file not found: {path}")
+
+    cache_path = _get_cache_path(path)
+    cached_data = _load_from_cache(cache_path)
+    if cached_data is not None:
+        return cached_data
 
     bars: list[PriceBar] = []
     seen_keys: set[tuple[date, str]] = set()
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         required = {"date", "symbol", "close"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            raise DataValidationError(f"CSV missing required columns: {missing_str}")
+
+        for line_number, row in enumerate(reader, start=2):
+            symbol = (row.get("symbol") or "").strip()
+            if not symbol:
+                raise DataValidationError(f"Line {line_number}: symbol is empty.")
+            if not is_a_share_symbol(symbol):
+                raise DataValidationError(
+                    f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
+                )
+
+            parsed_date = _parse_date(row.get("date"), line_number)
+            close_value = _parse_positive_float(row.get("close"), "close", line_number)
+
+            key = (parsed_date, symbol)
+            if key in seen_keys:
+                raise DataValidationError(
+                    f"Line {line_number}: duplicate bar for {symbol} on {parsed_date.isoformat()}."
+                )
+            seen_keys.add(key)
+
+            adjusted_close = _parse_optional_float(
+                row.get("adjusted_close"),
+                "adjusted_close",
+                line_number,
+            )
+            open_price = _parse_optional_float(
+                row.get("open"),
+                "open",
+                line_number,
+            )
+            vwap = _parse_optional_float(
+                row.get("vwap"),
+                "vwap",
+                line_number,
+            )
+            volume = None
+            if row.get("volume") not in (None, ""):
+                volume = _parse_positive_float(
+                    row.get("volume"),
+                    "volume",
+                    line_number,
+                    allow_zero=True,
+                )
+
+            tradable = _parse_boolean(row.get("tradable"), line_number, default=True)
+            can_buy = _parse_boolean(
+                row.get("can_buy"),
+                line_number,
+                default=tradable,
+            )
+            can_sell = _parse_boolean(
+                row.get("can_sell"),
+                line_number,
+                default=tradable,
+            )
+            is_suspended = _parse_boolean(
+                row.get("is_suspended") or row.get("suspended"),
+                line_number,
+                default=False,
+            )
+            is_limit_up = _parse_boolean(row.get("is_limit_up"), line_number, default=False)
+            is_limit_down = _parse_boolean(row.get("is_limit_down"), line_number, default=False)
+            is_st = _parse_boolean(row.get("is_st"), line_number, default=False)
+            limit_rate = _parse_optional_rate(row.get("limit_rate"), "limit_rate", line_number)
+            bars.append(
+                PriceBar(
+                    date=parsed_date,
+                    symbol=symbol,
+                    close=close_value,
+                    adjusted_close=adjusted_close,
+                    open=open_price,
+                    vwap=vwap,
+                    volume=volume,
+                    tradable=tradable,
+                    can_buy=can_buy,
+                    can_sell=can_sell,
+                    is_suspended=is_suspended,
+                    is_limit_up=is_limit_up,
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_str = ", ".join(sorted(missing))
@@ -115,6 +233,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
             )
 
     bars.sort(key=lambda item: (item.date, item.symbol))
+    _save_to_cache(cache_path, bars)
     return bars
 
 
@@ -124,6 +243,11 @@ def load_benchmark_bars_from_csv(
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"Benchmark CSV file not found: {path}")
+
+    cache_path = _get_cache_path(path)
+    cached_data = _load_from_cache(cache_path)
+    if cached_data is not None:
+        return cached_data
 
     bars: list[PriceBar] = []
     seen_dates: set[date] = set()
@@ -161,6 +285,7 @@ def load_benchmark_bars_from_csv(
             )
 
     bars.sort(key=lambda item: item.date)
+    _save_to_cache(cache_path, bars)
     return bars
 
 
@@ -168,6 +293,11 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"Stock pool CSV file not found: {path}")
+
+    cache_path = _get_cache_path(path)
+    cached_data = _load_from_cache(cache_path)
+    if cached_data is not None:
+        return cached_data
 
     stock_pool: dict[date, set[str]] = {}
     seen_keys: set[tuple[date, str]] = set()
@@ -200,13 +330,20 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
 
     if not stock_pool:
         raise DataValidationError("Stock pool CSV does not contain any symbols.")
-    return dict(sorted(stock_pool.items()))
+    result = dict(sorted(stock_pool.items()))
+    _save_to_cache(cache_path, result)
+    return result
 
 
 def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, float]]:
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"Factor score CSV file not found: {path}")
+
+    cache_path = _get_cache_path(path)
+    cached_data = _load_from_cache(cache_path)
+    if cached_data is not None:
+        return cached_data
 
     scores: dict[date, dict[str, float]] = {}
     seen_keys: set[tuple[date, str]] = set()
@@ -243,7 +380,9 @@ def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, fl
 
     if not scores:
         raise DataValidationError("Factor score CSV does not contain any scores.")
-    return dict(sorted(scores.items()))
+    result = dict(sorted(scores.items()))
+    _save_to_cache(cache_path, result)
+    return result
 
 
 def _parse_date(raw_value: str | None, line_number: int) -> date:

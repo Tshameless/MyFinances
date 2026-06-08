@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+
 from datetime import date
 from itertools import product
 from pathlib import Path
@@ -54,6 +54,42 @@ class _TrainCandidateResult(TypedDict):
     overrides: dict[str, object]
 
 
+_WORKER_CTX: dict[str, object] = {}
+
+def _init_worker(ctx: dict[str, object]) -> None:
+    global _WORKER_CTX
+    _WORKER_CTX = ctx
+
+def _sweep_worker_wrapper(item: tuple[int, dict[str, object]]) -> dict[str, object]:
+    global _WORKER_CTX
+    return _run_sweep_case(
+        args=cast("argparse.Namespace", _WORKER_CTX["args"]),
+        bars=cast(list[PriceBar], _WORKER_CTX["bars"]),
+        benchmark_bars=cast(list[PriceBar] | None, _WORKER_CTX["benchmark_bars"]),
+        base_config=cast(BacktestConfig, _WORKER_CTX["base_config"]),
+        batch_output_dir=cast(Path, _WORKER_CTX["batch_output_dir"]),
+        run_number=item[0],
+        override_values=item[1],
+        build_config_sources=cast(ConfigSourcesBuilder, _WORKER_CTX["build_config_sources"]),
+    )
+
+def _wf_train_worker_wrapper(item: tuple[int, dict[str, object]]) -> _TrainCandidateResult:
+    global _WORKER_CTX
+    optimize_output_dir = cast(Path, _WORKER_CTX["optimize_output_dir"])
+    window_id = cast(str, _WORKER_CTX["window_id"])
+    return _run_walk_forward_train_candidate(
+        args=cast("argparse.Namespace", _WORKER_CTX["args"]),
+        train_bars=cast(list[PriceBar], _WORKER_CTX["train_bars"]),
+        train_benchmark_bars=cast(list[PriceBar] | None, _WORKER_CTX["train_benchmark_bars"]),
+        base_config=cast(BacktestConfig, _WORKER_CTX["base_config"]),
+        train_output_dir=(optimize_output_dir / window_id / "train_candidates" / f"candidate_{item[0]:03d}"),
+        train_start=cast("date", _WORKER_CTX["train_start"]),
+        train_end=cast("date", _WORKER_CTX["train_end"]),
+        override_values=item[1],
+        build_config_sources=cast(ConfigSourcesBuilder, _WORKER_CTX["build_config_sources"]),
+    )
+
+
 def run_sweep(
     args: argparse.Namespace,
     bars: list[PriceBar],
@@ -69,23 +105,37 @@ def run_sweep(
     batch_output_dir = base_config.output_dir / "batch_runs"
     combinations = expand_sweep_combinations(sweep_overrides)
 
-    rows = _map_jobs(
-        [
-            (run_number, override_values)
-            for run_number, override_values in enumerate(combinations, start=1)
-        ],
-        lambda item: _run_sweep_case(
-            args=args,
-            bars=bars,
-            benchmark_bars=benchmark_bars,
-            base_config=base_config,
-            batch_output_dir=batch_output_dir,
-            run_number=item[0],
-            override_values=item[1],
-            build_config_sources=build_config_sources,
-        ),
-        jobs=args.jobs,
-    )
+    from concurrent.futures import ProcessPoolExecutor
+
+    items = [
+        (run_number, override_values)
+        for run_number, override_values in enumerate(combinations, start=1)
+    ]
+    if args.jobs <= 1 or len(items) <= 1:
+        rows = [
+            _run_sweep_case(
+                args=args,
+                bars=bars,
+                benchmark_bars=benchmark_bars,
+                base_config=base_config,
+                batch_output_dir=batch_output_dir,
+                run_number=item[0],
+                override_values=item[1],
+                build_config_sources=build_config_sources,
+            )
+            for item in items
+        ]
+    else:
+        ctx = {
+            "args": args,
+            "bars": bars,
+            "benchmark_bars": benchmark_bars,
+            "base_config": base_config,
+            "batch_output_dir": batch_output_dir,
+            "build_config_sources": build_config_sources,
+        }
+        with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
+            rows = list(executor.map(_sweep_worker_wrapper, items))
 
     summary_csv_path, summary_json_path = save_batch_summary(rows, batch_output_dir)
     stability_analysis = build_batch_stability_analysis(rows, rank_by=args.rank_by)
@@ -306,40 +356,41 @@ def run_walk_forward_optimization(
         best_metric = float("-inf")
         best_candidate_key: tuple[float, float, float, float, float, float] | None = None
 
-        def run_train_candidate(
-            item: tuple[int, dict[str, object]],
-            *,
-            train_bars: list[PriceBar] = train_bars,
-            train_benchmark_bars: list[PriceBar] | None = train_benchmark_bars,
-            window_id: str = window_id,
-            train_start: date = train_start,
-            train_end: date = train_end,
-        ) -> _TrainCandidateResult:
-            return _run_walk_forward_train_candidate(
-                args=args,
-                train_bars=train_bars,
-                train_benchmark_bars=train_benchmark_bars,
-                base_config=base_config,
-                train_output_dir=(
-                    optimize_output_dir
-                    / window_id
-                    / "train_candidates"
-                    / f"candidate_{item[0]:03d}"
-                ),
-                train_start=train_start,
-                train_end=train_end,
-                override_values=item[1],
-                build_config_sources=build_config_sources,
-            )
-
-        candidate_results: list[_TrainCandidateResult] = _map_jobs(
-            [
-                (combo_number, override_values)
-                for combo_number, override_values in enumerate(combinations, start=1)
-            ],
-            run_train_candidate,
-            jobs=args.jobs,
-        )
+        items = [
+            (combo_number, override_values)
+            for combo_number, override_values in enumerate(combinations, start=1)
+        ]
+        
+        if args.jobs <= 1 or len(items) <= 1:
+            candidate_results = [
+                _run_walk_forward_train_candidate(
+                    args=args,
+                    train_bars=train_bars,
+                    train_benchmark_bars=train_benchmark_bars,
+                    base_config=base_config,
+                    train_output_dir=(optimize_output_dir / window_id / "train_candidates" / f"candidate_{item[0]:03d}"),
+                    train_start=train_start,
+                    train_end=train_end,
+                    override_values=item[1],
+                    build_config_sources=build_config_sources,
+                )
+                for item in items
+            ]
+        else:
+            from concurrent.futures import ProcessPoolExecutor
+            ctx = {
+                "args": args,
+                "train_bars": train_bars,
+                "train_benchmark_bars": train_benchmark_bars,
+                "base_config": base_config,
+                "optimize_output_dir": optimize_output_dir,
+                "window_id": window_id,
+                "train_start": train_start,
+                "train_end": train_end,
+                "build_config_sources": build_config_sources,
+            }
+            with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
+                candidate_results = list(executor.map(_wf_train_worker_wrapper, items))
         for candidate in candidate_results:
             train_result = candidate["result"]
             train_artifacts = candidate["artifacts"]
@@ -479,16 +530,6 @@ def _run_sweep_case(
     )
 
 
-def _map_jobs[T, R](
-    items: list[T],
-    worker: Callable[[T], R],
-    *,
-    jobs: int,
-) -> list[R]:
-    if jobs <= 1 or len(items) <= 1:
-        return [worker(item) for item in items]
-    with ThreadPoolExecutor(max_workers=jobs) as executor:
-        return list(executor.map(worker, items))
 
 
 def _run_walk_forward_train_candidate(

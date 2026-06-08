@@ -12,6 +12,20 @@ from python_quant.config import BacktestConfig
 from python_quant.models import (
     BacktestMetrics,
     EquityPoint,
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from python_quant.config import BacktestConfig
+from python_quant.models import (
+    BacktestMetrics,
+    EquityPoint,
     FactorScoreRecord,
     PositionPoint,
     RebalanceRecord,
@@ -24,20 +38,24 @@ from python_quant.reporting import (
     print_summary,
     save_batch_chart_svg,
     save_batch_heatmap_svg,
-    save_batch_rankings,
-    save_batch_report_html,
     save_equity_chart_svg,
     save_equity_curve,
     save_factor_scores,
     save_performance_summary,
-    save_performance_summary_json,
     save_positions,
     save_rebalance_log,
-    save_run_manifest,
-    save_single_run_report_html,
     save_trade_attempts,
     save_trades,
+)
+from python_quant.reporting_html import (
+    save_batch_report_html,
+    save_single_run_report_html,
     save_walk_forward_report_html,
+)
+from python_quant.reporting_json import (
+    save_batch_rankings,
+    save_performance_summary_json,
+    save_run_manifest,
 )
 from python_quant.reporting_csv import (
     save_batch_stability_files,
