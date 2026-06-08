@@ -345,11 +345,12 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     print(f"策略风险闸门 CSV 已保存：{artifact_paths['strategy_health_gates_csv']}")
     print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
     print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
+    print(f"最终生效配置 JSON 已保存：{artifact_paths['config_effective_json']}")
     print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
     print(f"净值图 SVG 已保存：{artifact_paths['equity_curve_svg']}")
     print(f"HTML 报告已保存：{artifact_paths['report_html']}")
-    print(f"Suspension analysis CSV saved: {artifact_paths['suspension_analysis_csv']}")
-    print(f"Suspension daily CSV saved: {artifact_paths['suspension_daily_csv']}")
+    print(f"停牌分析 CSV 已保存：{artifact_paths['suspension_analysis_csv']}")
+    print(f"停牌日汇总 CSV 已保存：{artifact_paths['suspension_daily_csv']}")
 
 
 def _run_sweep(

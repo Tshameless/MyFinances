@@ -432,6 +432,7 @@ python -m pip install -e .[dev]
 - `factor_correlation.csv` / `factor_correlation.json`：因子相关性矩阵，逐调仓日记录因子两两 Pearson 相关和 Rank 相关；JSON 摘要会标出平均相关性最强的因子对，辅助判断信号拥挤和冗余。
 - `performance_summary.csv`：核心绩效指标和基准对比。
 - `performance_summary.json`：机器可读的绩效摘要，包含样本内/样本外切分表现。
+- `config_effective.json`：本次运行最终生效配置快照，包含配置文件、CLI 覆盖和默认值合并后的结果，便于复现实验。
 - `drawdown.csv` / `drawdown.json`：逐日回撤序列，包含当前权益、历史峰值、峰值日期、回撤、水下标记、连续水下天数、最长回撤持续期、95% 日 VaR、Expected Shortfall 和最差单日收益；JSON 摘要会标出最终是否已修复回撤。
 - `monthly_returns.csv` / `monthly_returns.json`：月度收益表，包含每月起止日期、月度收益和最佳/最差月份摘要。
 - `rolling_risk.csv` / `rolling_risk.json`：默认 20 期滚动风险分析，可通过 `rolling_risk_window` 或 `--rolling-risk-window` 调整，包含窗口收益、年化收益、年化波动、滚动夏普、窗口最大回撤、窗口胜率和最差窗口摘要。
@@ -445,16 +446,16 @@ python -m pip install -e .[dev]
 - `batch_runs/best_run.json`：当前批量结果中的最佳运行。
 - `batch_runs/batch_annualized_return.svg`：批量结果对比图。
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
-- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位及推荐依据、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
+- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、推荐依据、推荐总结、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
 - `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率、最差回撤、推荐档位标记，以及“排序指标最优 / 综合分最优”标记。
 - `batch_runs/batch_report.html`：批量扫描网页报告。
 - `walk_forward/walk_forward.csv/json`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要。
-- `walk_forward_optimization/walk_forward_optimization.csv/json`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、主导参数集、样本外稳定等级和过拟合风险摘要。
+- `walk_forward_optimization/walk_forward_optimization.csv/json`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、漂移最频繁参数、退化窗口参数组合、主导参数集、样本外稳定等级和过拟合风险摘要。
 - `price_data_quality_report.csv/json`：`--validate-csv` 生成的行情数据质量报告，JSON 摘要会按本次 `execution_price_field` 统计缺失执行价行数和覆盖率。
 - `benchmark_quality_report.csv/json`：`--validate-csv --benchmark-csv ...` 生成的基准数据质量报告，检查基准日期是否覆盖行情日期、复权价缺失、异常日收益和最大单日波动。
 - `stock_pool_quality_report.csv/json`：`--validate-csv --stock-pool-csv ...` 生成的股票池质量报告，检查空日期、空代码、非法代码、重复日期-代码组合，以及在同时提供行情 CSV 时的缺失/多余股票池标的。
 - `symbol_group_quality_report.csv/json`：`--validate-csv --symbol-group-csv ...` 生成的分组映射质量报告，检查缺列、空代码、空分组、重复代码，以及在同时提供行情 CSV 时的缺失/多余映射。
-- `factor_score_quality_report.csv/json`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合，以及在同时提供行情 CSV 时的评分日期/标的覆盖率。
+- `factor_score_quality_report.csv/json`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合、评分均值/标准差/重复率/极端值数量，以及在同时提供行情 CSV 时的评分日期/标的覆盖率。
 
 当前版本的输出风格已经按 A 股中文阅读场景做过收缩：
 

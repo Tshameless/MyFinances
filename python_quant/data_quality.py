@@ -577,6 +577,7 @@ def build_factor_score_quality_report(
         and (expected_dates is None or str(row["date"]) in expected_date_strings)
         and (expected_symbols is None or str(row["symbol"]) in expected_symbols)
     }
+    score_distribution = _score_distribution_summary(score_values)
     summary = {
         "row_count": len(rows),
         "date_count": len(dates),
@@ -591,6 +592,11 @@ def build_factor_score_quality_report(
         "invalid_score_rows": invalid_score_rows,
         "min_score": min(score_values, default=None),
         "max_score": max(score_values, default=None),
+        "average_score": score_distribution["average_score"],
+        "score_stddev": score_distribution["score_stddev"],
+        "unique_score_count": score_distribution["unique_score_count"],
+        "duplicate_score_rate": score_distribution["duplicate_score_rate"],
+        "extreme_score_count": score_distribution["extreme_score_count"],
         "missing_expected_symbols": len(missing_expected_symbols),
         "extra_scored_symbols": len(extra_scored_symbols),
         "missing_expected_symbol_list": missing_expected_symbols,
@@ -602,6 +608,37 @@ def build_factor_score_quality_report(
         "score_coverage_rate": 0.0 if expected_cells == 0 else len(valid_scored_keys) / expected_cells,
     }
     return MappingQualityReport(summary=summary, rows=rows)
+
+
+def _score_distribution_summary(score_values: list[float]) -> dict[str, object]:
+    if not score_values:
+        return {
+            "average_score": None,
+            "score_stddev": None,
+            "unique_score_count": 0,
+            "duplicate_score_rate": 0.0,
+            "extreme_score_count": 0,
+        }
+    average_score = sum(score_values) / len(score_values)
+    variance = (
+        sum((value - average_score) ** 2 for value in score_values)
+        / len(score_values)
+    )
+    score_stddev = variance ** 0.5
+    unique_score_count = len(set(score_values))
+    duplicate_score_rate = 1.0 - unique_score_count / len(score_values)
+    extreme_score_count = (
+        0
+        if score_stddev == 0.0
+        else sum(1 for value in score_values if abs((value - average_score) / score_stddev) >= 3.0)
+    )
+    return {
+        "average_score": average_score,
+        "score_stddev": score_stddev,
+        "unique_score_count": unique_score_count,
+        "duplicate_score_rate": duplicate_score_rate,
+        "extreme_score_count": extreme_score_count,
+    }
 
 
 def save_data_quality_report(

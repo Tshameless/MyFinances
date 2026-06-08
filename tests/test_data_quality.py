@@ -278,6 +278,11 @@ class DataQualityTests(unittest.TestCase):
             self.assertEqual(["300001", "AAPL"], report.summary["extra_scored_symbol_list"])
             self.assertEqual(["2024-01-04"], report.summary["extra_score_date_list"])
             self.assertAlmostEqual(1 / 6, report.summary["score_coverage_rate"])
+            self.assertAlmostEqual(0.66, report.summary["average_score"])
+            self.assertGreater(report.summary["score_stddev"], 0.0)
+            self.assertEqual(5, report.summary["unique_score_count"])
+            self.assertEqual(0.0, report.summary["duplicate_score_rate"])
+            self.assertEqual(0, report.summary["extreme_score_count"])
 
     def test_saves_factor_score_quality_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

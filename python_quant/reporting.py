@@ -148,6 +148,7 @@ _ZH_LABELS = {
     "start_date": "开始日期",
     "end_date": "结束日期",
     "equity_curve_csv": "净值曲线CSV",
+    "config_effective_json": "最终生效配置JSON",
     "run_manifest_json": "运行清单JSON",
     "equity_curve_svg": "净值曲线图",
     "positions_csv": "每日持仓账本CSV",
@@ -545,6 +546,18 @@ def save_run_manifest(
     }
     with target_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
+    return target_path
+
+
+def save_effective_config(
+    *,
+    output_dir: Path,
+    config: BacktestConfig,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target_path = output_dir / "config_effective.json"
+    with target_path.open("w", encoding="utf-8") as handle:
+        json.dump(_serialize_config(config), handle, ensure_ascii=False, indent=2)
     return target_path
 
 
@@ -1161,14 +1174,15 @@ def _build_batch_observation_rows(
                 ("稳健热区占比", _format_summary_pct(stability_summary, "robust_region_rate")),
                 ("热区平均指标", _format_summary_number(stability_summary, "robust_region_average_metric", decimals=3)),
                 ("参数孤岛", _format_summary_field(stability_summary, "is_parameter_island")),
-                ("Gate-passing runs", _format_summary_number(stability_summary, "gate_passing_run_count", decimals=0)),
-                ("Gate-failing runs", _format_summary_number(stability_summary, "gate_failing_run_count", decimals=0)),
-                ("Most common failed gate category", _format_count_map_top(stability_summary, "failed_gate_category_counts")),
-                ("Most common failed gate", _format_count_map_top(stability_summary, "failed_gate_name_counts")),
+                ("闸门通过运行数", _format_summary_number(stability_summary, "gate_passing_run_count", decimals=0)),
+                ("闸门失败运行数", _format_summary_number(stability_summary, "gate_failing_run_count", decimals=0)),
+                ("最常失败闸门类别", _format_count_map_top(stability_summary, "failed_gate_category_counts")),
+                ("最常失败闸门", _format_count_map_top(stability_summary, "failed_gate_name_counts")),
                 ("影响最强参数", _format_summary_field(stability_summary, "strongest_parameter")),
                 ("推荐参数档位", _format_best_parameter_values(stability_summary)),
                 ("参数推荐依据", _format_parameter_recommendation_rationale(stability_summary)),
-                ("建议动作", _format_list_first(stability_summary, "recommended_actions")),
+                ("参数推荐总结", _format_parameter_recommendation_summary(stability_summary)),
+                ("建议动作", _format_recommended_action_first(stability_summary)),
                 ("建议动作数量", _format_list_count(stability_summary, "recommended_actions")),
             ]
         )
@@ -1541,12 +1555,64 @@ def _format_parameter_recommendation_rationale(summary: dict[str, object]) -> st
     return "; ".join(parts) if parts else "-"
 
 
+def _format_parameter_recommendation_summary(summary: dict[str, object]) -> str:
+    value = summary.get("parameter_recommendation_summary")
+    if not isinstance(value, str) or not value:
+        return "-"
+    return _format_recommendation_summary_text(value)
+
+
 def _format_recommendation_reason(reason: object) -> str:
     reason_key = str(reason)
     labels = {
         "highest_average_composite_score": "平均综合分最高",
     }
     return labels.get(reason_key, reason_key)
+
+
+def _format_recommended_action_first(summary: dict[str, object]) -> str:
+    values = summary.get("recommended_actions")
+    if not isinstance(values, list) or not values:
+        return "-"
+    return _format_recommended_action_text(str(values[0]))
+
+
+def _format_recommendation_summary_text(value: str) -> str:
+    text = value.replace(
+        "Recommended parameter values by average composite score:",
+        "按平均综合分推荐参数：",
+    )
+    text = text.replace(
+        "Metric and composite recommendations diverge for:",
+        "排序指标最优与综合分推荐不一致：",
+    )
+    text = text.replace("composite ", "综合分 ")
+    text = text.replace("gate pass ", "闸门通过率 ")
+    text = text.replace("metric-best=", "排序指标最优=")
+    return text
+
+
+def _format_recommended_action_text(value: str) -> str:
+    translations = {
+        "Most parameter sets passed health gates; focus on robustness, live trading assumptions, and out-of-sample validation.": "多数参数组合通过健康闸门；下一步重点检查稳健性、实盘交易假设和样本外验证。",
+        "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.": "风险闸门频繁失败：降低持仓集中度、提高现金缓冲、缩短调仓暴露，或加入回撤感知过滤。",
+        "Stability gates fail often: prefer parameter regions with smoother rolling returns and validate on longer walk-forward windows.": "稳定性闸门频繁失败：优先选择滚动收益更平滑的参数区域，并用更长 walk-forward 窗口验证。",
+        "Execution gates fail often: reduce volume participation, avoid illiquid names, increase cash buffer, or relax target turnover.": "执行闸门频繁失败：降低成交量参与率、避开低流动性标的、增加现金缓冲，或放宽目标换手。",
+        "Exposure gates fail often: tighten max_position_weight or add group constraints to reduce concentration.": "暴露闸门频繁失败：收紧 max_position_weight，或增加分组约束以降低集中度。",
+        "Attribution gates fail often: inspect return attribution residuals before trusting parameter rankings.": "归因闸门频繁失败：在信任参数排名前，先检查收益归因残差。",
+        "Turnover gates fail often: lengthen rebalance interval, require stronger signal changes, or raise holding-period constraints.": "换手闸门频繁失败：拉长调仓间隔、要求更强信号变化，或提高持仓周期约束。",
+        "Factor gates fail often: remove redundant factors, lower highly correlated factor weights, or add orthogonal signals.": "因子闸门频繁失败：移除冗余因子、降低高相关因子权重，或加入正交信号。",
+        "Ledger gates fail often: resolve accounting reconciliation issues before comparing parameter performance.": "对账闸门频繁失败：先解决账务对齐问题，再比较参数表现。",
+    }
+    translated = translations.get(value)
+    if translated is not None:
+        return translated
+    prefix = "Most common failed gate is '"
+    suffix = "'; review the single-run strategy_health_gates.csv files for affected runs first."
+    if value.startswith(prefix) and value.endswith(suffix):
+        gate_name = value[len(prefix):-len(suffix)]
+        return f"最常失败闸门是“{gate_name}”；请优先查看受影响运行的 strategy_health_gates.csv。"
+    return value
 
 
 def _format_list_first(summary: dict[str, object], key: str) -> str:

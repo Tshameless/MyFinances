@@ -26,6 +26,7 @@ from .reporting import (
     load_symbol_group_mapping,
     load_symbol_name_mapping,
     print_summary,
+    save_effective_config,
     save_equity_chart_svg,
     save_equity_curve,
     save_factor_scores,
@@ -270,6 +271,7 @@ def persist_run_outputs(
         output_dir,
         result.benchmark_curve,
     )
+    effective_config_path = save_effective_config(output_dir=output_dir, config=config)
     artifact_paths = {
         "equity_curve_csv": equity_path,
         "equity_curve_svg": equity_chart_path,
@@ -319,6 +321,7 @@ def persist_run_outputs(
         "strategy_health_json": strategy_health_paths["strategy_health_json"],
         "performance_summary_csv": summary_path,
         "performance_summary_json": summary_json_path,
+        "config_effective_json": effective_config_path,
     }
     artifact_paths.update(factor_score_quality_paths)
     manifest_path = save_run_manifest(

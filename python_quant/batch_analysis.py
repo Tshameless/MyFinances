@@ -115,6 +115,8 @@ def build_walk_forward_optimization_summary(rows: list[dict[str, object]]) -> di
     degraded_windows = sum(1 for value in gaps if value > 0.0)
     worst_degradation_row = max(enriched_rows, key=lambda row: _float_value(row, "train_test_annualized_gap"))
     parameter_stability = _selected_parameter_stability(enriched_rows)
+    parameter_drift_counts = _parameter_drift_counts(enriched_rows)
+    degraded_parameter_sets = _degraded_parameter_sets(enriched_rows)
     parameter_drift_rate = _numeric_object(parameter_stability["parameter_drift_rate"])
     summary = {
         "windows": len(enriched_rows),
@@ -141,6 +143,9 @@ def build_walk_forward_optimization_summary(rows: list[dict[str, object]]) -> di
         "dominant_parameter_set_rate": parameter_stability["dominant_parameter_set_rate"],
         "parameter_drift_count": parameter_stability["parameter_drift_count"],
         "parameter_drift_rate": parameter_stability["parameter_drift_rate"],
+        "parameter_drift_counts": parameter_drift_counts,
+        "most_drifting_parameter": _top_count_key(parameter_drift_counts),
+        "degraded_parameter_sets": degraded_parameter_sets,
         "parameter_selection_counts": parameter_stability["parameter_selection_counts"],
         "oos_stability_grade": _oos_stability_grade(
             positive_test_window_rate=positive_test_windows / len(enriched_rows),
@@ -236,6 +241,7 @@ def build_batch_stability_analysis(
         "strongest_parameter": strongest_parameter,
         "best_parameter_values": best_parameter_values,
         "parameter_recommendation_rationale": parameter_recommendation_rationale,
+        "parameter_recommendation_summary": _parameter_recommendation_summary(parameter_recommendation_rationale),
         "recommended_actions": _recommended_actions(failed_gate_category_counts, failed_gate_name_counts),
         "best_composite_run_id": max(
             scored_rows,
@@ -373,6 +379,45 @@ def _selected_parameter_stability(rows: list[dict[str, object]]) -> dict[str, ob
     }
 
 
+def _parameter_drift_counts(rows: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for previous, current in zip(rows, rows[1:], strict=False):
+        parameter_keys = sorted(
+            {
+                key
+                for row in (previous, current)
+                for key in row
+                if _is_parameter_key(key)
+            }
+        )
+        for key in parameter_keys:
+            if previous.get(key) != current.get(key):
+                counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _degraded_parameter_sets(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    degraded_rows = [
+        row
+        for row in rows
+        if bool(row.get("is_degraded_out_of_sample"))
+    ]
+    return [
+        {
+            "window_id": row.get("window_id", ""),
+            "parameter_set": _parameter_set_label(row),
+            "train_test_annualized_gap": _float_value(row, "train_test_annualized_gap"),
+            "test_annualized_return": _float_value(row, "test_annualized_return"),
+            "test_total_return": _float_value(row, "test_total_return"),
+        }
+        for row in sorted(
+            degraded_rows,
+            key=lambda item: _float_value(item, "train_test_annualized_gap"),
+            reverse=True,
+        )
+    ]
+
+
 def _parameter_set_label(row: dict[str, object]) -> str:
     items = [
         (key, str(value))
@@ -498,6 +543,28 @@ def _parameter_recommendation_rationale(
     return rationale
 
 
+def _parameter_recommendation_summary(rationale: dict[str, dict[str, object]]) -> str:
+    if not rationale:
+        return "No scanned parameters were available for recommendation."
+    parts = []
+    divergent_parameters = []
+    for parameter, payload in sorted(rationale.items()):
+        recommended_value = payload.get("recommended_value", "-")
+        gate_rate = _numeric_object(payload.get("gate_passing_rate", 0.0))
+        composite = _numeric_object(payload.get("average_composite_score", 0.0))
+        parts.append(
+            f"{parameter}={recommended_value} (composite {composite:.3f}, gate pass {gate_rate:.2%})"
+        )
+        if not bool(payload.get("is_also_best_by_metric", False)):
+            divergent_parameters.append(
+                f"{parameter} metric-best={payload.get('best_value_by_metric', '-')}"
+            )
+    summary = "Recommended parameter values by average composite score: " + "; ".join(parts) + "."
+    if divergent_parameters:
+        summary += " Metric and composite recommendations diverge for: " + "; ".join(divergent_parameters) + "."
+    return summary
+
+
 def _strongest_parameter(
     sensitivity: dict[str, dict[str, object]],
 ) -> str | None:
@@ -521,6 +588,12 @@ def _delimited_value_counts(rows: list[dict[str, object]], key: str) -> dict[str
                 continue
             counts[item] = counts.get(item, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _top_count_key(counts: dict[str, int]) -> str | None:
+    if not counts:
+        return None
+    return next(iter(counts))
 
 
 def _recommended_actions(

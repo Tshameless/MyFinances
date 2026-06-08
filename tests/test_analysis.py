@@ -161,6 +161,10 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(1, summary["summary"]["parameter_drift_count"])
         self.assertEqual(1.0, summary["summary"]["parameter_drift_rate"])
         self.assertEqual({"2": 1, "3": 1}, summary["summary"]["parameter_selection_counts"]["param_top_n"])
+        self.assertEqual({"param_top_n": 1}, summary["summary"]["parameter_drift_counts"])
+        self.assertEqual("param_top_n", summary["summary"]["most_drifting_parameter"])
+        self.assertEqual("window_002", summary["summary"]["degraded_parameter_sets"][0]["window_id"])
+        self.assertEqual("param_top_n=3", summary["summary"]["degraded_parameter_sets"][0]["parameter_set"])
         self.assertEqual("mixed", summary["summary"]["oos_stability_grade"])
         self.assertEqual("medium", summary["summary"]["overfit_risk"])
 
@@ -1051,6 +1055,10 @@ class AnalysisTests(unittest.TestCase):
             1,
             analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["run_count"],
         )
+        self.assertIn(
+            "Recommended parameter values by average composite score",
+            analysis["summary"]["parameter_recommendation_summary"],
+        )
         self.assertIn("param_top_n_value_average_annualized_return", analysis["rows"][0])
         self.assertEqual(1, analysis["rows"][0]["param_top_n_value_run_count"])
         self.assertEqual(1.0, analysis["rows"][0]["param_rebalance_every_n_days_value_gate_passing_rate"])
@@ -1087,6 +1095,10 @@ class AnalysisTests(unittest.TestCase):
 
         self.assertEqual("2", analysis["summary"]["parameter_sensitivity"]["param_top_n"]["best_value_by_metric"])
         self.assertEqual("3", analysis["summary"]["best_parameter_values"]["param_top_n"])
+        self.assertIn(
+            "Metric and composite recommendations diverge",
+            analysis["summary"]["parameter_recommendation_summary"],
+        )
         self.assertFalse(
             analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["is_also_best_by_metric"],
         )

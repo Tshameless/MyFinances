@@ -1504,6 +1504,7 @@ class ReportingTests(unittest.TestCase):
                                     "gate_passing_rate": 0.5,
                                 }
                             },
+                            "parameter_recommendation_summary": "Recommended parameter values by average composite score: param_top_n=3 (composite 0.420, gate pass 50.00%). Metric and composite recommendations diverge for: param_top_n metric-best=4.",
                             "recommended_actions": [
                                 "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.",
                                 "Most common failed gate is 'Max drawdown'; review the single-run strategy_health_gates.csv files for affected runs first.",
@@ -1534,11 +1535,11 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("run_001", content)
             self.assertIn("Gate status", content)
             self.assertIn("Health score", content)
-            self.assertIn("Gate-passing runs", content)
-            self.assertIn("Gate-failing runs", content)
-            self.assertIn("Most common failed gate category", content)
+            self.assertIn("闸门通过运行数", content)
+            self.assertIn("闸门失败运行数", content)
+            self.assertIn("最常失败闸门类别", content)
             self.assertIn("risk: 2", content)
-            self.assertIn("Most common failed gate", content)
+            self.assertIn("最常失败闸门", content)
             self.assertIn("Max drawdown: 2", content)
             self.assertIn("影响最强参数", content)
             self.assertIn("param_top_n", content)
@@ -1549,8 +1550,11 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("排序指标最优=4", content)
             self.assertIn("综合分=0.420", content)
             self.assertIn("通过率=50.00%", content)
+            self.assertIn("参数推荐总结", content)
+            self.assertIn("按平均综合分推荐参数", content)
+            self.assertIn("排序指标最优与综合分推荐不一致", content)
             self.assertIn("建议动作", content)
-            self.assertIn("Risk gates fail often", content)
+            self.assertIn("风险闸门频繁失败", content)
             self.assertIn("建议动作数量", content)
             self.assertIn("gate_status", content)
             self.assertIn("health_score", content)
