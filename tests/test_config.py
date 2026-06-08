@@ -20,6 +20,7 @@ class ConfigTests(unittest.TestCase):
 [backtest]
 top_n = 5
 selection_mode = "bottom"
+score_source = "external"
 max_group_positions = 1
 rolling_risk_window = 15
 execution_delay_days = 1
@@ -28,6 +29,7 @@ max_allowed_daily_var = 0.04
 min_allowed_rolling_return = -0.12
 min_allowed_fill_rate = 0.65
 min_allowed_execution_price_coverage = 0.98
+min_allowed_factor_score_coverage = 0.90
 max_allowed_market_constraint_rate = 0.40
 max_allowed_position_weight = 0.45
 max_allowed_group_weight = 0.55
@@ -63,6 +65,7 @@ low_volatility = 0.3
 
             self.assertEqual(5, overrides["top_n"])
             self.assertEqual("bottom", overrides["selection_mode"])
+            self.assertEqual("external", overrides["score_source"])
             self.assertEqual(1, overrides["max_group_positions"])
             self.assertEqual(15, overrides["rolling_risk_window"])
             self.assertEqual(1, overrides["execution_delay_days"])
@@ -71,6 +74,7 @@ low_volatility = 0.3
             self.assertEqual(-0.12, overrides["min_allowed_rolling_return"])
             self.assertEqual(0.65, overrides["min_allowed_fill_rate"])
             self.assertEqual(0.98, overrides["min_allowed_execution_price_coverage"])
+            self.assertEqual(0.90, overrides["min_allowed_factor_score_coverage"])
             self.assertEqual(0.40, overrides["max_allowed_market_constraint_rate"])
             self.assertEqual(0.45, overrides["max_allowed_position_weight"])
             self.assertEqual(0.55, overrides["max_allowed_group_weight"])
@@ -253,6 +257,8 @@ rebalance_every_n_days = [5, "10"]
             BacktestConfig(min_allowed_fill_rate=1.1)
         with self.assertRaisesRegex(ValueError, "min_allowed_execution_price_coverage"):
             BacktestConfig(min_allowed_execution_price_coverage=1.1)
+        with self.assertRaisesRegex(ValueError, "min_allowed_factor_score_coverage"):
+            BacktestConfig(min_allowed_factor_score_coverage=1.1)
         with self.assertRaisesRegex(ValueError, "max_allowed_market_constraint_rate"):
             BacktestConfig(max_allowed_market_constraint_rate=1.1)
         with self.assertRaisesRegex(ValueError, "max_allowed_position_weight"):
@@ -277,6 +283,10 @@ rebalance_every_n_days = [5, "10"]
     def test_rejects_invalid_selection_mode(self) -> None:
         with self.assertRaisesRegex(ValueError, "selection_mode"):
             BacktestConfig(selection_mode="middle")
+
+    def test_rejects_invalid_score_source(self) -> None:
+        with self.assertRaisesRegex(ValueError, "score_source"):
+            BacktestConfig(score_source="mixed")
 
 
 if __name__ == "__main__":

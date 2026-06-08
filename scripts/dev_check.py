@@ -42,13 +42,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip the demo CLI smoke run and artifact checks.",
     )
+    parser.add_argument(
+        "--skip-static",
+        action="store_true",
+        help="Skip ruff and mypy checks when dev dependencies are not installed.",
+    )
     args = parser.parse_args(argv)
 
     commands = [
-        ("ruff", [sys.executable, "-m", "ruff", "check", "."]),
-        ("mypy", [sys.executable, "-m", "mypy", "python_quant"]),
         ("unit tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests"]),
     ]
+    if not args.skip_static:
+        commands = [
+            ("ruff", [sys.executable, "-m", "ruff", "check", "."]),
+            ("mypy", [sys.executable, "-m", "mypy", "python_quant"]),
+            *commands,
+        ]
     for label, command in commands:
         _run(label, command)
 
@@ -61,7 +70,15 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run(label: str, command: list[str]) -> None:
     print(f"==> {label}")
-    subprocess.run(command, cwd=PROJECT_ROOT, check=True)
+    completed = subprocess.run(command, cwd=PROJECT_ROOT)
+    if completed.returncode == 0:
+        return
+    if label in {"ruff", "mypy"}:
+        raise RuntimeError(
+            f"{label} failed or is not installed. Install dev dependencies with "
+            f"'{sys.executable} -m pip install -e .[dev]' or rerun with --skip-static."
+        )
+    raise subprocess.CalledProcessError(completed.returncode, command)
 
 
 def _run_smoke() -> None:

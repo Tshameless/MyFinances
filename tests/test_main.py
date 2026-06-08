@@ -685,6 +685,64 @@ rebalance_every_n_days = [5, 10]
 
         self.assertEqual("bottom", config.selection_mode)
 
+    def test_build_backtest_config_accepts_cli_score_source(self) -> None:
+        args = argparse.Namespace(
+            config=None,
+            initial_cash=None,
+            top_n=None,
+            selection_mode=None,
+            score_source="external",
+            lot_size=None,
+            max_group_positions=None,
+            lookback_momentum=None,
+            lookback_mean_reversion=None,
+            lookback_volatility=None,
+            rolling_risk_window=None,
+            max_allowed_drawdown=None,
+            min_allowed_rolling_return=None,
+            min_allowed_fill_rate=None,
+            max_allowed_position_weight=None,
+            max_allowed_attribution_residual=None,
+            rebalance_days=None,
+            commission_rate=None,
+            buy_commission_rate=None,
+            sell_commission_rate=None,
+            slippage_rate=None,
+            stamp_duty_rate=None,
+            min_commission=None,
+            transfer_fee_rate=None,
+            limit_up_down_rate=None,
+            st_limit_up_down_rate=None,
+            growth_limit_up_down_rate=None,
+            bse_limit_up_down_rate=None,
+            infer_limit_rate_by_symbol=False,
+            max_volume_participation=None,
+            target_cash_weight=None,
+            max_position_weight=None,
+            infer_limit_flags=False,
+            forward_fill_suspended_bars=False,
+            price_field=None,
+            execution_price_field=None,
+            execution_delay_days=None,
+            start_date=None,
+            end_date=None,
+            output_dir=None,
+            stock_pool_csv=None,
+            symbol_group_csv=None,
+            factor_score_csv=None,
+            walk_optimize=False,
+            walk_forward=False,
+            walk_window=30,
+            walk_step=10,
+            walk_train_window=40,
+            walk_test_window=20,
+            factor_weight=None,
+        )
+
+        config = _build_backtest_config(args)
+
+        self.assertEqual("external", config.score_source)
+
     def test_build_backtest_config_accepts_execution_price_field(self) -> None:
         args = argparse.Namespace(
             config=None,
@@ -1182,6 +1240,41 @@ rebalance_every_n_days = [5, 10]
             self.assertEqual(0, exit_code)
             self.assertTrue((output_dir / "symbol_group_quality_report.csv").exists())
             self.assertTrue((output_dir / "symbol_group_quality_report.json").exists())
+
+    def test_validate_csv_accepts_factor_score_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            price_csv = temp_path / "prices.csv"
+            score_csv = temp_path / "factor_scores.csv"
+            output_dir = temp_path / "quality"
+            _write_price_csv(price_csv)
+            score_csv.write_text(
+                "date,symbol,score\n"
+                "2024-01-04,000001,1\n"
+                "2024-01-04,600519,2\n"
+                "2024-01-04,000333,0\n",
+                encoding="utf-8",
+            )
+
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                exit_code = main(
+                    [
+                        "--validate-csv",
+                        "--csv",
+                        str(price_csv),
+                        "--factor-score-csv",
+                        str(score_csv),
+                        "--output-dir",
+                        str(output_dir),
+                    ]
+                )
+
+            self.assertEqual(0, exit_code)
+            self.assertIn("外部因子评分 CSV 校验完成", buffer.getvalue())
+            self.assertTrue((output_dir / "factor_score_quality_report.csv").exists())
+            self.assertTrue((output_dir / "factor_score_quality_report.json").exists())
+
 
 def _write_price_csv(path: Path) -> None:
     rows = ["date,symbol,close,adjusted_close"]

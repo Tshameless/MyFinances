@@ -32,11 +32,13 @@ from .data_loader import (
 )
 from .data_quality import (
     build_benchmark_quality_report,
+    build_factor_score_quality_report,
     build_price_data_quality_report,
     build_stock_pool_quality_report,
     build_symbol_group_quality_report,
     save_benchmark_quality_report,
     save_data_quality_report,
+    save_factor_score_quality_report,
     save_mapping_quality_report,
     save_stock_pool_quality_report,
 )
@@ -168,6 +170,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["top", "bottom"],
         help="选股方向：top 选择高分标的，bottom 选择低分标的，默认 top。",
     )
+    parser.add_argument(
+        "--score-source",
+        choices=["auto", "builtin", "external"],
+        help="评分来源：auto 有外部评分时优先使用，builtin 只用内置因子，external 要求调仓日必须有外部评分。",
+    )
     parser.add_argument("--max-group-positions", type=int, help="每个代码分组最多入选股票数量；需配合 symbol_group_csv。")
     parser.add_argument("--lot-size", type=int, help="每手股数，A 股默认使用 100。")
     parser.add_argument("--rebalance-days", type=int, help="调仓间隔天数。")
@@ -187,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-allowed-information-ratio", type=float, help="策略风险闸门：最低信息比率，默认 0.0。")
     parser.add_argument("--min-allowed-fill-rate", type=float, help="策略风险闸门：最低成交率，默认 0.70。")
     parser.add_argument("--min-allowed-execution-price-coverage", type=float, help="策略风险闸门：最低执行价字段覆盖率，默认 1.00。")
+    parser.add_argument("--min-allowed-factor-score-coverage", type=float, help="策略风险闸门：最低外部评分覆盖率，默认 0.95。")
     parser.add_argument("--max-allowed-market-constraint-rate", type=float, help="策略风险闸门：最大市场约束拒单占比，默认 0.50。")
     parser.add_argument("--max-allowed-position-weight", type=float, help="策略风险闸门：最大单票权重，默认 0.50。")
     parser.add_argument("--max-allowed-group-weight", type=float, help="策略风险闸门：最大分组/行业权重，默认 0.60。")
@@ -425,6 +433,7 @@ def _run_sweep(
         "batch_chart_svg": batch_chart_path,
         "batch_stability_csv": stability_paths["batch_stability_csv"],
         "batch_stability_json": stability_paths["batch_stability_json"],
+        "parameter_sensitivity_csv": stability_paths["parameter_sensitivity_csv"],
     }
     if heatmap_path is not None:
         batch_artifacts["batch_heatmap_svg"] = heatmap_path
@@ -442,6 +451,7 @@ def _run_sweep(
     print(f"最佳方案摘要已保存：{best_run_path}")
     print(f"参数稳定性 CSV 已保存：{stability_paths['batch_stability_csv']}")
     print(f"参数稳定性 JSON 已保存：{stability_paths['batch_stability_json']}")
+    print(f"参数敏感度 CSV 已保存：{stability_paths['parameter_sensitivity_csv']}")
     print(f"批量对比图已保存：{batch_chart_path}")
     if heatmap_path is not None:
         print(f"热力图已保存：{heatmap_path}")
@@ -813,8 +823,24 @@ def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentPars
         )
         print(f"分组映射质量 CSV 已保存：{report_paths['symbol_group_quality_report_csv']}")
         print(f"分组映射质量 JSON 已保存：{report_paths['symbol_group_quality_report_json']}")
+    if args.factor_score_csv:
+        score_report = build_factor_score_quality_report(
+            Path(args.factor_score_csv),
+            expected_symbols=price_symbols,
+            expected_dates=price_dates,
+        )
+        score_report_paths = save_factor_score_quality_report(score_report, output_dir)
+        loaded_any = True
+        print(
+            "外部因子评分 CSV 校验完成："
+            f"{score_report.summary['row_count']} 行，"
+            f"{score_report.summary['scored_symbol_count']} 只标的，"
+            f"{score_report.summary['date_count']} 个评分日。"
+        )
+        print(f"外部因子评分质量 CSV 已保存：{score_report_paths['factor_score_quality_report_csv']}")
+        print(f"外部因子评分质量 JSON 已保存：{score_report_paths['factor_score_quality_report_json']}")
     if not loaded_any:
-        parser.error("--validate-csv 需要配合 --csv、--benchmark-csv、--stock-pool-csv 或 --symbol-group-csv 使用。")
+        parser.error("--validate-csv 需要配合 --csv、--benchmark-csv、--stock-pool-csv、--symbol-group-csv 或 --factor-score-csv 使用。")
 
 
 def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
@@ -823,6 +849,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "initial_cash": default_config.initial_cash,
         "top_n": default_config.top_n,
         "selection_mode": default_config.selection_mode,
+        "score_source": default_config.score_source,
         "lot_size": default_config.lot_size,
         "max_group_positions": default_config.max_group_positions,
         "lookback_momentum": default_config.lookback_momentum,
@@ -836,6 +863,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "min_allowed_information_ratio": default_config.min_allowed_information_ratio,
         "min_allowed_fill_rate": default_config.min_allowed_fill_rate,
         "min_allowed_execution_price_coverage": default_config.min_allowed_execution_price_coverage,
+        "min_allowed_factor_score_coverage": default_config.min_allowed_factor_score_coverage,
         "max_allowed_market_constraint_rate": default_config.max_allowed_market_constraint_rate,
         "max_allowed_position_weight": default_config.max_allowed_position_weight,
         "max_allowed_group_weight": default_config.max_allowed_group_weight,
@@ -885,6 +913,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "initial_cash": args.initial_cash,
         "top_n": args.top_n,
         "selection_mode": getattr(args, "selection_mode", None),
+        "score_source": getattr(args, "score_source", None),
         "lot_size": args.lot_size,
         "max_group_positions": args.max_group_positions,
         "lookback_momentum": args.lookback_momentum,
@@ -898,6 +927,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "min_allowed_information_ratio": getattr(args, "min_allowed_information_ratio", None),
         "min_allowed_fill_rate": args.min_allowed_fill_rate,
         "min_allowed_execution_price_coverage": getattr(args, "min_allowed_execution_price_coverage", None),
+        "min_allowed_factor_score_coverage": getattr(args, "min_allowed_factor_score_coverage", None),
         "max_allowed_market_constraint_rate": getattr(args, "max_allowed_market_constraint_rate", None),
         "max_allowed_position_weight": args.max_allowed_position_weight,
         "max_allowed_group_weight": getattr(args, "max_allowed_group_weight", None),
@@ -1139,6 +1169,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
         initial_cash=cast(float, config_kwargs["initial_cash"]),
         top_n=cast(int, config_kwargs["top_n"]),
         selection_mode=cast(str, config_kwargs["selection_mode"]),
+        score_source=cast(str, config_kwargs["score_source"]),
         lot_size=cast(int, config_kwargs["lot_size"]),
         max_group_positions=cast(int | None, config_kwargs["max_group_positions"]),
         lookback_momentum=cast(int, config_kwargs["lookback_momentum"]),
@@ -1152,6 +1183,7 @@ def _build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestC
         min_allowed_information_ratio=cast(float, config_kwargs["min_allowed_information_ratio"]),
         min_allowed_fill_rate=cast(float, config_kwargs["min_allowed_fill_rate"]),
         min_allowed_execution_price_coverage=cast(float, config_kwargs["min_allowed_execution_price_coverage"]),
+        min_allowed_factor_score_coverage=cast(float, config_kwargs["min_allowed_factor_score_coverage"]),
         max_allowed_market_constraint_rate=cast(float, config_kwargs["max_allowed_market_constraint_rate"]),
         max_allowed_position_weight=cast(float, config_kwargs["max_allowed_position_weight"]),
         max_allowed_group_weight=cast(float, config_kwargs["max_allowed_group_weight"]),
@@ -1227,6 +1259,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
         "selection_mode": config.selection_mode,
+        "score_source": config.score_source,
         "lot_size": config.lot_size,
         "max_group_positions": config.max_group_positions,
         "lookback_momentum": config.lookback_momentum,
@@ -1240,6 +1273,7 @@ def _config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "min_allowed_information_ratio": config.min_allowed_information_ratio,
         "min_allowed_fill_rate": config.min_allowed_fill_rate,
         "min_allowed_execution_price_coverage": config.min_allowed_execution_price_coverage,
+        "min_allowed_factor_score_coverage": config.min_allowed_factor_score_coverage,
         "max_allowed_market_constraint_rate": config.max_allowed_market_constraint_rate,
         "max_allowed_position_weight": config.max_allowed_position_weight,
         "max_allowed_group_weight": config.max_allowed_group_weight,

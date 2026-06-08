@@ -5,7 +5,12 @@ from pathlib import Path
 from .attribution_analysis import build_return_attribution_analysis
 from .config import BacktestConfig
 from .cost_analysis import build_cost_attribution_analysis
-from .data_quality import build_price_data_quality_report, save_data_quality_report
+from .data_quality import (
+    build_factor_score_quality_report,
+    build_price_data_quality_report,
+    save_data_quality_report,
+    save_factor_score_quality_report,
+)
 from .execution_analysis import build_execution_quality_analysis
 from .exposure_analysis import build_exposure_analysis, build_group_exposure_analysis
 from .factor_analysis import (
@@ -120,6 +125,20 @@ def persist_run_outputs(
         output_dir,
         prefix="price_data_quality",
     )
+    factor_score_quality_report = (
+        None
+        if config.factor_score_csv is None
+        else build_factor_score_quality_report(
+            config.factor_score_csv,
+            expected_symbols={bar.symbol for bar in result.price_bars or []},
+            expected_dates={bar.date for bar in result.price_bars or []},
+        )
+    )
+    factor_score_quality_paths = (
+        {}
+        if factor_score_quality_report is None
+        else save_factor_score_quality_report(factor_score_quality_report, output_dir)
+    )
     factor_ic_paths = save_factor_ic_files(
         build_factor_ic_analysis(
             result.factor_scores or [],
@@ -211,6 +230,9 @@ def persist_run_outputs(
             relative_summary=_analysis_summary(relative_performance_analysis),
             execution_summary=_analysis_summary(execution_quality_analysis),
             data_quality_summary=price_data_quality_report.summary,
+            factor_score_quality_summary=(
+                {} if factor_score_quality_report is None else factor_score_quality_report.summary
+            ),
             exposure_summary=_analysis_summary(exposure_analysis),
             group_exposure_summary=_analysis_summary(group_exposure_analysis),
             return_attribution_summary=_analysis_summary(return_attribution_analysis),
@@ -225,6 +247,7 @@ def persist_run_outputs(
                 "min_allowed_information_ratio": config.min_allowed_information_ratio,
                 "min_allowed_fill_rate": config.min_allowed_fill_rate,
                 "min_allowed_execution_price_coverage": config.min_allowed_execution_price_coverage,
+                "min_allowed_factor_score_coverage": config.min_allowed_factor_score_coverage,
                 "max_allowed_market_constraint_rate": config.max_allowed_market_constraint_rate,
                 "max_allowed_position_weight": config.max_allowed_position_weight,
                 "max_allowed_group_weight": config.max_allowed_group_weight,
@@ -297,6 +320,7 @@ def persist_run_outputs(
         "performance_summary_csv": summary_path,
         "performance_summary_json": summary_json_path,
     }
+    artifact_paths.update(factor_score_quality_paths)
     manifest_path = save_run_manifest(
         output_dir=output_dir,
         config=config,

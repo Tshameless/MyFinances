@@ -20,6 +20,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "initial_cash",
         "top_n",
         "selection_mode",
+        "score_source",
         "lot_size",
         "max_group_positions",
         "lookback_momentum",
@@ -33,6 +34,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "min_allowed_information_ratio",
         "min_allowed_fill_rate",
         "min_allowed_execution_price_coverage",
+        "min_allowed_factor_score_coverage",
         "max_allowed_market_constraint_rate",
         "max_allowed_position_weight",
         "max_allowed_group_weight",
@@ -111,6 +113,7 @@ _FLOAT_FIELDS = frozenset(
         "min_allowed_information_ratio",
         "min_allowed_fill_rate",
         "min_allowed_execution_price_coverage",
+        "min_allowed_factor_score_coverage",
         "max_allowed_market_constraint_rate",
         "max_allowed_position_weight",
         "max_allowed_group_weight",
@@ -121,7 +124,7 @@ _FLOAT_FIELDS = frozenset(
     }
 )
 _OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate"})
-_STRING_FIELDS = frozenset({"selection_mode", "price_field", "execution_price_field"})
+_STRING_FIELDS = frozenset({"selection_mode", "score_source", "price_field", "execution_price_field"})
 _OPTIONAL_STRING_FIELDS = frozenset({"execution_price_field"})
 _DATE_FIELDS = frozenset({"start_date", "end_date"})
 _BOOL_FIELDS = frozenset({"infer_limit_flags", "infer_limit_rate_by_symbol", "forward_fill_suspended_bars"})
@@ -132,6 +135,7 @@ class BacktestConfig:
     initial_cash: float = 1_000_000.0
     top_n: int = 3
     selection_mode: str = "top"
+    score_source: str = "auto"
     lot_size: int = 100
     max_group_positions: int | None = None
     lookback_momentum: int = 20
@@ -145,6 +149,7 @@ class BacktestConfig:
     min_allowed_information_ratio: float = 0.0
     min_allowed_fill_rate: float = 0.70
     min_allowed_execution_price_coverage: float = 1.0
+    min_allowed_factor_score_coverage: float = 0.95
     max_allowed_market_constraint_rate: float = 0.50
     max_allowed_position_weight: float = 0.50
     max_allowed_group_weight: float = 0.60
@@ -201,6 +206,8 @@ class BacktestConfig:
             raise ValueError("top_n must be greater than 0.")
         if self.selection_mode not in {"top", "bottom"}:
             raise ValueError("selection_mode must be one of: top, bottom.")
+        if self.score_source not in {"auto", "builtin", "external"}:
+            raise ValueError("score_source must be one of: auto, builtin, external.")
         if self.lot_size <= 0:
             raise ValueError("lot_size must be greater than 0.")
         if self.max_group_positions is not None and self.max_group_positions <= 0:
@@ -231,6 +238,7 @@ class BacktestConfig:
             self.max_allowed_daily_var,
             self.min_allowed_fill_rate,
             self.min_allowed_execution_price_coverage,
+            self.min_allowed_factor_score_coverage,
             self.max_allowed_market_constraint_rate,
             self.max_allowed_position_weight,
             self.max_allowed_group_weight,
@@ -277,6 +285,8 @@ class BacktestConfig:
             raise ValueError("min_allowed_fill_rate must be between 0 and 1.")
         if self.min_allowed_execution_price_coverage < 0 or self.min_allowed_execution_price_coverage > 1:
             raise ValueError("min_allowed_execution_price_coverage must be between 0 and 1.")
+        if self.min_allowed_factor_score_coverage < 0 or self.min_allowed_factor_score_coverage > 1:
+            raise ValueError("min_allowed_factor_score_coverage must be between 0 and 1.")
         if self.max_allowed_market_constraint_rate < 0 or self.max_allowed_market_constraint_rate > 1:
             raise ValueError("max_allowed_market_constraint_rate must be between 0 and 1.")
         if self.max_allowed_position_weight <= 0 or self.max_allowed_position_weight > 1:

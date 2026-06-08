@@ -501,7 +501,40 @@ class ReportingTests(unittest.TestCase):
 
             self.assertTrue(paths["batch_stability_csv"].exists())
             self.assertTrue(paths["batch_stability_json"].exists())
+            self.assertTrue(paths["parameter_sensitivity_csv"].exists())
             self.assertIn("is_robust_region", paths["batch_stability_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_parameter_sensitivity_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_batch_stability_files(
+                {
+                    "rows": [],
+                    "summary": {
+                        "parameter_sensitivity": {
+                            "param_top_n": {
+                                "values": {
+                                    "2": {
+                                        "run_count": 2,
+                                        "average_metric": 0.1,
+                                        "best_metric": 0.2,
+                                        "average_composite_score": 0.3,
+                                        "gate_passing_run_count": 1,
+                                        "gate_passing_rate": 0.5,
+                                        "worst_max_drawdown": -0.1,
+                                    }
+                                }
+                            }
+                        }
+                    },
+                },
+                output_dir,
+            )
+
+            content = paths["parameter_sensitivity_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("parameter,value,run_count", content)
+            self.assertIn("param_top_n,2,2", content)
 
     def test_batch_rankings_prefer_gate_passing_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1438,6 +1471,11 @@ class ReportingTests(unittest.TestCase):
                             "gate_failing_run_count": 1,
                             "failed_gate_category_counts": {"risk": 2, "factor": 1},
                             "failed_gate_name_counts": {"Max drawdown": 2, "Factor correlation": 1},
+                            "strongest_parameter": "param_top_n",
+                            "best_parameter_values": {
+                                "param_top_n": "3",
+                                "param_rebalance_every_n_days": "5",
+                            },
                             "recommended_actions": [
                                 "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.",
                                 "Most common failed gate is 'Max drawdown'; review the single-run strategy_health_gates.csv files for affected runs first.",
@@ -1474,6 +1512,10 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("risk: 2", content)
             self.assertIn("Most common failed gate", content)
             self.assertIn("Max drawdown: 2", content)
+            self.assertIn("Strongest parameter effect", content)
+            self.assertIn("param_top_n", content)
+            self.assertIn("Best parameter values", content)
+            self.assertIn("param_rebalance_every_n_days=5", content)
             self.assertIn("Recommended action", content)
             self.assertIn("Risk gates fail often", content)
             self.assertIn("Recommended action count", content)

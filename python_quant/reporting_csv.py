@@ -766,6 +766,7 @@ def save_batch_stability_files(analysis: dict[str, object], output_dir: Path) ->
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "batch_stability.csv"
     json_path = output_dir / "batch_stability.json"
+    sensitivity_csv_path = output_dir / "parameter_sensitivity.csv"
     rows = cast(list[dict[str, object]], analysis.get("rows", []))
     fieldnames = _ordered_fieldnames(rows)
 
@@ -778,7 +779,52 @@ def save_batch_stability_files(analysis: dict[str, object], output_dir: Path) ->
     with json_path.open("w", encoding="utf-8") as handle:
         json.dump(analysis, handle, ensure_ascii=False, indent=2)
 
-    return {"batch_stability_csv": csv_path, "batch_stability_json": json_path}
+    sensitivity_rows = _parameter_sensitivity_rows(analysis)
+    with sensitivity_csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
+        fieldnames = [
+            "parameter",
+            "value",
+            "run_count",
+            "average_metric",
+            "best_metric",
+            "average_composite_score",
+            "gate_passing_run_count",
+            "gate_passing_rate",
+            "worst_max_drawdown",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in sensitivity_rows:
+            writer.writerow(row)
+
+    return {
+        "batch_stability_csv": csv_path,
+        "batch_stability_json": json_path,
+        "parameter_sensitivity_csv": sensitivity_csv_path,
+    }
+
+
+def _parameter_sensitivity_rows(analysis: dict[str, object]) -> list[dict[str, object]]:
+    summary = analysis.get("summary")
+    if not isinstance(summary, dict):
+        return []
+    sensitivity = summary.get("parameter_sensitivity")
+    if not isinstance(sensitivity, dict):
+        return []
+    rows: list[dict[str, object]] = []
+    for parameter, parameter_payload in sorted(sensitivity.items()):
+        if not isinstance(parameter_payload, dict):
+            continue
+        values = parameter_payload.get("values")
+        if not isinstance(values, dict):
+            continue
+        for value, stats in sorted(values.items()):
+            if not isinstance(stats, dict):
+                continue
+            row = {"parameter": parameter, "value": value}
+            row.update(stats)
+            rows.append(row)
+    return rows
 
 
 def save_walk_forward_files(analysis: dict[str, object], output_dir: Path) -> dict[str, Path]:

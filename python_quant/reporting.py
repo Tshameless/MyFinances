@@ -107,6 +107,7 @@ _ZH_LABELS = {
     "initial_cash": "初始资金",
     "top_n": "持仓数量TopN",
     "selection_mode": "选股方向",
+    "score_source": "评分来源",
     "lot_size": "每手股数",
     "max_group_positions": "单组最多入选数",
     "rebalance_every_n_days": "调仓间隔天数",
@@ -120,6 +121,7 @@ _ZH_LABELS = {
     "min_allowed_information_ratio": "闸门最低信息比率",
     "min_allowed_fill_rate": "闸门最低成交率",
     "min_allowed_execution_price_coverage": "闸门最低执行价覆盖率",
+    "min_allowed_factor_score_coverage": "闸门最低外部评分覆盖率",
     "max_allowed_position_weight": "闸门最大单票权重",
     "max_allowed_group_weight": "闸门最大分组权重",
     "max_allowed_attribution_residual": "闸门最大归因残差",
@@ -196,6 +198,7 @@ _ZH_LABELS = {
     "batch_heatmap_svg": "参数热力图",
     "batch_stability_csv": "参数稳定性CSV",
     "batch_stability_json": "参数稳定性JSON",
+    "parameter_sensitivity_csv": "参数敏感度CSV",
 }
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
@@ -678,6 +681,7 @@ def save_single_run_report_html(
         <tr><th>{_display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
         <tr><th>{_display_label("top_n")}</th><td>{config.top_n}</td></tr>
         <tr><th>{_display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
+        <tr><th>{_display_label("score_source")}</th><td>{escape(config.score_source)}</td></tr>
         <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
         <tr><th>{_display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
         <tr><th>{_display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
@@ -1161,6 +1165,8 @@ def _build_batch_observation_rows(
                 ("Gate-failing runs", _format_summary_number(stability_summary, "gate_failing_run_count", decimals=0)),
                 ("Most common failed gate category", _format_count_map_top(stability_summary, "failed_gate_category_counts")),
                 ("Most common failed gate", _format_count_map_top(stability_summary, "failed_gate_name_counts")),
+                ("Strongest parameter effect", _format_summary_field(stability_summary, "strongest_parameter")),
+                ("Best parameter values", _format_best_parameter_values(stability_summary)),
                 ("Recommended action", _format_list_first(stability_summary, "recommended_actions")),
                 ("Recommended action count", _format_list_count(stability_summary, "recommended_actions")),
             ]
@@ -1501,6 +1507,17 @@ def _format_count_map_top(summary: dict[str, object], key: str) -> str:
     return f"{top_key}: {_coerce_float(top_count):.0f}"
 
 
+def _format_best_parameter_values(summary: dict[str, object]) -> str:
+    values = summary.get("best_parameter_values")
+    if not isinstance(values, dict) or not values:
+        return "-"
+    parts = [
+        f"{key}={value}"
+        for key, value in sorted(values.items())
+    ]
+    return "; ".join(parts)
+
+
 def _format_list_first(summary: dict[str, object], key: str) -> str:
     values = summary.get(key)
     if not isinstance(values, list) or not values:
@@ -1648,6 +1665,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
         "selection_mode": config.selection_mode,
+        "score_source": config.score_source,
         "lot_size": config.lot_size,
         "max_group_positions": config.max_group_positions,
         "lookback_momentum": config.lookback_momentum,
@@ -1661,6 +1679,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "min_allowed_information_ratio": config.min_allowed_information_ratio,
         "min_allowed_fill_rate": config.min_allowed_fill_rate,
         "min_allowed_execution_price_coverage": config.min_allowed_execution_price_coverage,
+        "min_allowed_factor_score_coverage": config.min_allowed_factor_score_coverage,
         "max_allowed_position_weight": config.max_allowed_position_weight,
         "max_allowed_group_weight": config.max_allowed_group_weight,
         "max_allowed_attribution_residual": config.max_allowed_attribution_residual,

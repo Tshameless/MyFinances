@@ -211,6 +211,13 @@ def _factor_records_for_date(
 ) -> dict[str, FactorScoreRecord]:
     current_date = next(iter(aligned_history.values()))[index].date
     external_scores = None if external_scores_by_date is None else external_scores_by_date.get(current_date)
+    if config.score_source == "builtin":
+        external_scores = None
+    if config.score_source == "external" and external_scores is None:
+        raise ValueError(
+            f"External factor scores are required for {current_date.isoformat()} "
+            "when score_source is 'external'."
+        )
     if external_scores is None:
         return calculate_factor_score_records(
             aligned_history,

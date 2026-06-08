@@ -8,11 +8,13 @@ from pathlib import Path
 
 from python_quant.data_quality import (
     build_benchmark_quality_report,
+    build_factor_score_quality_report,
     build_price_data_quality_report,
     build_stock_pool_quality_report,
     build_symbol_group_quality_report,
     save_benchmark_quality_report,
     save_data_quality_report,
+    save_factor_score_quality_report,
     save_mapping_quality_report,
     save_stock_pool_quality_report,
 )
@@ -244,6 +246,55 @@ class DataQualityTests(unittest.TestCase):
             self.assertTrue(paths["stock_pool_quality_report_json"].exists())
             content = paths["stock_pool_quality_report_csv"].read_text(encoding="utf-8-sig")
             self.assertIn("duplicate_date_symbol", content)
+
+    def test_builds_factor_score_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            score_path = Path(temp_dir) / "factor_scores.csv"
+            score_path.write_text(
+                "date,symbol,score\n"
+                "2024-01-02,000001,1.5\n"
+                "2024/01/02,000001,2.0\n"
+                "2024-01-02,600519,nan\n"
+                "2024-01-04,300001,-0.5\n"
+                "bad-date,000002,0.1\n"
+                "2024-01-03,AAPL,0.2\n"
+                "2024-01-03,000001,\n",
+                encoding="utf-8",
+            )
+
+            report = build_factor_score_quality_report(
+                score_path,
+                expected_symbols={"000001", "600519", "000002"},
+                expected_dates={date(2024, 1, 2), date(2024, 1, 3)},
+            )
+
+            self.assertEqual(7, report.summary["row_count"])
+            self.assertEqual(3, report.summary["date_count"])
+            self.assertEqual(1, report.summary["duplicate_date_symbol_rows"])
+            self.assertEqual(1, report.summary["invalid_date_rows"])
+            self.assertEqual(1, report.summary["invalid_symbol_rows"])
+            self.assertEqual(1, report.summary["invalid_score_rows"])
+            self.assertEqual(1, report.summary["blank_score_rows"])
+            self.assertEqual(["300001", "AAPL"], report.summary["extra_scored_symbol_list"])
+            self.assertEqual(["2024-01-04"], report.summary["extra_score_date_list"])
+            self.assertAlmostEqual(1 / 6, report.summary["score_coverage_rate"])
+
+    def test_saves_factor_score_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            score_path = output_dir / "factor_scores.csv"
+            score_path.write_text(
+                "date,symbol,score\n2024-01-02,000001,1\n",
+                encoding="utf-8",
+            )
+            report = build_factor_score_quality_report(score_path)
+
+            paths = save_factor_score_quality_report(report, output_dir)
+
+            self.assertTrue(paths["factor_score_quality_report_csv"].exists())
+            self.assertTrue(paths["factor_score_quality_report_json"].exists())
+            content = paths["factor_score_quality_report_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("invalid_score", content)
 
 
 if __name__ == "__main__":

@@ -114,6 +114,7 @@ def build_walk_forward_optimization_summary(rows: list[dict[str, object]]) -> di
     gaps = [_float_value(row, "train_test_annualized_gap") for row in enriched_rows]
     degraded_windows = sum(1 for value in gaps if value > 0.0)
     worst_degradation_row = max(enriched_rows, key=lambda row: _float_value(row, "train_test_annualized_gap"))
+    parameter_stability = _selected_parameter_stability(enriched_rows)
     summary = {
         "windows": len(enriched_rows),
         "selection_policy": "gate_pass_first_then_metric",
@@ -144,6 +145,25 @@ def build_walk_forward_optimization_summary(rows: list[dict[str, object]]) -> di
                 )
                 for row in enriched_rows
             }
+        ),
+        "selected_parameter_set_counts": parameter_stability["selected_parameter_set_counts"],
+        "dominant_parameter_set": parameter_stability["dominant_parameter_set"],
+        "dominant_parameter_set_rate": parameter_stability["dominant_parameter_set_rate"],
+        "parameter_drift_count": parameter_stability["parameter_drift_count"],
+        "parameter_drift_rate": parameter_stability["parameter_drift_rate"],
+        "parameter_selection_counts": parameter_stability["parameter_selection_counts"],
+        "oos_stability_grade": _oos_stability_grade(
+            positive_test_window_rate=positive_test_windows / len(enriched_rows),
+            degraded_test_window_rate=degraded_windows / len(enriched_rows),
+            parameter_drift_rate=float(parameter_stability["parameter_drift_rate"]),
+        ),
+        "overfit_risk": _overfit_risk_label(
+            degraded_test_window_rate=degraded_windows / len(enriched_rows),
+            average_efficiency=sum(
+                _float_value(row, "test_to_train_efficiency")
+                for row in enriched_rows
+            ) / len(enriched_rows),
+            parameter_drift_rate=float(parameter_stability["parameter_drift_rate"]),
         ),
     }
     return {"rows": enriched_rows, "summary": summary}
@@ -193,6 +213,10 @@ def build_batch_stability_analysis(
     isolation_threshold = max(abs(best_metric) * 0.25, 0.05)
     failed_gate_category_counts = _delimited_value_counts(scored_rows, "failed_gate_categories")
     failed_gate_name_counts = _delimited_value_counts(scored_rows, "failed_gate_names")
+    parameter_sensitivity = _parameter_sensitivity(scored_rows, rank_by)
+    best_parameter_values = _best_parameter_values(parameter_sensitivity)
+    strongest_parameter = _strongest_parameter(parameter_sensitivity)
+    _attach_parameter_value_context(scored_rows, parameter_sensitivity, rank_by)
     summary = {
         "rank_by": rank_by,
         "best_run_id": best_row.get("run_id"),
@@ -214,6 +238,9 @@ def build_batch_stability_analysis(
         "gate_failing_run_count": sum(1 for row in scored_rows if str(row.get("gate_status", "")).lower() == "fail"),
         "failed_gate_category_counts": failed_gate_category_counts,
         "failed_gate_name_counts": failed_gate_name_counts,
+        "parameter_sensitivity": parameter_sensitivity,
+        "strongest_parameter": strongest_parameter,
+        "best_parameter_values": best_parameter_values,
         "recommended_actions": _recommended_actions(failed_gate_category_counts, failed_gate_name_counts),
         "best_composite_run_id": max(
             scored_rows,
@@ -252,7 +279,7 @@ def _robust_region_candidate_rows(rows: list[dict[str, object]]) -> list[dict[st
 
 
 def _parameter_ranges(rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-    param_keys = sorted({key for row in rows for key in row if key.startswith("param_")})
+    param_keys = sorted({key for row in rows for key in row if _is_parameter_key(key)})
     ranges: dict[str, dict[str, object]] = {}
     for key in param_keys:
         values = [row[key] for row in rows if key in row]
@@ -270,6 +297,190 @@ def _parameter_ranges(rows: list[dict[str, object]]) -> dict[str, dict[str, obje
         else:
             ranges[key] = {"values": sorted({str(value) for value in values})}
     return ranges
+
+
+def _parameter_sensitivity(
+    rows: list[dict[str, object]],
+    rank_by: str,
+) -> dict[str, dict[str, object]]:
+    param_keys = sorted({key for row in rows for key in row if _is_parameter_key(key)})
+    sensitivity: dict[str, dict[str, object]] = {}
+    for key in param_keys:
+        grouped_rows: dict[str, list[dict[str, object]]] = {}
+        for row in rows:
+            if key not in row:
+                continue
+            value_key = str(row[key])
+            grouped_rows.setdefault(value_key, []).append(row)
+        if not grouped_rows:
+            continue
+        value_stats = {
+            value: _parameter_value_stats(value_rows, rank_by)
+            for value, value_rows in sorted(grouped_rows.items(), key=lambda item: item[0])
+        }
+        average_metrics = [
+            float(stats["average_metric"])
+            for stats in value_stats.values()
+        ]
+        average_composites = [
+            float(stats["average_composite_score"])
+            for stats in value_stats.values()
+        ]
+        sensitivity[key] = {
+            "value_count": len(value_stats),
+            "metric_range": max(average_metrics) - min(average_metrics) if average_metrics else 0.0,
+            "composite_range": max(average_composites) - min(average_composites) if average_composites else 0.0,
+            "best_value_by_metric": max(
+                value_stats,
+                key=lambda value: float(value_stats[value]["average_metric"]),
+            ),
+            "best_value_by_composite": max(
+                value_stats,
+                key=lambda value: float(value_stats[value]["average_composite_score"]),
+            ),
+            "values": value_stats,
+        }
+    return sensitivity
+
+
+def _selected_parameter_stability(rows: list[dict[str, object]]) -> dict[str, object]:
+    labels = [_parameter_set_label(row) for row in rows]
+    counts: dict[str, int] = {}
+    for label in labels:
+        counts[label] = counts.get(label, 0) + 1
+    drift_count = sum(
+        1
+        for index in range(1, len(labels))
+        if labels[index] != labels[index - 1]
+    )
+    dominant_label = max(counts, key=lambda label: counts[label]) if counts else ""
+    parameter_selection_counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        for key, value in row.items():
+            if not _is_parameter_key(key):
+                continue
+            parameter_selection_counts.setdefault(key, {})
+            value_key = str(value)
+            parameter_selection_counts[key][value_key] = (
+                parameter_selection_counts[key].get(value_key, 0) + 1
+            )
+    return {
+        "selected_parameter_set_counts": dict(sorted(counts.items(), key=lambda item: (-item[1], item[0]))),
+        "dominant_parameter_set": dominant_label,
+        "dominant_parameter_set_rate": 0.0 if not rows else counts.get(dominant_label, 0) / len(rows),
+        "parameter_drift_count": drift_count,
+        "parameter_drift_rate": 0.0 if len(rows) <= 1 else drift_count / (len(rows) - 1),
+        "parameter_selection_counts": {
+            key: dict(sorted(values.items(), key=lambda item: (-item[1], item[0])))
+            for key, values in sorted(parameter_selection_counts.items())
+        },
+    }
+
+
+def _parameter_set_label(row: dict[str, object]) -> str:
+    items = [
+        (key, str(value))
+        for key, value in row.items()
+        if _is_parameter_key(key)
+    ]
+    if not items:
+        return "<none>"
+    return ";".join(f"{key}={value}" for key, value in sorted(items))
+
+
+def _oos_stability_grade(
+    *,
+    positive_test_window_rate: float,
+    degraded_test_window_rate: float,
+    parameter_drift_rate: float,
+) -> str:
+    if positive_test_window_rate >= 0.70 and degraded_test_window_rate <= 0.50 and parameter_drift_rate <= 0.50:
+        return "stable"
+    if positive_test_window_rate >= 0.50 and degraded_test_window_rate <= 0.75:
+        return "mixed"
+    return "unstable"
+
+
+def _overfit_risk_label(
+    *,
+    degraded_test_window_rate: float,
+    average_efficiency: float,
+    parameter_drift_rate: float,
+) -> str:
+    if degraded_test_window_rate >= 0.75 and average_efficiency < 0.50:
+        return "high"
+    if degraded_test_window_rate >= 0.50 or parameter_drift_rate > 0.75:
+        return "medium"
+    return "low"
+
+
+def _attach_parameter_value_context(
+    rows: list[dict[str, object]],
+    sensitivity: dict[str, dict[str, object]],
+    rank_by: str,
+) -> None:
+    for row in rows:
+        for param_key, analysis in sensitivity.items():
+            if param_key not in row:
+                continue
+            value = str(row[param_key])
+            values = analysis.get("values")
+            if not isinstance(values, dict):
+                continue
+            stats = values.get(value)
+            if not isinstance(stats, dict):
+                continue
+            metric_suffix = _metric_suffix(rank_by)
+            row[f"{param_key}_value_run_count"] = stats["run_count"]
+            row[f"{param_key}_value_average_{metric_suffix}"] = stats["average_metric"]
+            row[f"{param_key}_value_gate_passing_rate"] = stats["gate_passing_rate"]
+
+
+def _metric_suffix(metric_name: str) -> str:
+    return "".join(
+        character if character.isalnum() else "_"
+        for character in metric_name
+    ).strip("_") or "metric"
+
+
+def _parameter_value_stats(
+    rows: list[dict[str, object]],
+    rank_by: str,
+) -> dict[str, object]:
+    metrics = [_float_value(row, rank_by) for row in rows]
+    composite_scores = [_float_value(row, "composite_score") for row in rows]
+    drawdowns = [_float_value(row, "max_drawdown") for row in rows]
+    gate_passing = sum(1 for row in rows if str(row.get("gate_status", "")).lower() == "pass")
+    return {
+        "run_count": len(rows),
+        "average_metric": sum(metrics) / len(metrics),
+        "best_metric": max(metrics),
+        "average_composite_score": sum(composite_scores) / len(composite_scores),
+        "gate_passing_run_count": gate_passing,
+        "gate_passing_rate": gate_passing / len(rows),
+        "worst_max_drawdown": min(drawdowns),
+    }
+
+
+def _best_parameter_values(
+    sensitivity: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    return {
+        key: value["best_value_by_composite"]
+        for key, value in sensitivity.items()
+        if "best_value_by_composite" in value
+    }
+
+
+def _strongest_parameter(
+    sensitivity: dict[str, dict[str, object]],
+) -> str | None:
+    if not sensitivity:
+        return None
+    return max(
+        sensitivity,
+        key=lambda key: float(sensitivity[key].get("metric_range", 0.0)),
+    )
 
 
 def _delimited_value_counts(rows: list[dict[str, object]], key: str) -> dict[str, int]:
@@ -320,7 +531,7 @@ def _neighbor_rows(
     target: dict[str, object],
     rows: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    param_keys = sorted(key for key in target if key.startswith("param_"))
+    param_keys = sorted(key for key in target if _is_parameter_key(key))
     if not param_keys:
         return []
     neighbors = []
@@ -347,6 +558,10 @@ def _float_value(row: dict[str, object], key: str) -> float:
     if isinstance(value, (int, float, str)):
         return float(value)
     return 0.0
+
+
+def _is_parameter_key(key: str) -> bool:
+    return key.startswith("param_") and "_value_" not in key
 
 
 def _test_to_train_efficiency(train_return: float, test_return: float) -> float:

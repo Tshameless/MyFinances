@@ -45,14 +45,14 @@
 - 绩效 JSON 包含样本内/样本外半段切分指标，辅助观察结果稳定性。
 - 输出回撤序列、回撤持续期、月度收益表和滚动风险分析，方便定位回撤发生区间、水下天数、收益月份分布和阶段性风险稳定性。
 - 输出相对基准表现分析，在提供基准时展示主动收益、主动净值、主动回撤、主动胜率、最佳/最差主动日、跟踪误差和信息比率。
-- `--validate-csv` 会生成数据质量报告，检查缺失交易日、复权价缺失、实际执行价字段覆盖率、基准日期对齐、异常收益、每日股票数量变化、股票池质量和分组映射质量。
+- `--validate-csv` 会生成数据质量报告，检查缺失交易日、复权价缺失、实际执行价字段覆盖率、基准日期对齐、异常收益、每日股票数量变化、股票池质量、分组映射质量和外部评分覆盖率。
 - 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
 - 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
 - 支持 walk-forward 滚动窗口验证，按多个连续时间窗口输出稳定性汇总。
 - 支持 walk-forward 参数优化：每个训练窗口从 `[sweep]` 参数网格中选最优参数，再在后续测试窗口验证，并输出训练/测试退化、测试效率和过拟合风险诊断。
 - 自动输出中文化 SVG 图表和批量排行榜，减少手工读表。
 - 支持 `--rank-by` 自定义批量排序指标；双参数 sweep 会自动输出热力图。
-- 批量扫描会输出参数稳定性、综合评分、健康闸门失败原因分布和可行动调参建议，提示最佳方案是否可能是参数孤岛，以及常见参数组合为什么被风险闸门淘汰。
+- 批量扫描会输出参数稳定性、综合评分、参数敏感度、推荐参数档位、健康闸门失败原因分布和可行动调参建议，提示最佳方案是否可能是参数孤岛，以及常见参数组合为什么被风险闸门淘汰。
 - 单次和批量运行都会生成网页报告（HTML），方便直接浏览结果。
 - 回测内核、执行撮合模型、交易规则、风险分析、因子分析、执行分析、暴露分析、批量稳定性分析、CSV/HTML 报告和运行产物编排已经拆分为独立模块，便于继续扩展。
 - 内置 `unittest` 回归测试。
@@ -92,6 +92,7 @@ python -m python_quant.main --csv data/sample_prices.csv --validate-csv
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --validate-csv
 python -m python_quant.main --stock-pool-csv data/stock_pool.csv --validate-csv
 python -m python_quant.main --symbol-group-csv data/symbol_groups.csv --validate-csv
+python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data/factor_scores.csv --validate-csv
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --selection-mode bottom
 python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data/factor_scores.csv
@@ -151,13 +152,14 @@ date,symbol,score
 
 ```toml
 factor_score_csv = "data/factor_scores.csv"
+score_source = "auto"
 ```
 
 ```bash
 python -m python_quant.main --csv prices.csv --factor-score-csv data/factor_scores.csv
 ```
 
-外部评分只在存在对应调仓日期时生效；没有外部分数的调仓日会回退到内置三因子评分。`selection_mode = "top"` 会选择高分标的，`selection_mode = "bottom"` 会选择低分标的，便于做 alpha 方向验证。运行清单会记录 `factor_score_csv` 的路径、大小和 SHA256。
+`score_source` 可选 `auto`、`builtin`、`external`。默认 `auto` 会在调仓日存在外部评分时优先使用外部分数，缺失时回退到内置三因子；`builtin` 会忽略外部评分，只使用内置三因子；`external` 要求每个调仓日都必须有外部评分，缺失会直接报错。`selection_mode = "top"` 会选择高分标的，`selection_mode = "bottom"` 会选择低分标的，便于做 alpha 方向验证。运行清单会记录 `factor_score_csv` 的路径、大小和 SHA256；单次运行还会输出外部评分质量报告并把评分覆盖率纳入策略健康诊断。
 
 费用模型支持比例费率、最低佣金和过户费：
 
@@ -390,6 +392,18 @@ python scripts/dev_check.py
 python scripts/dev_check.py --skip-smoke
 ```
 
+如果本地暂时没有安装 `ruff` 或 `mypy`，可以先运行：
+
+```bash
+python scripts/dev_check.py --skip-static
+```
+
+完整静态检查需要先安装开发依赖：
+
+```bash
+python -m pip install -e .[dev]
+```
+
 ## 输出
 
 默认输出目录：`output/runs/<timestamp>-<config_hash>/`，避免多次回测互相覆盖。
@@ -431,14 +445,16 @@ python scripts/dev_check.py --skip-smoke
 - `batch_runs/best_run.json`：当前批量结果中的最佳运行。
 - `batch_runs/batch_annualized_return.svg`：批量结果对比图。
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
-- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
+- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
+- `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率和最差回撤。
 - `batch_runs/batch_report.html`：批量扫描网页报告。
 - `walk_forward/walk_forward.csv/json`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要。
-- `walk_forward_optimization/walk_forward_optimization.csv/json`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比和测试窗口稳定性摘要。
+- `walk_forward_optimization/walk_forward_optimization.csv/json`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、主导参数集、样本外稳定等级和过拟合风险摘要。
 - `price_data_quality_report.csv/json`：`--validate-csv` 生成的行情数据质量报告，JSON 摘要会按本次 `execution_price_field` 统计缺失执行价行数和覆盖率。
 - `benchmark_quality_report.csv/json`：`--validate-csv --benchmark-csv ...` 生成的基准数据质量报告，检查基准日期是否覆盖行情日期、复权价缺失、异常日收益和最大单日波动。
 - `stock_pool_quality_report.csv/json`：`--validate-csv --stock-pool-csv ...` 生成的股票池质量报告，检查空日期、空代码、非法代码、重复日期-代码组合，以及在同时提供行情 CSV 时的缺失/多余股票池标的。
 - `symbol_group_quality_report.csv/json`：`--validate-csv --symbol-group-csv ...` 生成的分组映射质量报告，检查缺列、空代码、空分组、重复代码，以及在同时提供行情 CSV 时的缺失/多余映射。
+- `factor_score_quality_report.csv/json`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合，以及在同时提供行情 CSV 时的评分日期/标的覆盖率。
 
 当前版本的输出风格已经按 A 股中文阅读场景做过收缩：
 

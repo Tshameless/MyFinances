@@ -71,6 +71,56 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual("600519", selected_record.symbol)
         self.assertEqual(3.0, selected_record.total_score)
 
+    def test_builtin_score_source_ignores_external_factor_scores(self) -> None:
+        bars = _build_a_share_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            score_source="builtin",
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(
+            bars,
+            config,
+            factor_scores_by_date={
+                date(2024, 1, 4): {
+                    "000001": -1.0,
+                    "600519": 3.0,
+                    "000002": 0.0,
+                }
+            },
+        )
+
+        self.assertNotEqual(("600519",), result.rebalance_records[0].holdings)
+
+    def test_external_score_source_requires_scores_for_rebalance_date(self) -> None:
+        bars = _build_a_share_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            score_source="external",
+        )
+
+        with self.assertRaisesRegex(ValueError, "External factor scores are required"):
+            run_backtest(bars, config, factor_scores_by_date={})
+
     def test_intersection_calendar_drops_missing_dates_without_misalignment(self) -> None:
         bars = [
             PriceBar(date=date(2024, 1, 2), symbol="AAA", close=10),

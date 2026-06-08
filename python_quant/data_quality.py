@@ -4,13 +4,15 @@ import csv
 import json
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime
+from math import isfinite
 from pathlib import Path
 
 from .market import is_a_share_symbol
 from .models import PriceBar
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
+_DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d")
 
 
 @dataclass(frozen=True)
@@ -452,6 +454,156 @@ def build_stock_pool_quality_report(
     return MappingQualityReport(summary=summary, rows=rows)
 
 
+def build_factor_score_quality_report(
+    factor_score_path: Path,
+    *,
+    expected_symbols: set[str] | None = None,
+    expected_dates: set[date] | None = None,
+) -> MappingQualityReport:
+    rows: list[dict[str, object]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    dates: set[str] = set()
+    scored_symbols: set[str] = set()
+    duplicate_keys = 0
+    blank_date_rows = 0
+    blank_symbol_rows = 0
+    blank_score_rows = 0
+    invalid_symbol_rows = 0
+    invalid_date_rows = 0
+    invalid_score_rows = 0
+    score_values: list[float] = []
+    expected_date_strings = {item.isoformat() for item in expected_dates or set()}
+
+    with factor_score_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
+        missing_columns = sorted({"date", "symbol", "score"} - fieldnames)
+        if missing_columns:
+            return MappingQualityReport(
+                summary={
+                    "row_count": 0,
+                    "date_count": 0,
+                    "scored_symbol_count": 0,
+                    "missing_columns": missing_columns,
+                    "duplicate_date_symbol_rows": 0,
+                    "blank_date_rows": 0,
+                    "blank_symbol_rows": 0,
+                    "blank_score_rows": 0,
+                    "invalid_date_rows": 0,
+                    "invalid_symbol_rows": 0,
+                    "invalid_score_rows": 0,
+                    "missing_expected_symbols": 0,
+                    "extra_scored_symbols": 0,
+                    "missing_expected_dates": 0,
+                    "extra_score_dates": 0,
+                    "score_coverage_rate": 0.0,
+                },
+                rows=[],
+            )
+
+        for row_index, raw_row in enumerate(reader, start=2):
+            raw_date = (raw_row.get("date") or "").strip()
+            normalized_date = _normalize_date_text(raw_date)
+            symbol = (raw_row.get("symbol") or "").strip()
+            raw_score = (raw_row.get("score") or "").strip()
+            is_blank_date = raw_date == ""
+            is_invalid_date = raw_date != "" and normalized_date is None
+            key_date = normalized_date or raw_date
+            is_duplicate = (key_date, symbol) in seen_keys
+            is_blank_symbol = symbol == ""
+            is_blank_score = raw_score == ""
+            is_valid_symbol = symbol != "" and is_a_share_symbol(symbol)
+            score_value = _parse_optional_finite_float(raw_score)
+            is_invalid_score = raw_score != "" and score_value is None
+
+            if normalized_date is not None:
+                dates.add(normalized_date)
+            if symbol:
+                scored_symbols.add(symbol)
+            if score_value is not None:
+                score_values.append(score_value)
+            if is_duplicate:
+                duplicate_keys += 1
+            if is_blank_date:
+                blank_date_rows += 1
+            if is_invalid_date:
+                invalid_date_rows += 1
+            if is_blank_symbol:
+                blank_symbol_rows += 1
+            if is_blank_score:
+                blank_score_rows += 1
+            if symbol and not is_valid_symbol:
+                invalid_symbol_rows += 1
+            if is_invalid_score:
+                invalid_score_rows += 1
+            seen_keys.add((key_date, symbol))
+
+            rows.append(
+                {
+                    "row_number": row_index,
+                    "date": raw_date if normalized_date is None else normalized_date,
+                    "symbol": symbol,
+                    "score": raw_score,
+                    "blank_date": is_blank_date,
+                    "invalid_date": is_invalid_date,
+                    "blank_symbol": is_blank_symbol,
+                    "blank_score": is_blank_score,
+                    "invalid_symbol": symbol != "" and not is_valid_symbol,
+                    "invalid_score": is_invalid_score,
+                    "duplicate_date_symbol": is_duplicate,
+                    "in_expected_symbols": None if expected_symbols is None or symbol == "" else symbol in expected_symbols,
+                    "in_expected_dates": None if expected_dates is None or normalized_date is None else normalized_date in expected_date_strings,
+                }
+            )
+
+    missing_expected_symbols = sorted((expected_symbols or set()) - scored_symbols)
+    extra_scored_symbols = sorted(scored_symbols - (expected_symbols or set())) if expected_symbols is not None else []
+    missing_expected_dates = sorted(expected_date_strings - dates)
+    extra_score_dates = sorted(dates - expected_date_strings) if expected_dates is not None else []
+    expected_cells = (
+        len(expected_symbols or set()) * len(expected_dates or set())
+        if expected_symbols is not None and expected_dates is not None
+        else 0
+    )
+    valid_scored_keys = {
+        (str(row["date"]), str(row["symbol"]))
+        for row in rows
+        if row["date"]
+        and row["symbol"]
+        and not row["invalid_date"]
+        and not row["invalid_symbol"]
+        and not row["invalid_score"]
+        and not row["blank_score"]
+        and (expected_dates is None or str(row["date"]) in expected_date_strings)
+        and (expected_symbols is None or str(row["symbol"]) in expected_symbols)
+    }
+    summary = {
+        "row_count": len(rows),
+        "date_count": len(dates),
+        "scored_symbol_count": len(scored_symbols),
+        "missing_columns": [],
+        "duplicate_date_symbol_rows": duplicate_keys,
+        "blank_date_rows": blank_date_rows,
+        "blank_symbol_rows": blank_symbol_rows,
+        "blank_score_rows": blank_score_rows,
+        "invalid_date_rows": invalid_date_rows,
+        "invalid_symbol_rows": invalid_symbol_rows,
+        "invalid_score_rows": invalid_score_rows,
+        "min_score": min(score_values, default=None),
+        "max_score": max(score_values, default=None),
+        "missing_expected_symbols": len(missing_expected_symbols),
+        "extra_scored_symbols": len(extra_scored_symbols),
+        "missing_expected_symbol_list": missing_expected_symbols,
+        "extra_scored_symbol_list": extra_scored_symbols,
+        "missing_expected_dates": len(missing_expected_dates),
+        "extra_score_dates": len(extra_score_dates),
+        "missing_expected_date_list": missing_expected_dates,
+        "extra_score_date_list": extra_score_dates,
+        "score_coverage_rate": 0.0 if expected_cells == 0 else len(valid_scored_keys) / expected_cells,
+    }
+    return MappingQualityReport(summary=summary, rows=rows)
+
+
 def save_data_quality_report(
     report: DataQualityReport,
     output_dir: Path,
@@ -527,6 +679,53 @@ def save_stock_pool_quality_report(
                 "invalid_symbol",
                 "duplicate_date_symbol",
                 "in_expected_symbols",
+            ],
+        )
+        writer.writeheader()
+        for row in report.rows:
+            writer.writerow(row)
+
+    with json_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {"summary": report.summary, "rows": report.rows},
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    return {
+        f"{prefix}_report_csv": csv_path,
+        f"{prefix}_report_json": json_path,
+    }
+
+
+def save_factor_score_quality_report(
+    report: MappingQualityReport,
+    output_dir: Path,
+    *,
+    prefix: str = "factor_score_quality",
+) -> dict[str, Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"{prefix}_report.csv"
+    json_path = output_dir / f"{prefix}_report.json"
+
+    with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "row_number",
+                "date",
+                "symbol",
+                "score",
+                "blank_date",
+                "invalid_date",
+                "blank_symbol",
+                "blank_score",
+                "invalid_symbol",
+                "invalid_score",
+                "duplicate_date_symbol",
+                "in_expected_symbols",
+                "in_expected_dates",
             ],
         )
         writer.writeheader()
@@ -635,3 +834,26 @@ def _daily_returns(bars: list[PriceBar]) -> list[float]:
         current = ordered[index].adjusted_close or ordered[index].close
         returns.append(current / previous - 1.0)
     return returns
+
+
+def _normalize_date_text(raw_value: str) -> str | None:
+    if not raw_value:
+        return None
+    for date_format in _DATE_FORMATS:
+        try:
+            return datetime.strptime(raw_value, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_optional_finite_float(raw_value: str) -> float | None:
+    if raw_value == "":
+        return None
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return None
+    if not isfinite(parsed):
+        return None
+    return parsed

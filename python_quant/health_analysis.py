@@ -16,6 +16,7 @@ DEFAULT_RISK_GATE_THRESHOLDS = {
     "max_allowed_factor_correlation": 0.90,
     "max_allowed_rebalance_changes": 3.0,
     "min_allowed_holding_days": 3.0,
+    "min_allowed_factor_score_coverage": 0.95,
 }
 
 
@@ -31,6 +32,7 @@ def build_strategy_health_analysis(
     cost_attribution_summary: dict[str, object],
     pnl_ledger_summary: dict[str, object],
     data_quality_summary: dict[str, object] | None = None,
+    factor_score_quality_summary: dict[str, object] | None = None,
     factor_correlation_summary: dict[str, object] | None = None,
     turnover_summary: dict[str, object] | None = None,
     group_exposure_summary: dict[str, object] | None = None,
@@ -50,6 +52,7 @@ def build_strategy_health_analysis(
         _score_information_ratio(relative_summary),
         _score_execution(execution_summary),
         _score_execution_price_coverage(data_quality_summary or {}),
+        _score_factor_score_coverage(factor_score_quality_summary or {}),
         _score_market_constraints(execution_summary),
         _score_concentration(exposure_summary),
         _score_group_concentration(group_exposure_summary or {}),
@@ -79,6 +82,7 @@ def build_strategy_health_analysis(
         relative_summary=relative_summary,
         execution_summary=execution_summary,
         data_quality_summary=data_quality_summary or {},
+        factor_score_quality_summary=factor_score_quality_summary or {},
         exposure_summary=exposure_summary,
         group_exposure_summary=group_exposure_summary or {},
         return_attribution_summary=return_attribution_summary,
@@ -113,6 +117,10 @@ def build_strategy_health_analysis(
         "execution_price_field": (data_quality_summary or {}).get("execution_price_field"),
         "execution_price_coverage_rate": (data_quality_summary or {}).get("execution_price_coverage_rate"),
         "missing_execution_price_rows": (data_quality_summary or {}).get("missing_execution_price_rows"),
+        "factor_score_coverage_rate": (factor_score_quality_summary or {}).get("score_coverage_rate"),
+        "factor_score_missing_expected_dates": (factor_score_quality_summary or {}).get("missing_expected_dates"),
+        "factor_score_missing_expected_symbols": (factor_score_quality_summary or {}).get("missing_expected_symbols"),
+        "factor_score_invalid_rows": _factor_score_invalid_rows(factor_score_quality_summary or {}),
         "max_largest_group_weight": (group_exposure_summary or {}).get("max_largest_group_weight"),
         "max_group_risk_contribution_group": (group_exposure_summary or {}).get("max_group_risk_contribution_group"),
         "max_group_risk_contribution_share": (group_exposure_summary or {}).get("max_group_risk_contribution_share"),
@@ -222,6 +230,20 @@ def _score_execution_price_coverage(summary: dict[str, object]) -> dict[str, obj
         return _check("data", "Execution price coverage", score, 0.8, "warning", "Execution price field has limited missing rows.")
     score = max(0.0, coverage / 0.95 * 70.0)
     return _check("data", "Execution price coverage", score, 0.8, "critical", "Execution price field coverage is too low.")
+
+
+def _score_factor_score_coverage(summary: dict[str, object]) -> dict[str, object]:
+    if not summary:
+        return _check("data", "External factor score coverage", 100.0, 0.4, "ok", "External factor score file is not configured.")
+    coverage = _float(summary, "score_coverage_rate", default=1.0)
+    invalid_rows = _factor_score_invalid_rows(summary)
+    if coverage >= 0.95 and invalid_rows == 0:
+        return _check("data", "External factor score coverage", 100.0, 0.4, "ok", "External factor scores are well covered.")
+    if coverage >= 0.80 and invalid_rows == 0:
+        score = 70.0 + (coverage - 0.80) / 0.15 * 25.0
+        return _check("data", "External factor score coverage", score, 0.4, "warning", "External factor scores have limited coverage gaps.")
+    score = max(0.0, coverage / 0.80 * 70.0)
+    return _check("data", "External factor score coverage", score, 0.4, "critical", "External factor score coverage is too low or contains invalid rows.")
 
 
 def _score_market_constraints(summary: dict[str, object]) -> dict[str, object]:
@@ -334,6 +356,7 @@ def _build_risk_gates(
     relative_summary: dict[str, object],
     execution_summary: dict[str, object],
     data_quality_summary: dict[str, object],
+    factor_score_quality_summary: dict[str, object],
     exposure_summary: dict[str, object],
     group_exposure_summary: dict[str, object],
     return_attribution_summary: dict[str, object],
@@ -348,6 +371,7 @@ def _build_risk_gates(
     min_information_ratio = thresholds["min_allowed_information_ratio"]
     min_fill_rate = thresholds["min_allowed_fill_rate"]
     min_execution_price_coverage = thresholds["min_allowed_execution_price_coverage"]
+    min_factor_score_coverage = thresholds["min_allowed_factor_score_coverage"]
     max_market_constraint_rate = thresholds["max_allowed_market_constraint_rate"]
     max_position_weight = thresholds["max_allowed_position_weight"]
     max_group_weight = thresholds["max_allowed_group_weight"]
@@ -425,6 +449,20 @@ def _build_risk_gates(
             threshold=min_execution_price_coverage,
             passed=_float(data_quality_summary, "execution_price_coverage_rate", default=1.0) >= min_execution_price_coverage,
             message="Execution price field coverage is below the required threshold.",
+        ),
+        _gate(
+            name=f"External factor score coverage at least {_pct_label(min_factor_score_coverage)}",
+            category="data",
+            actual=_float(factor_score_quality_summary, "score_coverage_rate", default=1.0),
+            threshold=min_factor_score_coverage,
+            passed=(
+                not factor_score_quality_summary
+                or (
+                    _float(factor_score_quality_summary, "score_coverage_rate", default=1.0) >= min_factor_score_coverage
+                    and _factor_score_invalid_rows(factor_score_quality_summary) == 0
+                )
+            ),
+            message="External factor score coverage is below the required threshold or contains invalid rows.",
         ),
         _gate(
             name=f"Market constraint rejection rate no more than {_pct_label(max_market_constraint_rate)}",
@@ -529,6 +567,15 @@ def _float(summary: dict[str, object], key: str, *, default: float) -> float:
     if isinstance(value, int | float):
         return float(value)
     return default
+
+
+def _factor_score_invalid_rows(summary: dict[str, object]) -> int:
+    return int(
+        _float(summary, "invalid_date_rows", default=0.0)
+        + _float(summary, "invalid_symbol_rows", default=0.0)
+        + _float(summary, "invalid_score_rows", default=0.0)
+        + _float(summary, "blank_score_rows", default=0.0)
+    )
 
 
 def _strongest_factor_correlation(summary: dict[str, object]) -> float:

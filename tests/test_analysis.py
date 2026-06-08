@@ -157,6 +157,12 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(1.5, summary["rows"][0]["test_to_train_efficiency"])
         self.assertFalse(summary["rows"][0]["is_degraded_out_of_sample"])
         self.assertTrue(summary["rows"][1]["is_degraded_out_of_sample"])
+        self.assertEqual({"param_top_n=2": 1, "param_top_n=3": 1}, summary["summary"]["selected_parameter_set_counts"])
+        self.assertEqual(1, summary["summary"]["parameter_drift_count"])
+        self.assertEqual(1.0, summary["summary"]["parameter_drift_rate"])
+        self.assertEqual({"2": 1, "3": 1}, summary["summary"]["parameter_selection_counts"]["param_top_n"])
+        self.assertEqual("mixed", summary["summary"]["oos_stability_grade"])
+        self.assertEqual("medium", summary["summary"]["overfit_risk"])
 
     def test_builds_drawdown_analysis(self) -> None:
         curve = [
@@ -968,9 +974,9 @@ class AnalysisTests(unittest.TestCase):
 
     def test_builds_batch_stability_analysis(self) -> None:
         rows = [
-            {"run_id": "run_001", "annualized_return": 0.2, "total_return": 0.1, "sharpe": 1.0, "max_drawdown": -0.1, "total_cost": 10.0, "gate_status": "pass", "param_top_n": 2},
-            {"run_id": "run_002", "annualized_return": 0.3, "total_return": 0.2, "sharpe": 1.2, "max_drawdown": -0.2, "total_cost": 20.0, "gate_status": "pass", "param_top_n": 3},
-            {"run_id": "run_003", "annualized_return": 0.4, "total_return": 0.3, "sharpe": 1.4, "max_drawdown": -0.2, "total_cost": 20.0, "gate_status": "fail", "failed_gate_categories": "risk;factor", "failed_gate_names": "Max drawdown;Factor correlation", "param_top_n": 4},
+            {"run_id": "run_001", "annualized_return": 0.2, "total_return": 0.1, "sharpe": 1.0, "max_drawdown": -0.1, "total_cost": 10.0, "gate_status": "pass", "param_top_n": 2, "param_rebalance_every_n_days": 5},
+            {"run_id": "run_002", "annualized_return": 0.3, "total_return": 0.2, "sharpe": 1.2, "max_drawdown": -0.2, "total_cost": 20.0, "gate_status": "pass", "param_top_n": 3, "param_rebalance_every_n_days": 5},
+            {"run_id": "run_003", "annualized_return": 0.4, "total_return": 0.3, "sharpe": 1.4, "max_drawdown": -0.2, "total_cost": 20.0, "gate_status": "fail", "failed_gate_categories": "risk;factor", "failed_gate_names": "Max drawdown;Factor correlation", "param_top_n": 4, "param_rebalance_every_n_days": 10},
         ]
 
         analysis = build_batch_stability_analysis(rows, rank_by="annualized_return")
@@ -979,11 +985,25 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual("run_003", analysis["summary"]["best_composite_run_id"])
         self.assertIn("composite_score", analysis["rows"][0])
         self.assertEqual(1, analysis["summary"]["robust_region_run_count"])
-        self.assertEqual({"param_top_n": {"min": 3.0, "max": 3.0, "values": [3.0]}}, analysis["summary"]["robust_region_parameter_ranges"])
+        self.assertEqual(
+            {
+                "param_rebalance_every_n_days": {"min": 5.0, "max": 5.0, "values": [5.0]},
+                "param_top_n": {"min": 3.0, "max": 3.0, "values": [3.0]},
+            },
+            analysis["summary"]["robust_region_parameter_ranges"],
+        )
         self.assertEqual(2, analysis["summary"]["gate_passing_run_count"])
         self.assertEqual(1, analysis["summary"]["gate_failing_run_count"])
         self.assertEqual({"factor": 1, "risk": 1}, analysis["summary"]["failed_gate_category_counts"])
         self.assertEqual({"Factor correlation": 1, "Max drawdown": 1}, analysis["summary"]["failed_gate_name_counts"])
+        sensitivity = analysis["summary"]["parameter_sensitivity"]
+        self.assertEqual("4", sensitivity["param_top_n"]["best_value_by_metric"])
+        self.assertEqual("10", sensitivity["param_rebalance_every_n_days"]["best_value_by_metric"])
+        self.assertEqual("param_top_n", analysis["summary"]["strongest_parameter"])
+        self.assertEqual("4", analysis["summary"]["best_parameter_values"]["param_top_n"])
+        self.assertIn("param_top_n_value_average_annualized_return", analysis["rows"][0])
+        self.assertEqual(1, analysis["rows"][0]["param_top_n_value_run_count"])
+        self.assertEqual(1.0, analysis["rows"][0]["param_rebalance_every_n_days_value_gate_passing_rate"])
         self.assertTrue(analysis["summary"]["recommended_actions"])
         self.assertIn("Factor gates fail often", " ".join(analysis["summary"]["recommended_actions"]))
         robust_rows = [row for row in analysis["rows"] if row["is_robust_region"]]
