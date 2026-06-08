@@ -445,8 +445,8 @@ python -m pip install -e .[dev]
 - `batch_runs/best_run.json`：当前批量结果中的最佳运行。
 - `batch_runs/batch_annualized_return.svg`：批量结果对比图。
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
-- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
-- `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率和最差回撤。
+- `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位及推荐依据、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
+- `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率、最差回撤、推荐档位标记，以及“排序指标最优 / 综合分最优”标记。
 - `batch_runs/batch_report.html`：批量扫描网页报告。
 - `walk_forward/walk_forward.csv/json`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要。
 - `walk_forward_optimization/walk_forward_optimization.csv/json`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、主导参数集、样本外稳定等级和过拟合风险摘要。

@@ -791,6 +791,10 @@ def save_batch_stability_files(analysis: dict[str, object], output_dir: Path) ->
             "gate_passing_run_count",
             "gate_passing_rate",
             "worst_max_drawdown",
+            "is_recommended",
+            "is_best_by_metric",
+            "is_best_by_composite",
+            "recommendation_reason",
         ]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -811,6 +815,12 @@ def _parameter_sensitivity_rows(analysis: dict[str, object]) -> list[dict[str, o
     sensitivity = summary.get("parameter_sensitivity")
     if not isinstance(sensitivity, dict):
         return []
+    best_parameter_values = summary.get("best_parameter_values")
+    if not isinstance(best_parameter_values, dict):
+        best_parameter_values = {}
+    rationale = summary.get("parameter_recommendation_rationale")
+    if not isinstance(rationale, dict):
+        rationale = {}
     rows: list[dict[str, object]] = []
     for parameter, parameter_payload in sorted(sensitivity.items()):
         if not isinstance(parameter_payload, dict):
@@ -823,6 +833,15 @@ def _parameter_sensitivity_rows(analysis: dict[str, object]) -> list[dict[str, o
                 continue
             row = {"parameter": parameter, "value": value}
             row.update(stats)
+            is_recommended = str(best_parameter_values.get(parameter, "")) == str(value)
+            row["is_recommended"] = is_recommended
+            row["is_best_by_metric"] = str(parameter_payload.get("best_value_by_metric", "")) == str(value)
+            row["is_best_by_composite"] = str(parameter_payload.get("best_value_by_composite", "")) == str(value)
+            parameter_rationale = rationale.get(parameter)
+            if is_recommended and isinstance(parameter_rationale, dict):
+                row["recommendation_reason"] = parameter_rationale.get("reason", "")
+            else:
+                row["recommendation_reason"] = ""
             rows.append(row)
     return rows
 

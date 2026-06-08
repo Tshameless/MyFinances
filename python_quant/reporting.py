@@ -1165,10 +1165,11 @@ def _build_batch_observation_rows(
                 ("Gate-failing runs", _format_summary_number(stability_summary, "gate_failing_run_count", decimals=0)),
                 ("Most common failed gate category", _format_count_map_top(stability_summary, "failed_gate_category_counts")),
                 ("Most common failed gate", _format_count_map_top(stability_summary, "failed_gate_name_counts")),
-                ("Strongest parameter effect", _format_summary_field(stability_summary, "strongest_parameter")),
-                ("Best parameter values", _format_best_parameter_values(stability_summary)),
-                ("Recommended action", _format_list_first(stability_summary, "recommended_actions")),
-                ("Recommended action count", _format_list_count(stability_summary, "recommended_actions")),
+                ("影响最强参数", _format_summary_field(stability_summary, "strongest_parameter")),
+                ("推荐参数档位", _format_best_parameter_values(stability_summary)),
+                ("参数推荐依据", _format_parameter_recommendation_rationale(stability_summary)),
+                ("建议动作", _format_list_first(stability_summary, "recommended_actions")),
+                ("建议动作数量", _format_list_count(stability_summary, "recommended_actions")),
             ]
         )
     return "\n".join(
@@ -1516,6 +1517,36 @@ def _format_best_parameter_values(summary: dict[str, object]) -> str:
         for key, value in sorted(values.items())
     ]
     return "; ".join(parts)
+
+
+def _format_parameter_recommendation_rationale(summary: dict[str, object]) -> str:
+    rationale = summary.get("parameter_recommendation_rationale")
+    if not isinstance(rationale, dict) or not rationale:
+        return "-"
+    parts = []
+    for parameter, payload in sorted(rationale.items()):
+        if not isinstance(payload, dict):
+            continue
+        recommended_value = payload.get("recommended_value", "-")
+        reason = _format_recommendation_reason(payload.get("reason", "-"))
+        best_by_metric = payload.get("best_value_by_metric", "-")
+        composite = _coerce_float(payload.get("average_composite_score", 0.0))
+        gate_rate = _coerce_float(payload.get("gate_passing_rate", 0.0))
+        metric_note = ""
+        if not payload.get("is_also_best_by_metric", False):
+            metric_note = f", 排序指标最优={best_by_metric}"
+        parts.append(
+            f"{parameter}={recommended_value} ({reason}{metric_note}, 综合分={composite:.3f}, 通过率={gate_rate:.2%})"
+        )
+    return "; ".join(parts) if parts else "-"
+
+
+def _format_recommendation_reason(reason: object) -> str:
+    reason_key = str(reason)
+    labels = {
+        "highest_average_composite_score": "平均综合分最高",
+    }
+    return labels.get(reason_key, reason_key)
 
 
 def _format_list_first(summary: dict[str, object], key: str) -> str:

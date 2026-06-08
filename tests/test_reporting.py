@@ -514,6 +514,8 @@ class ReportingTests(unittest.TestCase):
                     "summary": {
                         "parameter_sensitivity": {
                             "param_top_n": {
+                                "best_value_by_metric": "2",
+                                "best_value_by_composite": "3",
                                 "values": {
                                     "2": {
                                         "run_count": 2,
@@ -523,10 +525,23 @@ class ReportingTests(unittest.TestCase):
                                         "gate_passing_run_count": 1,
                                         "gate_passing_rate": 0.5,
                                         "worst_max_drawdown": -0.1,
+                                    },
+                                    "3": {
+                                        "run_count": 1,
+                                        "average_metric": 0.05,
+                                        "best_metric": 0.05,
+                                        "average_composite_score": 0.5,
+                                        "gate_passing_run_count": 1,
+                                        "gate_passing_rate": 1.0,
+                                        "worst_max_drawdown": -0.05,
                                     }
                                 }
                             }
-                        }
+                        },
+                        "best_parameter_values": {"param_top_n": "3"},
+                        "parameter_recommendation_rationale": {
+                            "param_top_n": {"reason": "highest_average_composite_score"}
+                        },
                     },
                 },
                 output_dir,
@@ -534,7 +549,10 @@ class ReportingTests(unittest.TestCase):
 
             content = paths["parameter_sensitivity_csv"].read_text(encoding="utf-8-sig")
             self.assertIn("parameter,value,run_count", content)
+            self.assertIn("is_recommended,is_best_by_metric,is_best_by_composite,recommendation_reason", content)
             self.assertIn("param_top_n,2,2", content)
+            self.assertIn("False,True,False,", content)
+            self.assertIn("True,False,True,highest_average_composite_score", content)
 
     def test_batch_rankings_prefer_gate_passing_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1476,6 +1494,16 @@ class ReportingTests(unittest.TestCase):
                                 "param_top_n": "3",
                                 "param_rebalance_every_n_days": "5",
                             },
+                            "parameter_recommendation_rationale": {
+                                "param_top_n": {
+                                    "recommended_value": "3",
+                                    "reason": "highest_average_composite_score",
+                                    "is_also_best_by_metric": False,
+                                    "best_value_by_metric": "4",
+                                    "average_composite_score": 0.42,
+                                    "gate_passing_rate": 0.5,
+                                }
+                            },
                             "recommended_actions": [
                                 "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.",
                                 "Most common failed gate is 'Max drawdown'; review the single-run strategy_health_gates.csv files for affected runs first.",
@@ -1512,13 +1540,18 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("risk: 2", content)
             self.assertIn("Most common failed gate", content)
             self.assertIn("Max drawdown: 2", content)
-            self.assertIn("Strongest parameter effect", content)
+            self.assertIn("影响最强参数", content)
             self.assertIn("param_top_n", content)
-            self.assertIn("Best parameter values", content)
+            self.assertIn("推荐参数档位", content)
             self.assertIn("param_rebalance_every_n_days=5", content)
-            self.assertIn("Recommended action", content)
+            self.assertIn("参数推荐依据", content)
+            self.assertIn("平均综合分最高", content)
+            self.assertIn("排序指标最优=4", content)
+            self.assertIn("综合分=0.420", content)
+            self.assertIn("通过率=50.00%", content)
+            self.assertIn("建议动作", content)
             self.assertIn("Risk gates fail often", content)
-            self.assertIn("Recommended action count", content)
+            self.assertIn("建议动作数量", content)
             self.assertIn("gate_status", content)
             self.assertIn("health_score", content)
             self.assertIn("pass", content)

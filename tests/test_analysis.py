@@ -164,6 +164,41 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual("mixed", summary["summary"]["oos_stability_grade"])
         self.assertEqual("medium", summary["summary"]["overfit_risk"])
 
+    def test_walk_forward_optimization_ignores_parameter_value_context_fields(self) -> None:
+        summary = build_walk_forward_optimization_summary(
+            [
+                {
+                    "window_id": "window_001",
+                    "train_annualized_return": 0.2,
+                    "train_health_score": 80,
+                    "train_gate_status": "pass",
+                    "test_total_return": 0.03,
+                    "test_annualized_return": 0.3,
+                    "test_max_drawdown": -0.02,
+                    "param_top_n": 2,
+                    "param_top_n_value_average_annualized_return": 0.2,
+                },
+                {
+                    "window_id": "window_002",
+                    "train_annualized_return": 0.1,
+                    "train_health_score": 60,
+                    "train_gate_status": "pass",
+                    "test_total_return": 0.01,
+                    "test_annualized_return": 0.2,
+                    "test_max_drawdown": -0.04,
+                    "param_top_n": 2,
+                    "param_top_n_value_average_annualized_return": 0.4,
+                },
+            ]
+        )
+
+        self.assertEqual(1, summary["summary"]["selected_parameter_sets"])
+        self.assertEqual(0, summary["summary"]["parameter_drift_count"])
+        self.assertNotIn(
+            "param_top_n_value_average_annualized_return",
+            summary["summary"]["parameter_selection_counts"],
+        )
+
     def test_builds_drawdown_analysis(self) -> None:
         curve = [
             EquityPoint(date=date(2024, 1, 2), equity=100.0, daily_return=0.0, holdings=()),
@@ -1001,6 +1036,21 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual("10", sensitivity["param_rebalance_every_n_days"]["best_value_by_metric"])
         self.assertEqual("param_top_n", analysis["summary"]["strongest_parameter"])
         self.assertEqual("4", analysis["summary"]["best_parameter_values"]["param_top_n"])
+        self.assertEqual(
+            "highest_average_composite_score",
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["reason"],
+        )
+        self.assertTrue(
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["is_also_best_by_metric"],
+        )
+        self.assertEqual(
+            "4",
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["best_value_by_metric"],
+        )
+        self.assertEqual(
+            1,
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["run_count"],
+        )
         self.assertIn("param_top_n_value_average_annualized_return", analysis["rows"][0])
         self.assertEqual(1, analysis["rows"][0]["param_top_n_value_run_count"])
         self.assertEqual(1.0, analysis["rows"][0]["param_rebalance_every_n_days_value_gate_passing_rate"])
@@ -1008,6 +1058,42 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("Factor gates fail often", " ".join(analysis["summary"]["recommended_actions"]))
         robust_rows = [row for row in analysis["rows"] if row["is_robust_region"]]
         self.assertEqual(["run_002"], [row["run_id"] for row in robust_rows])
+
+    def test_batch_stability_flags_metric_and_composite_recommendation_divergence(self) -> None:
+        rows = [
+            {
+                "run_id": "run_001",
+                "annualized_return": 0.4,
+                "total_return": 0.4,
+                "sharpe": 0.0,
+                "max_drawdown": -1.0,
+                "total_cost": 0.0,
+                "gate_status": "pass",
+                "param_top_n": 2,
+            },
+            {
+                "run_id": "run_002",
+                "annualized_return": 0.2,
+                "total_return": 0.2,
+                "sharpe": 2.0,
+                "max_drawdown": -0.01,
+                "total_cost": 0.0,
+                "gate_status": "pass",
+                "param_top_n": 3,
+            },
+        ]
+
+        analysis = build_batch_stability_analysis(rows, rank_by="annualized_return")
+
+        self.assertEqual("2", analysis["summary"]["parameter_sensitivity"]["param_top_n"]["best_value_by_metric"])
+        self.assertEqual("3", analysis["summary"]["best_parameter_values"]["param_top_n"])
+        self.assertFalse(
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["is_also_best_by_metric"],
+        )
+        self.assertEqual(
+            "2",
+            analysis["summary"]["parameter_recommendation_rationale"]["param_top_n"]["best_value_by_metric"],
+        )
 
 
 def _metrics(
