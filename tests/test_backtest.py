@@ -5,6 +5,7 @@ from datetime import date
 
 from python_quant.backtest import _build_target_holdings, run_backtest
 from python_quant.config import BacktestConfig
+from python_quant.execution_model import rebalance_account
 from python_quant.models import PriceBar
 
 
@@ -62,6 +63,91 @@ class BacktestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Not enough history"):
             run_backtest(bars, config)
 
+    def test_forward_fills_missing_bars_as_suspended_and_blocks_trades(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="AAA", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="AAA", close=12),
+            PriceBar(date=date(2024, 1, 5), symbol="AAA", close=11),
+            PriceBar(date=date(2024, 1, 2), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 4), symbol="BBB", close=15),
+            PriceBar(date=date(2024, 1, 5), symbol="BBB", close=16),
+        ]
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=1,
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            price_field="close",
+            factor_weights={"momentum": 1.0},
+            forward_fill_suspended_bars=True,
+        )
+
+        result = run_backtest(bars, config)
+
+        filled_bar = next(
+            bar
+            for bar in result.price_bars or []
+            if bar.symbol == "AAA" and bar.date == date(2024, 1, 4)
+        )
+        self.assertFalse(filled_bar.tradable)
+        self.assertEqual(0.0, filled_bar.volume)
+        self.assertEqual(12, filled_bar.close)
+        self.assertTrue(any("AAA" in point.holdings for point in result.equity_curve))
+
+    def test_suspended_fill_bar_blocks_sell_in_trade_engine(self) -> None:
+        aligned_history = {
+            "AAA": [
+                PriceBar(date=date(2024, 1, 3), symbol="AAA", close=12),
+                PriceBar(
+                    date=date(2024, 1, 4),
+                    symbol="AAA",
+                    close=12,
+                    volume=0,
+                    tradable=False,
+                    can_buy=False,
+                    can_sell=False,
+                    is_suspended=True,
+                ),
+            ],
+            "BBB": [
+                PriceBar(date=date(2024, 1, 3), symbol="BBB", close=10),
+                PriceBar(date=date(2024, 1, 4), symbol="BBB", close=10),
+            ],
+        }
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            price_field="close",
+        )
+
+        trade_plan = rebalance_account(
+            cash=0.0,
+            positions={"AAA": 10},
+            entry_dates={"AAA": date(2024, 1, 3)},
+            target_holdings=("BBB",),
+            aligned_history=aligned_history,
+            index=1,
+            config=config,
+            current_date=date(2024, 1, 4),
+        )
+
+        self.assertEqual({"AAA": 10}, trade_plan.positions)
+        self.assertTrue(
+            any(
+                attempt.symbol == "AAA" and attempt.reason == "suspended"
+                for attempt in trade_plan.trade_attempts
+            )
+        )
+
     def test_rejects_invalid_config(self) -> None:
         with self.assertRaisesRegex(ValueError, "top_n"):
             BacktestConfig(top_n=0)
@@ -87,6 +173,74 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(result.equity_curve[-1].equity, 100.0)
         self.assertGreaterEqual(result.metrics.sortino, 0.0)
         self.assertGreaterEqual(result.metrics.calmar, 0.0)
+
+    def test_delays_trade_execution_to_next_bar(self) -> None:
+        bars = _build_aligned_bars_with_open_prices()
+        config = BacktestConfig(
+            initial_cash=1000.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            execution_price_field="open",
+            execution_delay_days=1,
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        first_trade = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        self.assertEqual(date(2024, 1, 5), first_trade.date)
+        self.assertEqual(12.5, first_trade.price)
+
+    def test_caps_new_position_target_weight(self) -> None:
+        bars = _build_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=1000.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            max_position_weight=0.2,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        first_buy = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        self.assertLessEqual(first_buy.gross_value, 200.0)
+
+    def test_reserves_target_cash_weight_for_new_positions(self) -> None:
+        bars = _build_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=1000.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            target_cash_weight=0.3,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        first_buy = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        self.assertLessEqual(first_buy.gross_value, 700.0)
 
     def test_keeps_locked_position_when_sell_is_blocked(self) -> None:
         bars = [
@@ -221,6 +375,40 @@ class BacktestTests(unittest.TestCase):
             buy_trade.total_cost,
         )
 
+    def test_applies_side_specific_commission_rates(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="AAA", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="AAA", close=12),
+            PriceBar(date=date(2024, 1, 4), symbol="AAA", close=11),
+            PriceBar(date=date(2024, 1, 5), symbol="AAA", close=10),
+            PriceBar(date=date(2024, 1, 2), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 3), symbol="BBB", close=10),
+            PriceBar(date=date(2024, 1, 4), symbol="BBB", close=15),
+            PriceBar(date=date(2024, 1, 5), symbol="BBB", close=16),
+        ]
+        config = BacktestConfig(
+            initial_cash=1000.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=1,
+            price_field="close",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+            commission_rate=0.0,
+            buy_commission_rate=0.01,
+            sell_commission_rate=0.02,
+            slippage_rate=0.0,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        buy_trade = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        sell_trade = next(trade for trade in result.trades or [] if trade.side == "SELL")
+        self.assertAlmostEqual(buy_trade.gross_value * 0.01, buy_trade.commission)
+        self.assertAlmostEqual(sell_trade.gross_value * 0.02, sell_trade.commission)
+
     def test_default_lot_size_requires_buying_whole_a_share_lots(self) -> None:
         bars = _build_aligned_bars()
         config = BacktestConfig(
@@ -275,6 +463,160 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(("AAA",), target)
 
+    def test_target_holdings_respects_group_position_limit(self) -> None:
+        bars = _build_aligned_bars()
+        aligned_history = {
+            "AAA": [bar for bar in bars if bar.symbol == "AAA"],
+            "BBB": [bar for bar in bars if bar.symbol == "BBB"],
+            "CCC": [bar for bar in bars if bar.symbol == "CCC"],
+        }
+        config = BacktestConfig(
+            top_n=3,
+            max_group_positions=1,
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+        )
+
+        target = _build_target_holdings(
+            scores={"AAA": 3.0, "BBB": 2.0, "CCC": 1.0},
+            aligned_history=aligned_history,
+            index=1,
+            current_holdings=(),
+            config=config,
+            symbol_groups={"AAA": "金融", "BBB": "金融", "CCC": "消费"},
+        )
+
+        self.assertEqual(("AAA", "CCC"), target)
+
+    def test_stock_pool_limits_new_entries(self) -> None:
+        bars = _build_aligned_bars()
+        config = BacktestConfig(
+            initial_cash=100.0,
+            top_n=1,
+            lot_size=1,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(
+            bars,
+            config,
+            stock_pool_by_date={date(2024, 1, 2): {"BBB", "CCC"}},
+        )
+
+        bought_symbols = {trade.symbol for trade in result.trades or [] if trade.side == "BUY"}
+        self.assertNotIn("AAA", bought_symbols)
+        self.assertTrue(bought_symbols <= {"BBB", "CCC"})
+
+    def test_stock_pool_keeps_locked_position_until_sellable(self) -> None:
+        bars = _build_reversing_signal_bars()
+        aligned_history = {
+            "AAA": [bar for bar in bars if bar.symbol == "AAA"],
+            "BBB": [bar for bar in bars if bar.symbol == "BBB"],
+        }
+        config = BacktestConfig(
+            initial_cash=10_000.0,
+            top_n=1,
+            lot_size=100,
+            rebalance_every_n_days=1,
+            price_field="close",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            factor_weights={"momentum": 1.0},
+        )
+
+        target = _build_target_holdings(
+            scores={"BBB": 1.0, "AAA": 0.0},
+            aligned_history=aligned_history,
+            index=1,
+            current_holdings=("AAA",),
+            config=config,
+            entry_dates={"AAA": date(2024, 1, 3)},
+            current_date=date(2024, 1, 3),
+            allowed_symbols={"BBB"},
+        )
+
+        self.assertEqual(("AAA",), target)
+
+    def test_volume_participation_limits_buy_shares(self) -> None:
+        bars = [
+            PriceBar(date=bar.date, symbol=bar.symbol, close=bar.close, volume=50)
+            for bar in _build_aligned_bars()
+        ]
+        config = BacktestConfig(
+            initial_cash=100_000.0,
+            top_n=1,
+            lot_size=10,
+            rebalance_every_n_days=2,
+            price_field="close",
+            lookback_momentum=2,
+            lookback_mean_reversion=1,
+            lookback_volatility=2,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            max_volume_participation=0.5,
+            factor_weights={"momentum": 1.0},
+        )
+
+        result = run_backtest(bars, config)
+
+        first_buy = next(trade for trade in result.trades or [] if trade.side == "BUY")
+        self.assertEqual(20, first_buy.shares)
+
+    def test_volume_participation_allows_partial_sell(self) -> None:
+        bars = _build_reversing_signal_bars()
+        aligned_history = {
+            "AAA": [
+                PriceBar(date=bar.date, symbol=bar.symbol, close=bar.close, volume=300)
+                for bar in bars
+                if bar.symbol == "AAA"
+            ],
+            "BBB": [
+                PriceBar(date=bar.date, symbol=bar.symbol, close=bar.close, volume=1000)
+                for bar in bars
+                if bar.symbol == "BBB"
+            ],
+        }
+        config = BacktestConfig(
+            initial_cash=10_000.0,
+            top_n=1,
+            lot_size=100,
+            rebalance_every_n_days=1,
+            price_field="close",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+            max_volume_participation=0.5,
+            factor_weights={"momentum": 1.0},
+        )
+
+        trade_plan = rebalance_account(
+            cash=1000.0,
+            positions={"AAA": 200},
+            entry_dates={"AAA": date(2024, 1, 2)},
+            target_holdings=(),
+            aligned_history=aligned_history,
+            index=1,
+            config=config,
+            current_date=date(2024, 1, 3),
+        )
+
+        self.assertEqual({"AAA": 50}, trade_plan.positions)
+        self.assertEqual(150, trade_plan.trades[0].shares)
+        self.assertEqual("rebalance_exit_partial_volume_limit", trade_plan.trades[0].reason)
+
 
 def _build_aligned_bars() -> list[PriceBar]:
     closes = {
@@ -311,6 +653,13 @@ def _build_adjusted_price_bars() -> list[PriceBar]:
             )
         )
     return adjusted_bars
+
+
+def _build_aligned_bars_with_open_prices() -> list[PriceBar]:
+    return [
+        PriceBar(date=bar.date, symbol=bar.symbol, close=bar.close, open=bar.close - 0.5)
+        for bar in _build_aligned_bars()
+    ]
 
 
 def _build_reversing_signal_bars() -> list[PriceBar]:

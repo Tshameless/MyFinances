@@ -19,6 +19,7 @@ from python_quant.models import (
     TradeRecord,
 )
 from python_quant.reporting import (
+    load_symbol_group_mapping,
     load_symbol_name_mapping,
     print_summary,
     save_batch_chart_svg,
@@ -36,6 +37,25 @@ from python_quant.reporting import (
     save_single_run_report_html,
     save_trade_attempts,
     save_trades,
+)
+from python_quant.reporting_csv import (
+    save_batch_stability_files,
+    save_cost_attribution_files,
+    save_drawdown_files,
+    save_execution_quality_files,
+    save_exposure_files,
+    save_factor_correlation_files,
+    save_factor_decay_files,
+    save_factor_group_return_files,
+    save_group_exposure_files,
+    save_monthly_return_files,
+    save_pnl_ledger_files,
+    save_relative_performance_files,
+    save_return_attribution_files,
+    save_rolling_risk_files,
+    save_strategy_health_files,
+    save_walk_forward_files,
+    save_walk_forward_optimization_files,
 )
 
 
@@ -127,6 +147,19 @@ class ReportingTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "Unsupported A-share symbol format"):
                 load_symbol_name_mapping(csv_path)
+
+    def test_loads_symbol_group_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "groups.csv"
+            csv_path.write_text(
+                "symbol,group\n000001,银行\n600519,消费\n",
+                encoding="utf-8",
+            )
+
+            mapping = load_symbol_group_mapping(csv_path)
+
+            self.assertEqual("银行", mapping["000001"])
+            self.assertEqual("消费", mapping["600519"])
 
     def test_saves_equity_chart_svg(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -292,6 +325,8 @@ class ReportingTests(unittest.TestCase):
                     total_cost=0.84,
                     cash_change=-1025.84,
                     reason="rebalance_entry",
+                    fixed_slippage=0.20,
+                    market_impact=0.31,
                 )
             ]
 
@@ -301,6 +336,10 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("方向 / side", content)
             self.assertIn("成交金额 / gross_value", content)
             self.assertIn("佣金 / commission", content)
+            self.assertIn("fixed_slippage", content)
+            self.assertIn("market_impact", content)
+            self.assertIn("0.20", content)
+            self.assertIn("0.31", content)
             self.assertIn("BUY", content)
             self.assertIn("-1025.84", content)
 
@@ -441,6 +480,522 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("方案2", chart_content)
             self.assertIn("年化收益参数热力图", heatmap_content)
 
+    def test_saves_batch_stability_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_batch_stability_files(
+                {
+                    "rows": [
+                        {
+                            "run_id": "run_001",
+                            "is_robust_region": True,
+                            "composite_score": 1.2,
+                            "risk_penalty": 0.1,
+                        }
+                    ],
+                    "summary": {"best_run_id": "run_001"},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["batch_stability_csv"].exists())
+            self.assertTrue(paths["batch_stability_json"].exists())
+            self.assertIn("is_robust_region", paths["batch_stability_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_batch_rankings_prefer_gate_passing_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            rows = [
+                {
+                    "run_id": "run_001",
+                    "annualized_return": 0.2,
+                    "health_score": 88.0,
+                    "gate_status": "pass",
+                    "gate_failures": 0,
+                    "health_warnings": 1,
+                    "critical_warnings": 0,
+                },
+                {
+                    "run_id": "run_002",
+                    "annualized_return": 0.5,
+                    "health_score": 55.0,
+                    "gate_status": "fail",
+                    "gate_failures": 2,
+                    "health_warnings": 4,
+                    "critical_warnings": 1,
+                },
+            ]
+
+            _, leaderboard_json, best_run_json = save_batch_rankings(
+                rows,
+                output_dir,
+                rank_by="annualized_return",
+            )
+
+            leaderboard_payload = json.loads(leaderboard_json.read_text(encoding="utf-8"))
+            best_payload = json.loads(best_run_json.read_text(encoding="utf-8"))
+            self.assertEqual("gate_pass_first_then_metric", leaderboard_payload["ranking_policy"])
+            self.assertEqual("run_001", leaderboard_payload["rows"][0]["run_id"])
+            self.assertEqual("pass", leaderboard_payload["reader_friendly"]["best_gate_status"])
+            self.assertEqual("88.000", leaderboard_payload["reader_friendly"]["best_health_score"])
+            self.assertEqual("run_001", best_payload["best_run"]["run_id"])
+            self.assertEqual("pass", best_payload["reader_friendly"]["best_gate_status"])
+
+    def test_saves_walk_forward_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_walk_forward_files(
+                {
+                    "rows": [
+                        {
+                            "window_id": "window_001",
+                            "start_date": "2024-01-02",
+                            "end_date": "2024-02-02",
+                            "periods": 20,
+                            "total_return": 0.05,
+                            "annualized_return": 0.2,
+                            "max_drawdown": -0.03,
+                            "sharpe": 1.2,
+                            "win_rate": 0.6,
+                            "total_cost": 10.0,
+                            "run_manifest_json": "run_manifest.json",
+                        }
+                    ],
+                    "summary": {"windows": 1},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["walk_forward_csv"].exists())
+            self.assertTrue(paths["walk_forward_json"].exists())
+            self.assertIn("window_001", paths["walk_forward_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_walk_forward_optimization_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_walk_forward_optimization_files(
+                {
+                    "rows": [
+                        {
+                            "window_id": "window_001",
+                            "train_start_date": "2024-01-02",
+                            "train_end_date": "2024-02-02",
+                            "test_start_date": "2024-02-05",
+                            "test_end_date": "2024-03-01",
+                            "train_annualized_return": 0.2,
+                            "train_sharpe": 1.1,
+                            "test_total_return": 0.03,
+                            "test_annualized_return": 0.18,
+                            "train_test_annualized_gap": 0.02,
+                            "test_to_train_efficiency": 0.9,
+                            "is_degraded_out_of_sample": True,
+                            "test_max_drawdown": -0.02,
+                            "test_sharpe": 1.0,
+                            "test_win_rate": 0.6,
+                            "train_run_manifest_json": "train.json",
+                            "test_run_manifest_json": "test.json",
+                            "param_top_n": 2,
+                        }
+                    ],
+                    "summary": {"windows": 1},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["walk_forward_optimization_csv"].exists())
+            self.assertTrue(paths["walk_forward_optimization_json"].exists())
+            content = paths["walk_forward_optimization_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("param_top_n", content)
+            self.assertIn("train_test_annualized_gap", content)
+            self.assertIn("test_to_train_efficiency", content)
+
+    def test_saves_factor_group_return_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_factor_group_return_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "next_date": "2024-01-03",
+                            "factor": "momentum",
+                            "group": 1,
+                            "group_count": 2,
+                            "sample_size": 3,
+                            "average_factor_value": 0.1,
+                            "average_forward_return": 0.02,
+                        }
+                    ],
+                    "summary": {"group_count": 2},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["factor_group_returns_csv"].exists())
+            self.assertTrue(paths["factor_group_returns_json"].exists())
+
+    def test_saves_factor_decay_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_factor_decay_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "next_date": "2024-01-03",
+                            "factor": "total_score",
+                            "score_correlation": 0.8,
+                            "rank_correlation": 0.7,
+                            "sample_size": 3,
+                            "selected_count": 2,
+                            "selected_retention_rate": 0.5,
+                            "selected_turnover_rate": 0.5,
+                        }
+                    ],
+                    "summary": {"total_score": {"average_rank_correlation": 0.7}},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["factor_decay_csv"].exists())
+            self.assertTrue(paths["factor_decay_json"].exists())
+            self.assertIn("selected_retention_rate", paths["factor_decay_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_factor_correlation_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_factor_correlation_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "factor": "momentum",
+                            "compared_factor": "mean_reversion",
+                            "correlation": -0.8,
+                            "rank_correlation": -0.7,
+                            "sample_size": 3,
+                        }
+                    ],
+                    "summary": {"strongest_pair": {"factor": "momentum", "compared_factor": "mean_reversion"}},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["factor_correlation_csv"].exists())
+            self.assertTrue(paths["factor_correlation_json"].exists())
+            self.assertIn("compared_factor", paths["factor_correlation_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_risk_analysis_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            drawdown_paths = save_drawdown_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "equity": 100.0,
+                            "peak_date": "2024-01-02",
+                            "peak_equity": 100.0,
+                            "drawdown": 0.0,
+                            "is_underwater": False,
+                            "underwater_days": 0,
+                            "underwater_start_date": "",
+                            "daily_return": 0.0,
+                        }
+                    ],
+                    "summary": {"max_drawdown": 0.0},
+                },
+                output_dir,
+            )
+            monthly_paths = save_monthly_return_files(
+                {
+                    "rows": [
+                        {
+                            "month": "2024-01",
+                            "start_date": "2024-01-02",
+                            "end_date": "2024-01-31",
+                            "periods": 20,
+                            "starting_equity": 100.0,
+                            "ending_equity": 105.0,
+                            "monthly_return": 0.05,
+                        }
+                    ],
+                    "summary": {"months": 1},
+                },
+                output_dir,
+            )
+            relative_paths = save_relative_performance_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "strategy_daily_return": 0.01,
+                            "benchmark_daily_return": 0.005,
+                            "active_return": 0.005,
+                            "cumulative_strategy_equity": 101.0,
+                            "cumulative_benchmark_equity": 100.5,
+                            "active_equity": 1.005,
+                            "cumulative_active_return": 0.005,
+                            "active_drawdown": 0.0,
+                        }
+                    ],
+                    "summary": {"has_benchmark": True},
+                },
+                output_dir,
+            )
+            rolling_paths = save_rolling_risk_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-31",
+                            "start_date": "2024-01-02",
+                            "end_date": "2024-01-31",
+                            "window": 20,
+                            "periods": 20,
+                            "rolling_return": 0.05,
+                            "rolling_annualized_return": 0.8,
+                            "rolling_volatility": 0.16,
+                            "rolling_sharpe": 5.0,
+                            "rolling_max_drawdown": -0.02,
+                            "rolling_win_rate": 0.6,
+                        }
+                    ],
+                    "summary": {"periods": 1},
+                },
+                output_dir,
+            )
+            health_paths = save_strategy_health_files(
+                {
+                    "rows": [
+                        {
+                            "category": "risk",
+                            "name": "最大回撤",
+                            "score": 90.0,
+                            "weight": 1.0,
+                            "severity": "ok",
+                            "message": "最大回撤控制良好。",
+                        }
+                    ],
+                    "summary": {"score": 90.0, "grade": "A"},
+                    "warnings": [],
+                    "gates": [
+                        {
+                            "name": "最大回撤不超过 20%",
+                            "category": "risk",
+                            "actual": 0.05,
+                            "threshold": 0.20,
+                            "passed": True,
+                            "message": "通过",
+                        }
+                    ],
+                },
+                output_dir,
+            )
+
+            self.assertTrue(drawdown_paths["drawdown_csv"].exists())
+            self.assertTrue(drawdown_paths["drawdown_json"].exists())
+            drawdown_content = drawdown_paths["drawdown_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("is_underwater", drawdown_content)
+            self.assertIn("underwater_days", drawdown_content)
+            self.assertTrue(monthly_paths["monthly_returns_csv"].exists())
+            self.assertTrue(monthly_paths["monthly_returns_json"].exists())
+            self.assertTrue(relative_paths["relative_performance_csv"].exists())
+            self.assertTrue(relative_paths["relative_performance_json"].exists())
+            self.assertIn(
+                "cumulative_active_return",
+                relative_paths["relative_performance_csv"].read_text(encoding="utf-8-sig"),
+            )
+            self.assertTrue(rolling_paths["rolling_risk_csv"].exists())
+            self.assertTrue(rolling_paths["rolling_risk_json"].exists())
+            self.assertTrue(health_paths["strategy_health_csv"].exists())
+            self.assertTrue(health_paths["strategy_health_gates_csv"].exists())
+            self.assertTrue(health_paths["strategy_health_json"].exists())
+
+    def test_saves_execution_quality_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_execution_quality_files(
+                {
+                    "rows": [
+                        {
+                            "category": "side",
+                            "key": "ALL",
+                            "orders": 2,
+                            "filled_orders": 1,
+                            "rejected_orders": 1,
+                            "fill_rate": 0.5,
+                            "filled_shares": 100,
+                            "rejected_target_shares": 100,
+                            "gross_value": 1000.0,
+                            "total_cost": 1.0,
+                            "cost_bps": 10.0,
+                            "average_trade_value": 1000.0,
+                        }
+                    ],
+                    "summary": {"fill_rate": 0.5},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["execution_quality_csv"].exists())
+            self.assertTrue(paths["execution_quality_json"].exists())
+            self.assertIn("cost_bps", paths["execution_quality_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_exposure_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_exposure_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "holding_count": 2,
+                            "stock_weight": 0.9,
+                            "cash_weight": 0.1,
+                            "largest_position_weight": 0.5,
+                            "hhi_concentration": 0.41,
+                            "effective_position_count": 2.439,
+                            "largest_risk_contribution_symbol": "000001",
+                            "largest_risk_contribution_share": 0.61,
+                            "total_equity": 2000.0,
+                        }
+                    ],
+                    "summary": {"average_stock_weight": 0.9},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["exposure_csv"].exists())
+            self.assertTrue(paths["exposure_json"].exists())
+            content = paths["exposure_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("hhi_concentration", content)
+            self.assertIn("largest_risk_contribution_symbol", content)
+
+    def test_saves_group_exposure_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_group_exposure_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "group": "银行",
+                            "holding_count": 1,
+                            "weight": 0.5,
+                            "market_value": 1000.0,
+                            "risk_contribution_share": 1.0,
+                        }
+                    ],
+                    "summary": {"has_group_mapping": True},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["group_exposure_csv"].exists())
+            self.assertTrue(paths["group_exposure_json"].exists())
+            content = paths["group_exposure_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("group", content)
+            self.assertIn("risk_contribution_share", content)
+
+    def test_saves_return_attribution_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_return_attribution_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-03",
+                            "previous_date": "2024-01-02",
+                            "symbol": "000001",
+                            "group": "银行",
+                            "previous_weight": 1.0,
+                            "asset_return": 0.01,
+                            "return_contribution": 0.01,
+                        }
+                    ],
+                    "summary": {"periods": 1},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["return_attribution_csv"].exists())
+            self.assertTrue(paths["return_attribution_json"].exists())
+            self.assertIn("return_contribution", paths["return_attribution_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_cost_attribution_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_cost_attribution_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "symbol": "000001",
+                            "group": "银行",
+                            "side": "BUY",
+                            "reason": "rebalance_entry",
+                            "component": "commission",
+                            "amount": 1.0,
+                            "gross_value": 1000.0,
+                            "cost_bps": 10.0,
+                        }
+                    ],
+                    "summary": {"total_cost": 1.0},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["cost_attribution_csv"].exists())
+            self.assertTrue(paths["cost_attribution_json"].exists())
+            self.assertIn("component", paths["cost_attribution_csv"].read_text(encoding="utf-8-sig"))
+
+    def test_saves_pnl_ledger_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_pnl_ledger_files(
+                {
+                    "rows": [
+                        {
+                            "date": "2024-01-02",
+                            "starting_equity": 1000.0,
+                            "ending_equity": 1010.0,
+                            "equity_change": 10.0,
+                            "daily_return": 0.01,
+                            "gross_buy_value": 0.0,
+                            "gross_sell_value": 0.0,
+                            "net_cash_flow": 0.0,
+                            "total_cost": 0.0,
+                            "market_pnl": 10.0,
+                            "ending_cash": 10.0,
+                            "ending_market_value": 1000.0,
+                            "ledger_equity": 1010.0,
+                            "reconciliation_difference": 0.0,
+                            "trade_count": 0,
+                            "holding_count": 1,
+                        }
+                    ],
+                    "summary": {"reconciled": True},
+                },
+                output_dir,
+            )
+
+            self.assertTrue(paths["pnl_ledger_csv"].exists())
+            self.assertTrue(paths["pnl_ledger_json"].exists())
+            self.assertIn("reconciliation_difference", paths["pnl_ledger_csv"].read_text(encoding="utf-8-sig"))
+
     def test_saves_empty_batch_chart_with_chinese_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -484,11 +1039,239 @@ class ReportingTests(unittest.TestCase):
                 tracking_error=0.03,
                 information_ratio=1.1,
             )
+            (output_dir / "drawdown.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "max_drawdown_date": "2024-01-10",
+                            "longest_underwater_days": 7,
+                            "is_recovered": False,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "exposure.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "average_stock_weight": 0.82,
+                            "average_holding_count": 3.5,
+                            "average_effective_position_count": 2.8,
+                            "max_largest_position_weight": 0.45,
+                            "max_hhi_concentration": 0.31,
+                            "max_largest_risk_contribution_symbol": "000001",
+                            "max_largest_risk_contribution_share": 0.62,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "group_exposure.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "max_group_risk_contribution_group": "银行",
+                            "max_group_risk_contribution_share": 0.58,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "relative_performance.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "total_active_return": 0.04,
+                            "annualized_alpha": 0.03,
+                            "beta": 0.85,
+                            "r_squared": 0.64,
+                            "active_win_rate": 0.67,
+                            "worst_active_return_date": "2024-01-03",
+                            "max_active_drawdown": -0.02,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "factor_ic.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "total_score": {
+                                "mean_ic": 0.12,
+                                "ic_ir": 0.75,
+                                "ic_t_stat": 2.10,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "factor_decay.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "total_score": {
+                                "average_rank_correlation": 0.66,
+                                "average_selected_retention_rate": 0.50,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "factor_correlation.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "strongest_pair": {
+                                "factor": "momentum",
+                                "compared_factor": "mean_reversion",
+                                "average_correlation": -0.8,
+                            },
+                            "strongest_rank_pair": {
+                                "factor": "momentum",
+                                "compared_factor": "low_volatility",
+                                "average_rank_correlation": 0.7,
+                            },
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "rolling_risk.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "worst_rolling_return": -0.03,
+                            "worst_rolling_return_date": "2024-01-12",
+                            "average_rolling_sharpe": 1.23,
+                            "worst_rolling_drawdown": -0.04,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "execution_quality.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "fill_rate": 0.75,
+                            "cost_bps": 8.2,
+                            "dominant_constraint_category": "limit",
+                            "market_constraint_rate": 0.6,
+                            "worst_constraint_date": "2024-01-03",
+                            "worst_constraint_dominant_category": "t_plus_one",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "return_attribution.json").write_text(
+                json.dumps({"summary": {"total_residual_return": 0.0012, "total_cost_drag": 0.0034}}),
+                encoding="utf-8",
+            )
+            (output_dir / "cost_attribution.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "total_cost": 123.45,
+                            "fixed_slippage_cost": 12.30,
+                            "market_impact_cost": 45.60,
+                            "cost_bps": 9.9,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "pnl_ledger.json").write_text(
+                json.dumps({"summary": {"max_abs_reconciliation_difference": 0.0, "reconciled": True}}),
+                encoding="utf-8",
+            )
+            (output_dir / "strategy_health.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "score": 92.5,
+                            "grade": "A",
+                            "gate_status": "pass",
+                            "gate_failures": 0,
+                            "warnings": 1,
+                            "strongest_factor_correlation": 0.82,
+                            "strongest_factor_correlation_pair": "momentum vs mean_reversion",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "turnover_analysis.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "average_entries_per_rebalance": 1.25,
+                            "average_exits_per_rebalance": 0.75,
+                            "realized_holding_count": 4,
+                            "average_realized_holding_days": 8.5,
+                            "open_position_count": 2,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output_dir / "price_data_quality_report.json").write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "row_count": 8,
+                            "symbol_count": 2,
+                            "date_count": 4,
+                            "start_date": "2024-01-02",
+                            "end_date": "2024-01-05",
+                            "symbols_with_missing_adjusted_close": 1,
+                            "execution_price_field": "open",
+                            "missing_execution_price_rows": 3,
+                            "execution_price_coverage_rate": 0.625,
+                            "missing_open_rows": 3,
+                            "missing_vwap_rows": 4,
+                            "suspended_days": 1,
+                            "limit_up_days": 1,
+                            "limit_down_days": 1,
+                            "st_days": 1,
+                            "custom_limit_rate_days": 2,
+                            "untradable_days": 1,
+                            "cannot_buy_days": 2,
+                            "cannot_sell_days": 1,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             report_path = save_single_run_report_html(
                 output_dir=output_dir,
                 config=config,
                 metrics=metrics,
-                artifacts={"equity_curve_svg": output_dir / "equity_curve.svg"},
+                artifacts={
+                    "equity_curve_svg": output_dir / "equity_curve.svg",
+                    "drawdown_json": output_dir / "drawdown.json",
+                    "exposure_json": output_dir / "exposure.json",
+                    "group_exposure_json": output_dir / "group_exposure.json",
+                    "rolling_risk_json": output_dir / "rolling_risk.json",
+                    "relative_performance_json": output_dir / "relative_performance.json",
+                    "factor_ic_json": output_dir / "factor_ic.json",
+                    "factor_decay_json": output_dir / "factor_decay.json",
+                    "factor_correlation_json": output_dir / "factor_correlation.json",
+                    "execution_quality_json": output_dir / "execution_quality.json",
+                    "return_attribution_json": output_dir / "return_attribution.json",
+                    "cost_attribution_json": output_dir / "cost_attribution.json",
+                    "pnl_ledger_json": output_dir / "pnl_ledger.json",
+                    "strategy_health_json": output_dir / "strategy_health.json",
+                    "turnover_analysis_json": output_dir / "turnover_analysis.json",
+                    "price_data_quality_report_json": output_dir / "price_data_quality_report.json",
+                },
                 latest_holdings=("000001", "600519"),
                 latest_rebalance=RebalanceRecord(
                     date=__import__("datetime").date(2024, 1, 8),
@@ -508,6 +1291,7 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("当前持仓", content)
             self.assertIn("调仓摘要", content)
             self.assertIn("基准复盘", content)
+            self.assertIn("复盘摘要", content)
             self.assertIn("配置摘要", content)
             self.assertIn("指标怎么看", content)
             self.assertIn("持仓代码说明", content)
@@ -518,6 +1302,99 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("88.80", content)
             self.assertIn("同期基准收益为 6.00%，策略跑赢基准 4.00%。", content)
             self.assertIn("1.100", content)
+            self.assertIn("最大回撤日期", content)
+            self.assertIn("策略健康评分", content)
+            self.assertIn("有效持仓数", content)
+            self.assertIn("最大单票权重", content)
+            self.assertIn("最大风险贡献标的", content)
+            self.assertIn("最大风险贡献占比", content)
+            self.assertIn("62.00%", content)
+            self.assertIn("最大分组风险贡献", content)
+            self.assertIn("最大分组贡献占比", content)
+            self.assertIn("58.00%", content)
+            self.assertIn("总分平均IC", content)
+            self.assertIn("总分ICIR", content)
+            self.assertIn("总分稳定性", content)
+            self.assertIn("入选留存率", content)
+            self.assertIn("年化Alpha", content)
+            self.assertIn("Beta", content)
+            self.assertIn("R平方", content)
+            self.assertIn("92.50", content)
+            self.assertIn("策略健康等级", content)
+            self.assertIn("策略闸门状态", content)
+            self.assertIn("策略闸门失败数", content)
+            self.assertIn("策略预警数量", content)
+            self.assertIn("2024-01-10", content)
+            self.assertIn("7.00", content)
+            self.assertIn("否", content)
+            self.assertIn("滚动最差收益", content)
+            self.assertIn("-3.00%", content)
+            self.assertIn("滚动最差收益日", content)
+            self.assertIn("2024-01-12", content)
+            self.assertIn("滚动平均夏普", content)
+            self.assertIn("1.23", content)
+            self.assertIn("滚动最大回撤", content)
+            self.assertIn("-4.00%", content)
+            self.assertIn("平均股票仓位", content)
+            self.assertIn("82.00%", content)
+            self.assertIn("平均持仓数量", content)
+            self.assertIn("3.50", content)
+            self.assertIn("累计主动收益", content)
+            self.assertIn("4.00%", content)
+            self.assertIn("主动胜率", content)
+            self.assertIn("67.00%", content)
+            self.assertIn("最差主动日", content)
+            self.assertIn("2024-01-03", content)
+            self.assertIn("主动最大回撤", content)
+            self.assertIn("-2.00%", content)
+            self.assertIn("成交率", content)
+            self.assertIn("75.00%", content)
+            self.assertIn("8.20 bps", content)
+            self.assertIn("limit", content)
+            self.assertIn("60.00%", content)
+            self.assertIn("2024-01-03", content)
+            self.assertIn("t_plus_one", content)
+            self.assertIn("收益归因残差", content)
+            self.assertIn("0.12%", content)
+            self.assertIn("momentum vs mean_reversion", content)
+            self.assertIn("momentum vs low_volatility", content)
+            self.assertIn("82.00%", content)
+            self.assertIn("成本拖累", content)
+            self.assertIn("0.34%", content)
+            self.assertIn("成本归因 bps", content)
+            self.assertIn("9.90 bps", content)
+            self.assertIn("固定滑点成本", content)
+            self.assertIn("12.30", content)
+            self.assertIn("市场冲击成本", content)
+            self.assertIn("45.60", content)
+            self.assertIn("Trading Behavior Diagnostics", content)
+            self.assertIn("Average entries per rebalance", content)
+            self.assertIn("1.25", content)
+            self.assertIn("Average exits per rebalance", content)
+            self.assertIn("0.75", content)
+            self.assertIn("Average rebalance changes", content)
+            self.assertIn("2.00", content)
+            self.assertIn("Realized holding periods", content)
+            self.assertIn("Average realized holding days", content)
+            self.assertIn("8.50", content)
+            self.assertIn("Open positions after final bar", content)
+            self.assertIn("Turnover gate status", content)
+            self.assertIn("Data Quality Diagnostics", content)
+            self.assertIn("Price rows", content)
+            self.assertIn("Symbols missing adjusted close", content)
+            self.assertIn("Execution price field", content)
+            self.assertIn("Missing execution price rows", content)
+            self.assertIn("Execution price coverage", content)
+            self.assertIn("62.50%", content)
+            self.assertIn("Missing open rows", content)
+            self.assertIn("Missing VWAP rows", content)
+            self.assertIn("Limit-up rows", content)
+            self.assertIn("Limit-down rows", content)
+            self.assertIn("Custom limit-rate rows", content)
+            self.assertIn("2024-01-02 to 2024-01-05", content)
+            self.assertIn("最大对账差异", content)
+            self.assertIn("对账状态", content)
+            self.assertIn("已对齐", content)
             self.assertIn("000001（平安银行）", content)
             self.assertIn("600519（贵州茅台）", content)
 
@@ -532,6 +1409,9 @@ class ReportingTests(unittest.TestCase):
                     "sharpe": 1.0,
                     "sortino": 1.1,
                     "calmar": 2.0,
+                    "health_score": 80.0,
+                    "gate_status": "pass",
+                    "gate_failures": 0,
                 },
                 {
                     "run_id": "run_002",
@@ -540,13 +1420,41 @@ class ReportingTests(unittest.TestCase):
                     "sharpe": 1.5,
                     "sortino": 1.6,
                     "calmar": 3.0,
+                    "health_score": 60.0,
+                    "gate_status": "fail",
+                    "gate_failures": 2,
                 },
             ]
+            stability_path = output_dir / "batch_stability.json"
+            stability_path.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "robust_region_run_count": 1,
+                            "robust_region_rate": 0.5,
+                            "robust_region_average_metric": 0.2,
+                            "is_parameter_island": False,
+                            "gate_passing_run_count": 1,
+                            "gate_failing_run_count": 1,
+                            "failed_gate_category_counts": {"risk": 2, "factor": 1},
+                            "failed_gate_name_counts": {"Max drawdown": 2, "Factor correlation": 1},
+                            "recommended_actions": [
+                                "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.",
+                                "Most common failed gate is 'Max drawdown'; review the single-run strategy_health_gates.csv files for affected runs first.",
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
             report_path = save_batch_report_html(
                 output_dir=output_dir,
                 rows=rows,
                 rank_by="annualized_return",
-                artifacts={"batch_chart_svg": output_dir / "batch_annualized_return.svg"},
+                artifacts={
+                    "batch_chart_svg": output_dir / "batch_annualized_return.svg",
+                    "batch_stability_json": stability_path,
+                },
             )
 
             content = report_path.read_text(encoding="utf-8-sig")
@@ -557,8 +1465,24 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("最佳方案", content)
             self.assertIn("方案2", content)
             self.assertIn("内部编号", content)
-            self.assertIn("run_002", content)
+            self.assertIn("run_001", content)
+            self.assertIn("Gate status", content)
+            self.assertIn("Health score", content)
+            self.assertIn("Gate-passing runs", content)
+            self.assertIn("Gate-failing runs", content)
+            self.assertIn("Most common failed gate category", content)
+            self.assertIn("risk: 2", content)
+            self.assertIn("Most common failed gate", content)
+            self.assertIn("Max drawdown: 2", content)
+            self.assertIn("Recommended action", content)
+            self.assertIn("Risk gates fail often", content)
+            self.assertIn("Recommended action count", content)
+            self.assertIn("gate_status", content)
+            self.assertIn("health_score", content)
+            self.assertIn("pass", content)
             self.assertIn("年化收益 / annualized_return", content)
+            self.assertIn("稳健热区数量", content)
+            self.assertIn("稳健热区占比", content)
 
 
 if __name__ == "__main__":

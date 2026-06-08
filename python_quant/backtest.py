@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from datetime import date
 from math import sqrt
 
 from .config import BacktestConfig
+from .execution_model import (
+    calculate_account_equity,
+    is_buyable,
+    is_sellable,
+    rebalance_account,
+)
 from .factors import (
     align_history_to_calendar,
+    align_history_with_suspended_fills,
     build_intersection_calendar,
     calculate_factor_score_records,
     group_prices_by_symbol,
@@ -20,8 +28,6 @@ from .models import (
     PositionPoint,
     PriceBar,
     RebalanceRecord,
-    TradeAttemptRecord,
-    TradeRecord,
 )
 from .strategy import select_symbols
 
@@ -31,16 +37,21 @@ def run_backtest(
     config: BacktestConfig | None = None,
     *,
     benchmark_bars: list[PriceBar] | None = None,
+    stock_pool_by_date: dict[date, set[str]] | None = None,
+    symbol_groups: dict[str, str] | None = None,
 ) -> BacktestResult:
     config = config or BacktestConfig()
     history_by_symbol = group_prices_by_symbol(bars)
     if not history_by_symbol:
         raise ValueError("No price data available for backtest.")
 
-    calendar = build_intersection_calendar(history_by_symbol)
-    aligned_history = align_history_to_calendar(history_by_symbol, calendar)
+    if config.forward_fill_suspended_bars:
+        calendar, aligned_history = align_history_with_suspended_fills(history_by_symbol)
+    else:
+        calendar = build_intersection_calendar(history_by_symbol)
+        aligned_history = align_history_to_calendar(history_by_symbol, calendar)
     common_length = len(calendar)
-    if common_length < config.max_lookback + 2:
+    if common_length < config.max_lookback + config.execution_delay_days + 2:
         raise ValueError("Not enough history to run the strategy.")
 
     cash = config.initial_cash
@@ -48,8 +59,8 @@ def run_backtest(
     entry_dates: dict[str, object] = {}
     equity_curve: list[EquityPoint] = []
     position_points: list[PositionPoint] = []
-    trade_records: list[TradeRecord] = []
-    trade_attempt_records: list[TradeAttemptRecord] = []
+    trade_records = []
+    trade_attempt_records = []
     factor_score_records: list[FactorScoreRecord] = []
     rebalance_records: list[RebalanceRecord] = []
     holdings: tuple[str, ...] = ()
@@ -58,15 +69,18 @@ def run_backtest(
     warmup = config.max_lookback
     previous_equity = config.initial_cash
 
-    for index in range(warmup, common_length - 1):
+    last_signal_index = common_length - config.execution_delay_days - 2
+    for index in range(warmup, last_signal_index + 1):
         current_date = calendar[index]
-        next_date = calendar[index + 1]
-        current_equity = _calculate_account_equity(cash, positions, aligned_history, index, config)
+        execution_index = index + config.execution_delay_days
+        execution_date = calendar[execution_index]
+        next_date = calendar[execution_index + 1]
 
         should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
         if should_rebalance:
             factor_records = calculate_factor_score_records(aligned_history, index, config)
             scores = {symbol: record.total_score for symbol, record in factor_records.items()}
+            allowed_symbols = _resolve_stock_pool_for_date(stock_pool_by_date, current_date)
             selected = _build_target_holdings(
                 scores=scores,
                 aligned_history=aligned_history,
@@ -75,6 +89,8 @@ def run_backtest(
                 config=config,
                 entry_dates=entry_dates,
                 current_date=current_date,
+                allowed_symbols=allowed_symbols,
+                symbol_groups=symbol_groups,
             )
             factor_score_records.extend(
                 calculate_factor_score_records(
@@ -84,15 +100,15 @@ def run_backtest(
                     selected_symbols=set(selected),
                 ).values()
             )
-            trade_plan = _rebalance_account(
+            trade_plan = rebalance_account(
                 cash=cash,
                 positions=positions,
                 entry_dates=entry_dates,
                 target_holdings=selected,
                 aligned_history=aligned_history,
-                index=index,
+                index=execution_index,
                 config=config,
-                current_date=current_date,
+                current_date=execution_date,
             )
             cash = trade_plan.cash
             positions = trade_plan.positions
@@ -114,7 +130,13 @@ def run_backtest(
                 )
             )
 
-        next_equity = _calculate_account_equity(cash, positions, aligned_history, index + 1, config)
+        next_equity = calculate_account_equity(
+            cash,
+            positions,
+            aligned_history,
+            execution_index + 1,
+            config,
+        )
         daily_return = next_equity / previous_equity - 1.0
 
         equity_curve.append(
@@ -130,7 +152,7 @@ def run_backtest(
                 cash=cash,
                 positions=positions,
                 aligned_history=aligned_history,
-                index=index + 1,
+                index=execution_index + 1,
                 config=config,
                 total_equity=next_equity,
             )
@@ -163,188 +185,11 @@ def run_backtest(
         trades=trade_records,
         trade_attempts=trade_attempt_records,
         factor_scores=factor_score_records,
-    )
-
-
-@dataclass(frozen=True)
-class _AccountTradeResult:
-    cash: float
-    positions: dict[str, int]
-    entry_dates: dict[str, object]
-    holdings: tuple[str, ...]
-    buy_turnover: float
-    sell_turnover: float
-    cost: float
-    trades: list[TradeRecord]
-    trade_attempts: list[TradeAttemptRecord]
-
-
-def _calculate_account_equity(
-    cash: float,
-    positions: dict[str, int],
-    aligned_history: dict[str, list[PriceBar]],
-    index: int,
-    config: BacktestConfig,
-) -> float:
-    market_value = sum(
-        shares * price_for_bar(aligned_history[symbol][index], config)
-        for symbol, shares in positions.items()
-    )
-    return cash + market_value
-
-
-def _rebalance_account(
-    *,
-    cash: float,
-    positions: dict[str, int],
-    entry_dates: dict[str, object],
-    target_holdings: tuple[str, ...],
-    aligned_history: dict[str, list[PriceBar]],
-    index: int,
-    config: BacktestConfig,
-    current_date: object,
-) -> _AccountTradeResult:
-    positions = positions.copy()
-    entry_dates = entry_dates.copy()
-    start_equity = _calculate_account_equity(cash, positions, aligned_history, index, config)
-    sold_value = 0.0
-    bought_value = 0.0
-    cost = 0.0
-    trades: list[TradeRecord] = []
-    trade_attempts: list[TradeAttemptRecord] = []
-
-    for symbol in sorted(set(positions) - set(target_holdings)):
-        bar = aligned_history[symbol][index]
-        price = price_for_bar(bar, config)
-        if entry_dates.get(symbol) == current_date:
-            trade_attempts.append(
-                _build_trade_attempt(bar, "SELL", positions[symbol], price, "t_plus_one_locked", cash)
-            )
-            continue
-        if not _is_sellable(bar):
-            trade_attempts.append(
-                _build_trade_attempt(bar, "SELL", positions[symbol], price, "not_sellable", cash)
-            )
-            continue
-        shares = positions.pop(symbol)
-        gross_value = shares * price
-        commission = _calculate_commission(gross_value, config)
-        slippage = gross_value * config.slippage_rate
-        transfer_fee = gross_value * config.transfer_fee_rate
-        stamp_duty = gross_value * config.stamp_duty_rate
-        trade_cost = commission + slippage + transfer_fee + stamp_duty
-        cash += gross_value - trade_cost
-        sold_value += gross_value
-        cost += trade_cost
-        entry_dates.pop(symbol, None)
-        trades.append(
-            TradeRecord(
-                date=bar.date,
-                symbol=symbol,
-                side="SELL",
-                shares=shares,
-                price=round(price, 4),
-                gross_value=round(gross_value, 2),
-                commission=round(commission, 2),
-                slippage=round(slippage, 2),
-                transfer_fee=round(transfer_fee, 2),
-                stamp_duty=round(stamp_duty, 2),
-                total_cost=round(trade_cost, 2),
-                cash_change=round(gross_value - trade_cost, 2),
-                reason="rebalance_exit",
-            )
-        )
-
-    retained_targets = tuple(symbol for symbol in target_holdings if symbol in positions)
-    new_targets = tuple(symbol for symbol in target_holdings if symbol not in positions)
-    target_count = len(retained_targets) + len(new_targets)
-    target_value = start_equity / target_count if target_count else 0.0
-
-    for symbol in new_targets:
-        bar = aligned_history[symbol][index]
-        price = price_for_bar(bar, config)
-        if not _is_buyable(bar):
-            trade_attempts.append(
-                _build_trade_attempt(bar, "BUY", 0, price, "not_buyable", cash)
-            )
-            continue
-        max_cash_for_position = min(target_value, cash / (1.0 + config.per_side_cost_rate))
-        shares = _round_down_to_lot(max_cash_for_position / price, config.lot_size)
-        if shares <= 0:
-            trade_attempts.append(
-                _build_trade_attempt(bar, "BUY", 0, price, "insufficient_cash_for_lot", cash)
-            )
-            continue
-        gross_value = shares * price
-        commission = _calculate_commission(gross_value, config)
-        slippage = gross_value * config.slippage_rate
-        transfer_fee = gross_value * config.transfer_fee_rate
-        stamp_duty = 0.0
-        trade_cost = commission + slippage + transfer_fee
-        cash -= gross_value + trade_cost
-        positions[symbol] = shares
-        entry_dates[symbol] = current_date
-        bought_value += gross_value
-        cost += trade_cost
-        trades.append(
-            TradeRecord(
-                date=bar.date,
-                symbol=symbol,
-                side="BUY",
-                shares=shares,
-                price=round(price, 4),
-                gross_value=round(gross_value, 2),
-                commission=round(commission, 2),
-                slippage=round(slippage, 2),
-                transfer_fee=round(transfer_fee, 2),
-                stamp_duty=round(stamp_duty, 2),
-                total_cost=round(trade_cost, 2),
-                cash_change=round(-(gross_value + trade_cost), 2),
-                reason="rebalance_entry",
-            )
-        )
-
-    holdings = tuple(sorted(positions))
-    return _AccountTradeResult(
-        cash=cash,
-        positions=positions,
-        entry_dates=entry_dates,
-        holdings=holdings,
-        buy_turnover=0.0 if start_equity == 0 else bought_value / start_equity,
-        sell_turnover=0.0 if start_equity == 0 else sold_value / start_equity,
-        cost=cost,
-        trades=trades,
-        trade_attempts=trade_attempts,
-    )
-
-
-def _round_down_to_lot(shares: float, lot_size: int) -> int:
-    return int(shares // lot_size) * lot_size
-
-
-def _calculate_commission(gross_value: float, config: BacktestConfig) -> float:
-    commission = gross_value * config.commission_rate
-    if gross_value > 0 and config.min_commission > 0:
-        return max(commission, config.min_commission)
-    return commission
-
-
-def _build_trade_attempt(
-    bar: PriceBar,
-    side: str,
-    target_shares: int,
-    price: float,
-    reason: str,
-    cash: float,
-) -> TradeAttemptRecord:
-    return TradeAttemptRecord(
-        date=bar.date,
-        symbol=bar.symbol,
-        side=side,
-        target_shares=target_shares,
-        price=round(price, 4),
-        reason=reason,
-        cash=round(cash, 2),
+        price_bars=[
+            bar
+            for symbol in sorted(aligned_history)
+            for bar in aligned_history[symbol]
+        ],
     )
 
 
@@ -399,7 +244,9 @@ def _build_target_holdings(
     current_holdings: tuple[str, ...],
     config: BacktestConfig,
     entry_dates: dict[str, object] | None = None,
-    current_date: object | None = None,
+    current_date: date | None = None,
+    allowed_symbols: set[str] | None = None,
+    symbol_groups: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
     if not scores and not current_holdings:
         return ()
@@ -419,21 +266,67 @@ def _build_target_holdings(
     candidate_scores = {
         symbol: score
         for symbol, score in scores.items()
-        if _can_be_selected(symbol, aligned_history, index, current_holdings)
+        if _is_in_allowed_stock_pool(symbol, allowed_symbols)
+        and _can_be_selected(symbol, aligned_history, index, current_holdings)
     }
     ranked_symbols: list[str] = []
     if candidate_scores:
         ranked_symbols = select_symbols(candidate_scores, min(len(candidate_scores), target_size))
 
     target_holdings: list[str] = list(locked_holdings)
+    group_counts = _build_group_counts(target_holdings, symbol_groups)
     for symbol in ranked_symbols:
         if len(target_holdings) >= target_size:
             break
         if symbol in target_holdings:
             continue
+        group_key = _group_key(symbol, symbol_groups)
+        if (
+            config.max_group_positions is not None
+            and group_counts.get(group_key, 0) >= config.max_group_positions
+        ):
+            continue
         target_holdings.append(symbol)
+        group_counts[group_key] = group_counts.get(group_key, 0) + 1
 
     return tuple(target_holdings)
+
+
+def _build_group_counts(
+    symbols: list[str],
+    symbol_groups: dict[str, str] | None,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for symbol in symbols:
+        group_key = _group_key(symbol, symbol_groups)
+        counts[group_key] = counts.get(group_key, 0) + 1
+    return counts
+
+
+def _group_key(symbol: str, symbol_groups: dict[str, str] | None) -> str:
+    if not symbol_groups:
+        return f"__symbol__:{symbol}"
+    return symbol_groups.get(symbol, f"__symbol__:{symbol}")
+
+
+def _resolve_stock_pool_for_date(
+    stock_pool_by_date: dict[date, set[str]] | None,
+    current_date: date,
+) -> set[str] | None:
+    if stock_pool_by_date is None:
+        return None
+    effective_dates = [
+        pool_date
+        for pool_date in stock_pool_by_date
+        if pool_date <= current_date
+    ]
+    if not effective_dates:
+        return set()
+    return stock_pool_by_date[max(effective_dates)]
+
+
+def _is_in_allowed_stock_pool(symbol: str, allowed_symbols: set[str] | None) -> bool:
+    return allowed_symbols is None or symbol in allowed_symbols
 
 
 def _calculate_metrics(
@@ -591,15 +484,7 @@ def _can_be_selected(
     bar = aligned_history[symbol][index]
     if symbol in current_holdings:
         return bar.tradable or bar.can_buy or bar.can_sell
-    return _is_buyable(bar)
-
-
-def _is_buyable(bar: PriceBar) -> bool:
-    return bar.tradable and bar.can_buy
-
-
-def _is_sellable(bar: PriceBar) -> bool:
-    return bar.tradable and bar.can_sell
+    return is_buyable(bar)
 
 
 def _can_exit_position(
@@ -611,4 +496,4 @@ def _can_exit_position(
 ) -> bool:
     if entry_dates.get(symbol) == current_date:
         return False
-    return _is_sellable(aligned_history[symbol][index])
+    return is_sellable(aligned_history[symbol][index])

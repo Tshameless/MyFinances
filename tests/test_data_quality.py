@@ -7,8 +7,14 @@ from datetime import date
 from pathlib import Path
 
 from python_quant.data_quality import (
+    build_benchmark_quality_report,
     build_price_data_quality_report,
+    build_stock_pool_quality_report,
+    build_symbol_group_quality_report,
+    save_benchmark_quality_report,
     save_data_quality_report,
+    save_mapping_quality_report,
+    save_stock_pool_quality_report,
 )
 from python_quant.models import PriceBar
 
@@ -31,6 +37,71 @@ class DataQualityTests(unittest.TestCase):
         self.assertEqual(1, row_by_symbol["600519"].zero_volume_days)
         self.assertEqual(1, row_by_symbol["000001"].abnormal_return_days)
 
+    def test_counts_suspended_days(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="000001", close=10),
+            PriceBar(
+                date=date(2024, 1, 3),
+                symbol="000001",
+                close=10,
+                volume=0,
+                tradable=False,
+                can_buy=False,
+                can_sell=False,
+                is_suspended=True,
+                is_limit_down=True,
+                is_st=True,
+                limit_rate=0.05,
+            ),
+            PriceBar(
+                date=date(2024, 1, 4),
+                symbol="000001",
+                close=11,
+                open=10.8,
+                vwap=10.9,
+                is_limit_up=True,
+            ),
+        ]
+
+        report = build_price_data_quality_report(bars)
+
+        self.assertEqual(1, report.summary["suspended_days"])
+        self.assertEqual(1, report.summary["symbols_with_suspended_days"])
+        self.assertEqual(1, report.summary["limit_up_days"])
+        self.assertEqual(1, report.summary["limit_down_days"])
+        self.assertEqual(1, report.summary["st_days"])
+        self.assertEqual(1, report.summary["custom_limit_rate_days"])
+        self.assertEqual(2, report.summary["missing_open_rows"])
+        self.assertEqual(2, report.summary["missing_vwap_rows"])
+        self.assertEqual(1, report.summary["untradable_days"])
+        self.assertEqual(1, report.summary["cannot_buy_days"])
+        self.assertEqual(1, report.summary["cannot_sell_days"])
+        self.assertEqual(1, report.symbols[0].suspended_days)
+        self.assertEqual(1, report.symbols[0].limit_up_days)
+        self.assertEqual(1, report.symbols[0].limit_down_days)
+        self.assertEqual(1, report.symbols[0].st_days)
+        self.assertEqual(1, report.symbols[0].custom_limit_rate_days)
+        self.assertEqual(2, report.symbols[0].missing_open)
+        self.assertEqual(2, report.symbols[0].missing_vwap)
+        daily_by_date = {row["date"]: row for row in report.daily_counts}
+        self.assertEqual(1, daily_by_date["2024-01-03"]["suspended_count"])
+        self.assertEqual(1, daily_by_date["2024-01-03"]["limit_down_count"])
+        self.assertEqual(1, daily_by_date["2024-01-03"]["st_count"])
+        self.assertEqual(1, daily_by_date["2024-01-04"]["limit_up_count"])
+
+    def test_summarizes_execution_price_field_coverage(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="000001", close=10, open=9.9),
+            PriceBar(date=date(2024, 1, 3), symbol="000001", close=11),
+            PriceBar(date=date(2024, 1, 4), symbol="000001", close=12, open=11.9),
+        ]
+
+        report = build_price_data_quality_report(bars, execution_price_field="open")
+
+        self.assertEqual("open", report.summary["execution_price_field"])
+        self.assertEqual(1, report.summary["missing_execution_price_rows"])
+        self.assertAlmostEqual(2 / 3, report.summary["execution_price_coverage_rate"])
+
     def test_saves_quality_report_csv_and_json(self) -> None:
         report = build_price_data_quality_report(
             [
@@ -47,8 +118,132 @@ class DataQualityTests(unittest.TestCase):
             self.assertTrue(paths["data_quality_report_json"].exists())
             content = paths["data_quality_report_csv"].read_text(encoding="utf-8-sig")
             self.assertIn("missing_adjusted_close", content)
+            self.assertIn("missing_open", content)
+            self.assertIn("missing_vwap", content)
+            self.assertIn("suspended_days", content)
+            self.assertIn("limit_up_days", content)
+            self.assertIn("limit_down_days", content)
+            self.assertIn("st_days", content)
+            self.assertIn("custom_limit_rate_days", content)
             payload = json.loads(paths["data_quality_report_json"].read_text(encoding="utf-8"))
             self.assertEqual(1, payload["summary"]["symbol_count"])
+            self.assertIn("missing_open_rows", payload["summary"])
+            self.assertIn("limit_up_count", payload["daily_counts"][0])
+
+    def test_builds_benchmark_quality_report(self) -> None:
+        bars = [
+            PriceBar(date=date(2024, 1, 2), symbol="BENCHMARK", close=100, adjusted_close=100),
+            PriceBar(date=date(2024, 1, 4), symbol="BENCHMARK", close=120),
+        ]
+
+        report = build_benchmark_quality_report(
+            bars,
+            expected_dates={date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4)},
+            abnormal_return_threshold=0.11,
+        )
+
+        self.assertEqual(2, report.summary["row_count"])
+        self.assertEqual(1, report.summary["missing_expected_dates"])
+        self.assertEqual(["2024-01-03"], report.summary["missing_expected_date_list"])
+        self.assertEqual(1, report.summary["missing_adjusted_close_rows"])
+        self.assertEqual(1, report.summary["abnormal_return_days"])
+        self.assertAlmostEqual(0.2, report.summary["max_abs_return"])
+        self.assertTrue(report.rows[1].abnormal_return)
+
+    def test_saves_benchmark_quality_report(self) -> None:
+        report = build_benchmark_quality_report(
+            [
+                PriceBar(date=date(2024, 1, 2), symbol="BENCHMARK", close=100),
+                PriceBar(date=date(2024, 1, 3), symbol="BENCHMARK", close=101),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            paths = save_benchmark_quality_report(report, output_dir)
+
+            self.assertTrue(paths["benchmark_quality_report_csv"].exists())
+            self.assertTrue(paths["benchmark_quality_report_json"].exists())
+            content = paths["benchmark_quality_report_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("abnormal_return", content)
+            payload = json.loads(
+                paths["benchmark_quality_report_json"].read_text(encoding="utf-8")
+            )
+            self.assertEqual(2, payload["summary"]["row_count"])
+
+    def test_builds_symbol_group_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mapping_path = Path(temp_dir) / "symbol_groups.csv"
+            mapping_path.write_text(
+                "symbol,group\n000001,银行\n000001,金融\n600519,\n,空代码\n300001,科技\n",
+                encoding="utf-8",
+            )
+
+            report = build_symbol_group_quality_report(
+                mapping_path,
+                expected_symbols={"000001", "600519", "000002"},
+            )
+
+            self.assertEqual(5, report.summary["row_count"])
+            self.assertEqual(3, report.summary["mapped_symbol_count"])
+            self.assertEqual(1, report.summary["duplicate_symbols"])
+            self.assertEqual(1, report.summary["blank_symbol_rows"])
+            self.assertEqual(1, report.summary["blank_group_rows"])
+            self.assertEqual(1, report.summary["missing_expected_symbols"])
+            self.assertEqual(["000002"], report.summary["missing_expected_symbol_list"])
+            self.assertEqual(["300001"], report.summary["extra_mapped_symbol_list"])
+            self.assertTrue(any(row["duplicate_symbol"] for row in report.rows))
+
+    def test_saves_symbol_group_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            mapping_path = output_dir / "symbol_groups.csv"
+            mapping_path.write_text("symbol,group\n000001,银行\n", encoding="utf-8")
+            report = build_symbol_group_quality_report(mapping_path)
+
+            paths = save_mapping_quality_report(report, output_dir)
+
+            self.assertTrue(paths["symbol_group_quality_report_csv"].exists())
+            self.assertTrue(paths["symbol_group_quality_report_json"].exists())
+            content = paths["symbol_group_quality_report_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("duplicate_symbol", content)
+
+    def test_builds_stock_pool_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pool_path = Path(temp_dir) / "stock_pool.csv"
+            pool_path.write_text(
+                "date,symbol\n2024-01-02,000001\n2024-01-02,000001\n2024-01-03,ABCDEF\n,600519\n2024-01-04,\n2024-01-05,300001\n",
+                encoding="utf-8",
+            )
+
+            report = build_stock_pool_quality_report(
+                pool_path,
+                expected_symbols={"000001", "600519", "000002"},
+            )
+
+            self.assertEqual(6, report.summary["row_count"])
+            self.assertEqual(4, report.summary["date_count"])
+            self.assertEqual(1, report.summary["duplicate_date_symbol_rows"])
+            self.assertEqual(1, report.summary["blank_date_rows"])
+            self.assertEqual(1, report.summary["blank_symbol_rows"])
+            self.assertEqual(1, report.summary["invalid_symbol_rows"])
+            self.assertEqual(["000002"], report.summary["missing_expected_symbol_list"])
+            self.assertEqual(["300001", "ABCDEF"], report.summary["extra_mapped_symbol_list"])
+            self.assertTrue(any(row["duplicate_date_symbol"] for row in report.rows))
+
+    def test_saves_stock_pool_quality_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            pool_path = output_dir / "stock_pool.csv"
+            pool_path.write_text("date,symbol\n2024-01-02,000001\n", encoding="utf-8")
+            report = build_stock_pool_quality_report(pool_path)
+
+            paths = save_stock_pool_quality_report(report, output_dir)
+
+            self.assertTrue(paths["stock_pool_quality_report_csv"].exists())
+            self.assertTrue(paths["stock_pool_quality_report_json"].exists())
+            content = paths["stock_pool_quality_report_csv"].read_text(encoding="utf-8-sig")
+            self.assertIn("duplicate_date_symbol", content)
 
 
 if __name__ == "__main__":

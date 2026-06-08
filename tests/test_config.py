@@ -19,9 +19,36 @@ class ConfigTests(unittest.TestCase):
                 """
 [backtest]
 top_n = 5
+max_group_positions = 1
+rolling_risk_window = 15
+execution_delay_days = 1
+max_allowed_drawdown = 0.25
+max_allowed_daily_var = 0.04
+min_allowed_rolling_return = -0.12
+min_allowed_fill_rate = 0.65
+min_allowed_execution_price_coverage = 0.98
+max_allowed_market_constraint_rate = 0.40
+max_allowed_position_weight = 0.45
+max_allowed_group_weight = 0.55
+max_allowed_attribution_residual = 0.03
+max_allowed_factor_correlation = 0.85
+max_allowed_rebalance_changes = 2.5
+min_allowed_holding_days = 4.0
 price_field = "adjusted_close"
+execution_price_field = "vwap"
 output_dir = "reports"
 symbol_name_csv = "a_share_symbols.csv"
+stock_pool_csv = "stock_pool.csv"
+symbol_group_csv = "symbol_groups.csv"
+infer_limit_rate_by_symbol = true
+forward_fill_suspended_bars = true
+growth_limit_up_down_rate = 0.2
+buy_commission_rate = 0.0002
+sell_commission_rate = 0.0004
+market_impact_coefficient = 0.15
+market_impact_exponent = 0.5
+target_cash_weight = 0.10
+max_position_weight = 0.25
 
 [backtest.factor_weights]
 momentum = 0.7
@@ -33,9 +60,36 @@ low_volatility = 0.3
             overrides = load_config_overrides_from_toml(config_path)
 
             self.assertEqual(5, overrides["top_n"])
+            self.assertEqual(1, overrides["max_group_positions"])
+            self.assertEqual(15, overrides["rolling_risk_window"])
+            self.assertEqual(1, overrides["execution_delay_days"])
+            self.assertEqual(0.25, overrides["max_allowed_drawdown"])
+            self.assertEqual(0.04, overrides["max_allowed_daily_var"])
+            self.assertEqual(-0.12, overrides["min_allowed_rolling_return"])
+            self.assertEqual(0.65, overrides["min_allowed_fill_rate"])
+            self.assertEqual(0.98, overrides["min_allowed_execution_price_coverage"])
+            self.assertEqual(0.40, overrides["max_allowed_market_constraint_rate"])
+            self.assertEqual(0.45, overrides["max_allowed_position_weight"])
+            self.assertEqual(0.55, overrides["max_allowed_group_weight"])
+            self.assertEqual(0.03, overrides["max_allowed_attribution_residual"])
+            self.assertEqual(0.85, overrides["max_allowed_factor_correlation"])
+            self.assertEqual(2.5, overrides["max_allowed_rebalance_changes"])
+            self.assertEqual(4.0, overrides["min_allowed_holding_days"])
             self.assertEqual("adjusted_close", overrides["price_field"])
+            self.assertEqual("vwap", overrides["execution_price_field"])
             self.assertEqual((config_path.parent / "reports").resolve(), overrides["output_dir"])
             self.assertEqual((config_path.parent / "a_share_symbols.csv").resolve(), overrides["symbol_name_csv"])
+            self.assertEqual((config_path.parent / "stock_pool.csv").resolve(), overrides["stock_pool_csv"])
+            self.assertEqual((config_path.parent / "symbol_groups.csv").resolve(), overrides["symbol_group_csv"])
+            self.assertTrue(overrides["infer_limit_rate_by_symbol"])
+            self.assertTrue(overrides["forward_fill_suspended_bars"])
+            self.assertEqual(0.2, overrides["growth_limit_up_down_rate"])
+            self.assertEqual(0.0002, overrides["buy_commission_rate"])
+            self.assertEqual(0.0004, overrides["sell_commission_rate"])
+            self.assertEqual(0.15, overrides["market_impact_coefficient"])
+            self.assertEqual(0.5, overrides["market_impact_exponent"])
+            self.assertEqual(0.10, overrides["target_cash_weight"])
+            self.assertEqual(0.25, overrides["max_position_weight"])
             self.assertEqual(0.7, overrides["factor_weights"]["momentum"])
 
     def test_rejects_toml_without_backtest_section(self) -> None:
@@ -159,6 +213,62 @@ rebalance_every_n_days = [5, "10"]
                     "alpha101": 0.5,
                 }
             )
+
+    def test_rejects_invalid_max_position_weight(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_position_weight"):
+            BacktestConfig(max_position_weight=0.0)
+        with self.assertRaisesRegex(ValueError, "max_position_weight"):
+            BacktestConfig(max_position_weight=1.1)
+
+    def test_rejects_invalid_target_cash_weight(self) -> None:
+        with self.assertRaisesRegex(ValueError, "target_cash_weight"):
+            BacktestConfig(target_cash_weight=-0.1)
+        with self.assertRaisesRegex(ValueError, "target_cash_weight"):
+            BacktestConfig(target_cash_weight=1.0)
+
+    def test_rejects_invalid_max_group_positions(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_group_positions"):
+            BacktestConfig(max_group_positions=0)
+
+    def test_rejects_invalid_rolling_risk_window(self) -> None:
+        with self.assertRaisesRegex(ValueError, "rolling"):
+            BacktestConfig(rolling_risk_window=0)
+
+    def test_rejects_invalid_execution_delay_days(self) -> None:
+        with self.assertRaisesRegex(ValueError, "execution_delay_days"):
+            BacktestConfig(execution_delay_days=-1)
+
+    def test_rejects_invalid_risk_gate_thresholds(self) -> None:
+        with self.assertRaisesRegex(ValueError, "max_allowed_drawdown"):
+            BacktestConfig(max_allowed_drawdown=0.0)
+        with self.assertRaisesRegex(ValueError, "max_allowed_daily_var"):
+            BacktestConfig(max_allowed_daily_var=1.1)
+        with self.assertRaisesRegex(ValueError, "min_allowed_rolling_return"):
+            BacktestConfig(min_allowed_rolling_return=-1.1)
+        with self.assertRaisesRegex(ValueError, "min_allowed_fill_rate"):
+            BacktestConfig(min_allowed_fill_rate=1.1)
+        with self.assertRaisesRegex(ValueError, "min_allowed_execution_price_coverage"):
+            BacktestConfig(min_allowed_execution_price_coverage=1.1)
+        with self.assertRaisesRegex(ValueError, "max_allowed_market_constraint_rate"):
+            BacktestConfig(max_allowed_market_constraint_rate=1.1)
+        with self.assertRaisesRegex(ValueError, "max_allowed_position_weight"):
+            BacktestConfig(max_allowed_position_weight=0.0)
+        with self.assertRaisesRegex(ValueError, "max_allowed_group_weight"):
+            BacktestConfig(max_allowed_group_weight=0.0)
+        with self.assertRaisesRegex(ValueError, "max_allowed_attribution_residual"):
+            BacktestConfig(max_allowed_attribution_residual=1.1)
+        with self.assertRaisesRegex(ValueError, "max_allowed_factor_correlation"):
+            BacktestConfig(max_allowed_factor_correlation=1.1)
+        with self.assertRaisesRegex(ValueError, "max_allowed_rebalance_changes"):
+            BacktestConfig(max_allowed_rebalance_changes=-0.1)
+        with self.assertRaisesRegex(ValueError, "min_allowed_holding_days"):
+            BacktestConfig(min_allowed_holding_days=-0.1)
+        with self.assertRaisesRegex(ValueError, "market_impact_exponent"):
+            BacktestConfig(market_impact_exponent=0.0)
+
+    def test_rejects_invalid_execution_price_field(self) -> None:
+        with self.assertRaisesRegex(ValueError, "execution_price_field"):
+            BacktestConfig(execution_price_field="high")
 
 
 if __name__ == "__main__":

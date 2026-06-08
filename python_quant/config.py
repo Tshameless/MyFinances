@@ -20,21 +20,52 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "initial_cash",
         "top_n",
         "lot_size",
+        "max_group_positions",
         "lookback_momentum",
         "lookback_mean_reversion",
         "lookback_volatility",
+        "rolling_risk_window",
+        "execution_delay_days",
+        "max_allowed_drawdown",
+        "max_allowed_daily_var",
+        "min_allowed_rolling_return",
+        "min_allowed_information_ratio",
+        "min_allowed_fill_rate",
+        "min_allowed_execution_price_coverage",
+        "max_allowed_market_constraint_rate",
+        "max_allowed_position_weight",
+        "max_allowed_group_weight",
+        "max_allowed_attribution_residual",
+        "max_allowed_factor_correlation",
+        "max_allowed_rebalance_changes",
+        "min_allowed_holding_days",
         "rebalance_every_n_days",
         "commission_rate",
+        "buy_commission_rate",
+        "sell_commission_rate",
         "slippage_rate",
+        "market_impact_coefficient",
+        "market_impact_exponent",
         "stamp_duty_rate",
         "min_commission",
         "transfer_fee_rate",
+        "target_cash_weight",
+        "max_position_weight",
+        "limit_up_down_rate",
+        "st_limit_up_down_rate",
+        "growth_limit_up_down_rate",
+        "bse_limit_up_down_rate",
+        "infer_limit_rate_by_symbol",
+        "max_volume_participation",
+        "infer_limit_flags",
+        "forward_fill_suspended_bars",
         "price_field",
+        "execution_price_field",
         "start_date",
         "end_date",
     }
 )
-_BACKTEST_PATH_FIELDS = frozenset({"output_dir", "symbol_name_csv"})
+_BACKTEST_PATH_FIELDS = frozenset({"output_dir", "symbol_name_csv", "stock_pool_csv", "symbol_group_csv"})
 _BACKTEST_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS | _BACKTEST_PATH_FIELDS | {"factor_weights"}
 _CONFIG_ALLOWED_TOP_LEVEL_TABLES = frozenset({"backtest", "sweep"})
 _SWEEP_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS - {"initial_cash"}
@@ -42,24 +73,55 @@ _INT_FIELDS = frozenset(
     {
         "top_n",
         "lot_size",
+        "max_group_positions",
         "lookback_momentum",
         "lookback_mean_reversion",
         "lookback_volatility",
+        "rolling_risk_window",
+        "execution_delay_days",
         "rebalance_every_n_days",
     }
 )
+_OPTIONAL_INT_FIELDS = frozenset({"max_group_positions"})
 _FLOAT_FIELDS = frozenset(
     {
         "initial_cash",
         "commission_rate",
+        "buy_commission_rate",
+        "sell_commission_rate",
         "slippage_rate",
+        "market_impact_coefficient",
+        "market_impact_exponent",
         "stamp_duty_rate",
         "min_commission",
         "transfer_fee_rate",
+        "target_cash_weight",
+        "max_position_weight",
+        "limit_up_down_rate",
+        "st_limit_up_down_rate",
+        "growth_limit_up_down_rate",
+        "bse_limit_up_down_rate",
+        "max_volume_participation",
+        "max_allowed_drawdown",
+        "max_allowed_daily_var",
+        "min_allowed_rolling_return",
+        "min_allowed_information_ratio",
+        "min_allowed_fill_rate",
+        "min_allowed_execution_price_coverage",
+        "max_allowed_market_constraint_rate",
+        "max_allowed_position_weight",
+        "max_allowed_group_weight",
+        "max_allowed_attribution_residual",
+        "max_allowed_factor_correlation",
+        "max_allowed_rebalance_changes",
+        "min_allowed_holding_days",
     }
 )
-_STRING_FIELDS = frozenset({"price_field"})
+_OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate"})
+_STRING_FIELDS = frozenset({"price_field", "execution_price_field"})
+_OPTIONAL_STRING_FIELDS = frozenset({"execution_price_field"})
 _DATE_FIELDS = frozenset({"start_date", "end_date"})
+_BOOL_FIELDS = frozenset({"infer_limit_flags", "infer_limit_rate_by_symbol", "forward_fill_suspended_bars"})
 
 
 @dataclass(frozen=True)
@@ -67,20 +129,53 @@ class BacktestConfig:
     initial_cash: float = 1_000_000.0
     top_n: int = 3
     lot_size: int = 100
+    max_group_positions: int | None = None
     lookback_momentum: int = 20
     lookback_mean_reversion: int = 5
     lookback_volatility: int = 20
+    rolling_risk_window: int = 20
+    execution_delay_days: int = 0
+    max_allowed_drawdown: float = 0.20
+    max_allowed_daily_var: float = 0.05
+    min_allowed_rolling_return: float = -0.10
+    min_allowed_information_ratio: float = 0.0
+    min_allowed_fill_rate: float = 0.70
+    min_allowed_execution_price_coverage: float = 1.0
+    max_allowed_market_constraint_rate: float = 0.50
+    max_allowed_position_weight: float = 0.50
+    max_allowed_group_weight: float = 0.60
+    max_allowed_attribution_residual: float = 0.05
+    max_allowed_factor_correlation: float = 0.90
+    max_allowed_rebalance_changes: float = 3.0
+    min_allowed_holding_days: float = 3.0
     rebalance_every_n_days: int = 5
     commission_rate: float = 0.0003
+    buy_commission_rate: float | None = None
+    sell_commission_rate: float | None = None
     slippage_rate: float = 0.0005
+    market_impact_coefficient: float = 0.0
+    market_impact_exponent: float = 1.0
     stamp_duty_rate: float = 0.0
     min_commission: float = 0.0
     transfer_fee_rate: float = 0.0
+    target_cash_weight: float = 0.0
+    max_position_weight: float = 1.0
+    limit_up_down_rate: float = 0.10
+    st_limit_up_down_rate: float = 0.05
+    growth_limit_up_down_rate: float = 0.20
+    bse_limit_up_down_rate: float = 0.30
+    infer_limit_rate_by_symbol: bool = False
+    max_volume_participation: float = 1.0
+    infer_limit_flags: bool = False
+    forward_fill_suspended_bars: bool = False
     price_field: str = "adjusted_close"
+    execution_price_field: str | None = None
     start_date: date | None = None
     end_date: date | None = None
     output_dir: Path = OUTPUT_DIR
     symbol_name_csv: Path | None = None
+    stock_pool_csv: Path | None = None
+    symbol_group_csv: Path | None = None
     factor_weights: dict[str, float] = field(
         default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
     )
@@ -89,30 +184,110 @@ class BacktestConfig:
         object.__setattr__(self, "output_dir", self.output_dir.resolve())
         if self.symbol_name_csv is not None:
             object.__setattr__(self, "symbol_name_csv", self.symbol_name_csv.resolve())
+        if self.stock_pool_csv is not None:
+            object.__setattr__(self, "stock_pool_csv", self.stock_pool_csv.resolve())
+        if self.symbol_group_csv is not None:
+            object.__setattr__(self, "symbol_group_csv", self.symbol_group_csv.resolve())
         if self.initial_cash <= 0:
             raise ValueError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
             raise ValueError("top_n must be greater than 0.")
         if self.lot_size <= 0:
             raise ValueError("lot_size must be greater than 0.")
+        if self.max_group_positions is not None and self.max_group_positions <= 0:
+            raise ValueError("max_group_positions must be greater than 0.")
         if self.rebalance_every_n_days <= 0:
             raise ValueError("rebalance_every_n_days must be greater than 0.")
         if min(
             self.lookback_momentum,
             self.lookback_mean_reversion,
             self.lookback_volatility,
+            self.rolling_risk_window,
         ) <= 0:
-            raise ValueError("All lookback windows must be greater than 0.")
+            raise ValueError("All lookback and rolling windows must be greater than 0.")
+        if self.execution_delay_days < 0:
+            raise ValueError("execution_delay_days must be greater than or equal to 0.")
         if min(
             self.commission_rate,
+            0.0 if self.buy_commission_rate is None else self.buy_commission_rate,
+            0.0 if self.sell_commission_rate is None else self.sell_commission_rate,
             self.slippage_rate,
+            self.market_impact_coefficient,
+            self.market_impact_exponent,
             self.stamp_duty_rate,
             self.min_commission,
             self.transfer_fee_rate,
+            self.max_position_weight,
+            self.max_allowed_drawdown,
+            self.max_allowed_daily_var,
+            self.min_allowed_fill_rate,
+            self.min_allowed_execution_price_coverage,
+            self.max_allowed_market_constraint_rate,
+            self.max_allowed_position_weight,
+            self.max_allowed_group_weight,
+            self.max_allowed_attribution_residual,
+            self.max_allowed_factor_correlation,
+            self.limit_up_down_rate,
+            self.st_limit_up_down_rate,
+            self.growth_limit_up_down_rate,
+            self.bse_limit_up_down_rate,
+            self.max_volume_participation,
         ) < 0:
             raise ValueError("Cost rates cannot be negative.")
+        if min(
+            self.limit_up_down_rate,
+            self.st_limit_up_down_rate,
+            self.growth_limit_up_down_rate,
+            self.bse_limit_up_down_rate,
+        ) <= 0:
+            raise ValueError("Limit rates must be greater than 0.")
+        if max(
+            self.limit_up_down_rate,
+            self.st_limit_up_down_rate,
+            self.growth_limit_up_down_rate,
+            self.bse_limit_up_down_rate,
+        ) >= 1:
+            raise ValueError("Limit rates must be less than 1.")
+        if self.max_volume_participation > 1:
+            raise ValueError("max_volume_participation must be between 0 and 1.")
+        if self.market_impact_exponent <= 0:
+            raise ValueError("market_impact_exponent must be greater than 0.")
+        if self.target_cash_weight < 0 or self.target_cash_weight >= 1:
+            raise ValueError("target_cash_weight must be between 0 and 1.")
+        if self.max_position_weight <= 0 or self.max_position_weight > 1:
+            raise ValueError("max_position_weight must be between 0 and 1.")
+        if self.max_allowed_drawdown <= 0 or self.max_allowed_drawdown > 1:
+            raise ValueError("max_allowed_drawdown must be between 0 and 1.")
+        if self.max_allowed_daily_var < 0 or self.max_allowed_daily_var > 1:
+            raise ValueError("max_allowed_daily_var must be between 0 and 1.")
+        if self.min_allowed_rolling_return < -1 or self.min_allowed_rolling_return > 1:
+            raise ValueError("min_allowed_rolling_return must be between -1 and 1.")
+        if self.min_allowed_information_ratio < -10 or self.min_allowed_information_ratio > 10:
+            raise ValueError("min_allowed_information_ratio must be between -10 and 10.")
+        if self.min_allowed_fill_rate < 0 or self.min_allowed_fill_rate > 1:
+            raise ValueError("min_allowed_fill_rate must be between 0 and 1.")
+        if self.min_allowed_execution_price_coverage < 0 or self.min_allowed_execution_price_coverage > 1:
+            raise ValueError("min_allowed_execution_price_coverage must be between 0 and 1.")
+        if self.max_allowed_market_constraint_rate < 0 or self.max_allowed_market_constraint_rate > 1:
+            raise ValueError("max_allowed_market_constraint_rate must be between 0 and 1.")
+        if self.max_allowed_position_weight <= 0 or self.max_allowed_position_weight > 1:
+            raise ValueError("max_allowed_position_weight must be between 0 and 1.")
+        if self.max_allowed_group_weight <= 0 or self.max_allowed_group_weight > 1:
+            raise ValueError("max_allowed_group_weight must be between 0 and 1.")
+        if self.max_allowed_attribution_residual < 0 or self.max_allowed_attribution_residual > 1:
+            raise ValueError("max_allowed_attribution_residual must be between 0 and 1.")
+        if self.max_allowed_factor_correlation < 0 or self.max_allowed_factor_correlation > 1:
+            raise ValueError("max_allowed_factor_correlation must be between 0 and 1.")
+        if self.max_allowed_rebalance_changes < 0:
+            raise ValueError("max_allowed_rebalance_changes must be greater than or equal to 0.")
+        if self.min_allowed_holding_days < 0:
+            raise ValueError("min_allowed_holding_days must be greater than or equal to 0.")
         if self.price_field not in {"close", "adjusted_close"}:
             raise ValueError("price_field must be one of: close, adjusted_close.")
+        if self.execution_price_field_effective not in {"close", "adjusted_close", "open", "vwap"}:
+            raise ValueError(
+                "execution_price_field must be one of: close, adjusted_close, open, vwap."
+            )
         if self.start_date is not None and self.end_date is not None:
             if self.start_date > self.end_date:
                 raise ValueError("start_date must be earlier than or equal to end_date.")
@@ -131,7 +306,23 @@ class BacktestConfig:
 
     @property
     def per_side_cost_rate(self) -> float:
-        return self.commission_rate + self.slippage_rate
+        return self.buy_commission_rate_effective + self.slippage_rate
+
+    @property
+    def execution_price_field_effective(self) -> str:
+        return self.execution_price_field or self.price_field
+
+    @property
+    def buy_commission_rate_effective(self) -> float:
+        return self.commission_rate if self.buy_commission_rate is None else self.buy_commission_rate
+
+    @property
+    def sell_commission_rate_effective(self) -> float:
+        return (
+            self.commission_rate
+            if self.sell_commission_rate is None
+            else self.sell_commission_rate
+        )
 
     @property
     def max_lookback(self) -> int:
@@ -175,19 +366,29 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
     normalized: dict[str, object] = {}
     for field_name in _INT_FIELDS:
         if field_name in raw_config:
+            if field_name in _OPTIONAL_INT_FIELDS and raw_config[field_name] in ("", None):
+                continue
             normalized[field_name] = _require_int(raw_config[field_name], field_name)
 
     for field_name in _FLOAT_FIELDS:
         if field_name in raw_config:
+            if field_name in _OPTIONAL_FLOAT_FIELDS and raw_config[field_name] in ("", None):
+                continue
             normalized[field_name] = _require_number(raw_config[field_name], field_name)
 
     for field_name in _STRING_FIELDS:
         if field_name in raw_config:
+            if field_name in _OPTIONAL_STRING_FIELDS and raw_config[field_name] in ("", None):
+                continue
             normalized[field_name] = _require_str(raw_config[field_name], field_name)
 
     for field_name in _DATE_FIELDS:
         if field_name in raw_config and raw_config[field_name] not in ("", None):
             normalized[field_name] = _require_date(raw_config[field_name], field_name)
+
+    for field_name in _BOOL_FIELDS:
+        if field_name in raw_config:
+            normalized[field_name] = _require_bool(raw_config[field_name], field_name)
 
     if "output_dir" in raw_config:
         output_dir = Path(_require_str(raw_config["output_dir"], "output_dir"))
@@ -200,6 +401,18 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
         if not symbol_name_csv.is_absolute():
             symbol_name_csv = (path.parent / symbol_name_csv).resolve()
         normalized["symbol_name_csv"] = symbol_name_csv
+
+    if "stock_pool_csv" in raw_config and raw_config["stock_pool_csv"] not in ("", None):
+        stock_pool_csv = Path(_require_str(raw_config["stock_pool_csv"], "stock_pool_csv"))
+        if not stock_pool_csv.is_absolute():
+            stock_pool_csv = (path.parent / stock_pool_csv).resolve()
+        normalized["stock_pool_csv"] = stock_pool_csv
+
+    if "symbol_group_csv" in raw_config and raw_config["symbol_group_csv"] not in ("", None):
+        symbol_group_csv = Path(_require_str(raw_config["symbol_group_csv"], "symbol_group_csv"))
+        if not symbol_group_csv.is_absolute():
+            symbol_group_csv = (path.parent / symbol_group_csv).resolve()
+        normalized["symbol_group_csv"] = symbol_group_csv
 
     if "factor_weights" in raw_config:
         factor_weights = raw_config["factor_weights"]
@@ -269,6 +482,8 @@ def _validate_sweep_value(field_name: str, value: object) -> object:
         return _require_number(value, field_name)
     if field_name in _STRING_FIELDS:
         return _require_str(value, field_name)
+    if field_name in _BOOL_FIELDS:
+        return _require_bool(value, field_name)
     raise ValueError(f"Unsupported sweep field: {field_name}")
 
 
@@ -287,6 +502,12 @@ def _require_number(value: object, field_name: str) -> float:
 def _require_str(value: object, field_name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string.")
+    return value
+
+
+def _require_bool(value: object, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean.")
     return value
 
 

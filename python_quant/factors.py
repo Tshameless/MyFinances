@@ -27,6 +27,44 @@ def build_intersection_calendar(history_by_symbol: dict[str, list[PriceBar]]) ->
     return sorted(common_dates)
 
 
+def align_history_with_suspended_fills(
+    history_by_symbol: dict[str, list[PriceBar]],
+) -> tuple[list[date], dict[str, list[PriceBar]]]:
+    if not history_by_symbol:
+        return [], {}
+
+    first_dates = [bars[0].date for bars in history_by_symbol.values() if bars]
+    if not first_dates:
+        return [], {}
+    start_date = max(first_dates)
+    calendar = sorted(
+        {
+            bar.date
+            for symbol_bars in history_by_symbol.values()
+            for bar in symbol_bars
+            if bar.date >= start_date
+        }
+    )
+
+    aligned: dict[str, list[PriceBar]] = {}
+    for symbol, bars in history_by_symbol.items():
+        bar_by_date = {bar.date: bar for bar in bars}
+        previous_bar: PriceBar | None = None
+        rows: list[PriceBar] = []
+        for trading_date in calendar:
+            bar = bar_by_date.get(trading_date)
+            if bar is not None:
+                previous_bar = bar
+                rows.append(bar)
+                continue
+            if previous_bar is None:
+                break
+            rows.append(_suspended_fill_bar(previous_bar, trading_date))
+        if len(rows) == len(calendar):
+            aligned[symbol] = rows
+    return calendar, aligned
+
+
 def align_history_to_calendar(
     history_by_symbol: dict[str, list[PriceBar]],
     calendar: list[date],
@@ -42,6 +80,26 @@ def align_history_to_calendar(
         if len(aligned_bars) == len(calendar):
             aligned[symbol] = aligned_bars
     return aligned
+
+
+def _suspended_fill_bar(previous_bar: PriceBar, trading_date: date) -> PriceBar:
+    return PriceBar(
+        date=trading_date,
+        symbol=previous_bar.symbol,
+        close=previous_bar.close,
+        adjusted_close=previous_bar.adjusted_close,
+        open=previous_bar.open,
+        vwap=previous_bar.vwap,
+        volume=0.0,
+        tradable=False,
+        can_buy=False,
+        can_sell=False,
+        is_suspended=True,
+        is_limit_up=False,
+        is_limit_down=False,
+        is_st=previous_bar.is_st,
+        limit_rate=previous_bar.limit_rate,
+    )
 
 
 def compute_daily_returns(closes: list[float]) -> list[float]:

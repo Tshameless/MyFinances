@@ -10,10 +10,17 @@ class PriceBar:
     symbol: str
     close: float
     adjusted_close: float | None = None
+    open: float | None = None
+    vwap: float | None = None
     volume: float | None = None
     tradable: bool = True
     can_buy: bool = True
     can_sell: bool = True
+    is_suspended: bool = False
+    is_limit_up: bool = False
+    is_limit_down: bool = False
+    is_st: bool = False
+    limit_rate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,8 @@ class TradeRecord:
     total_cost: float
     cash_change: float
     reason: str
+    fixed_slippage: float = 0.0
+    market_impact: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -128,3 +137,4 @@ class BacktestResult:
     trades: list[TradeRecord] | None = None
     trade_attempts: list[TradeAttemptRecord] | None = None
     factor_scores: list[FactorScoreRecord] | None = None
+    price_bars: list[PriceBar] | None = None

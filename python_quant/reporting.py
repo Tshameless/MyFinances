@@ -46,6 +46,8 @@ _ZH_LABELS = {
     "gross_value": "成交金额",
     "commission": "佣金",
     "slippage": "滑点",
+    "fixed_slippage": "固定滑点",
+    "market_impact": "市场冲击",
     "transfer_fee": "过户费",
     "stamp_duty": "印花税",
     "cash_change": "现金变化",
@@ -79,6 +81,12 @@ _ZH_LABELS = {
     "win_rate": "胜率",
     "average_turnover": "平均换手",
     "total_cost": "总成本",
+    "health_score": "策略健康评分",
+    "health_grade": "策略健康等级",
+    "gate_status": "策略闸门状态",
+    "gate_failures": "策略闸门失败数",
+    "health_warnings": "策略预警数",
+    "critical_warnings": "严重预警数",
     "periods": "周期数",
     "benchmark_total_return": "基准总收益",
     "benchmark_annualized_return": "基准年化收益",
@@ -87,6 +95,11 @@ _ZH_LABELS = {
     "excess_return": "超额收益",
     "tracking_error": "跟踪误差",
     "information_ratio": "信息比率",
+    "beta": "Beta",
+    "daily_alpha": "日度Alpha",
+    "annualized_alpha": "年化Alpha",
+    "correlation": "相关系数",
+    "r_squared": "R平方",
     "run_id": "内部编号",
     "scheme_label": "方案编号",
     "output_dir": "输出目录",
@@ -94,15 +107,40 @@ _ZH_LABELS = {
     "initial_cash": "初始资金",
     "top_n": "持仓数量TopN",
     "lot_size": "每手股数",
+    "max_group_positions": "单组最多入选数",
     "rebalance_every_n_days": "调仓间隔天数",
     "lookback_momentum": "动量回看窗口",
     "lookback_mean_reversion": "均值回归回看窗口",
     "lookback_volatility": "波动率回看窗口",
+    "rolling_risk_window": "滚动风险窗口",
+    "max_allowed_drawdown": "闸门最大回撤",
+    "max_allowed_daily_var": "闸门最大日VaR",
+    "min_allowed_rolling_return": "闸门最差滚动收益",
+    "min_allowed_information_ratio": "闸门最低信息比率",
+    "min_allowed_fill_rate": "闸门最低成交率",
+    "min_allowed_execution_price_coverage": "闸门最低执行价覆盖率",
+    "max_allowed_position_weight": "闸门最大单票权重",
+    "max_allowed_group_weight": "闸门最大分组权重",
+    "max_allowed_attribution_residual": "闸门最大归因残差",
     "commission_rate": "佣金率",
+    "buy_commission_rate": "买入佣金率",
+    "sell_commission_rate": "卖出佣金率",
     "slippage_rate": "滑点率",
+    "market_impact_coefficient": "冲击成本系数",
+    "market_impact_exponent": "冲击成本指数",
     "stamp_duty_rate": "印花税率",
     "min_commission": "最低佣金",
     "transfer_fee_rate": "过户费率",
+    "target_cash_weight": "目标现金权重",
+    "max_position_weight": "单票目标权重上限",
+    "limit_up_down_rate": "涨跌停阈值",
+    "st_limit_up_down_rate": "ST涨跌停阈值",
+    "growth_limit_up_down_rate": "成长板涨跌停阈值",
+    "bse_limit_up_down_rate": "北交所涨跌停阈值",
+    "infer_limit_rate_by_symbol": "按代码推断涨跌停",
+    "max_volume_participation": "最大成交量参与率",
+    "infer_limit_flags": "自动推断涨跌停",
+    "forward_fill_suspended_bars": "缺失行情前值停牌估值",
     "price_field": "价格字段",
     "start_date": "开始日期",
     "end_date": "结束日期",
@@ -113,6 +151,37 @@ _ZH_LABELS = {
     "trades_csv": "逐笔交易明细CSV",
     "trade_attempts_csv": "未成交原因CSV",
     "factor_scores_csv": "因子评分明细CSV",
+    "factor_ic_csv": "因子IC分析CSV",
+    "factor_ic_json": "因子IC分析JSON",
+    "factor_group_returns_csv": "因子分组收益CSV",
+    "factor_group_returns_json": "因子分组收益JSON",
+    "factor_decay_csv": "因子衰减分析CSV",
+    "factor_decay_json": "因子衰减分析JSON",
+    "factor_correlation_csv": "因子相关性矩阵CSV",
+    "factor_correlation_json": "因子相关性矩阵JSON",
+    "drawdown_csv": "回撤序列CSV",
+    "drawdown_json": "回撤序列JSON",
+    "monthly_returns_csv": "月度收益CSV",
+    "monthly_returns_json": "月度收益JSON",
+    "rolling_risk_csv": "滚动风险CSV",
+    "rolling_risk_json": "滚动风险JSON",
+    "relative_performance_csv": "相对基准表现CSV",
+    "relative_performance_json": "相对基准表现JSON",
+    "execution_quality_csv": "执行质量CSV",
+    "execution_quality_json": "执行质量JSON",
+    "exposure_csv": "持仓暴露CSV",
+    "exposure_json": "持仓暴露JSON",
+    "group_exposure_csv": "分组暴露CSV",
+    "group_exposure_json": "分组暴露JSON",
+    "return_attribution_csv": "收益归因CSV",
+    "return_attribution_json": "收益归因JSON",
+    "cost_attribution_csv": "成本归因CSV",
+    "cost_attribution_json": "成本归因JSON",
+    "pnl_ledger_csv": "盈亏对账CSV",
+    "pnl_ledger_json": "盈亏对账JSON",
+    "strategy_health_csv": "策略健康诊断CSV",
+    "strategy_health_gates_csv": "策略风险闸门CSV",
+    "strategy_health_json": "策略健康诊断JSON",
     "rebalance_log_csv": "调仓日志CSV",
     "performance_summary_csv": "绩效汇总CSV",
     "performance_summary_json": "绩效汇总JSON",
@@ -124,6 +193,8 @@ _ZH_LABELS = {
     "best_run_json": "最佳方案JSON",
     "batch_chart_svg": "参数对比图",
     "batch_heatmap_svg": "参数热力图",
+    "batch_stability_csv": "参数稳定性CSV",
+    "batch_stability_json": "参数稳定性JSON",
 }
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
@@ -148,6 +219,9 @@ _METRIC_EXPLANATIONS = {
     "excess_return": "组合总收益减去基准总收益。",
     "tracking_error": "组合相对基准的超额收益波动率。",
     "information_ratio": "平均超额收益与跟踪误差之比。",
+    "beta": "组合日收益相对基准日收益的市场暴露。",
+    "annualized_alpha": "在零无风险利率口径下，剔除 beta 暴露后的年化超额收益。",
+    "r_squared": "基准日收益解释组合日收益波动的比例。",
 }
 
 _DEFAULT_A_SHARE_SYMBOL_NAMES = {
@@ -408,10 +482,15 @@ def save_performance_summary(metrics: BacktestMetrics, output_dir: Path) -> Path
     return target_path
 
 
-def save_performance_summary_json(metrics: BacktestMetrics, output_dir: Path) -> Path:
+def save_performance_summary_json(
+    metrics: BacktestMetrics,
+    output_dir: Path,
+    *,
+    extra_payload: dict[str, object] | None = None,
+) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_path = output_dir / "performance_summary.json"
-    payload = {
+    payload: dict[str, object] = {
         "total_return": metrics.total_return,
         "annualized_return": metrics.annualized_return,
         "max_drawdown": metrics.max_drawdown,
@@ -432,6 +511,8 @@ def save_performance_summary_json(metrics: BacktestMetrics, output_dir: Path) ->
         "tracking_error": metrics.tracking_error,
         "information_ratio": metrics.information_ratio,
     }
+    if extra_payload:
+        payload.update(extra_payload)
     with target_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
     return target_path
@@ -482,6 +563,9 @@ def save_single_run_report_html(
     has_benchmark = _has_benchmark_metrics(metrics)
     benchmark_section = ""
     rows = _build_single_run_metric_rows(metrics)
+    review_rows = _build_single_run_review_rows(artifacts)
+    trading_behavior_rows = _build_trading_behavior_rows(artifacts)
+    data_quality_rows = _build_data_quality_rows(artifacts)
 
     artifact_links = _build_artifact_links(artifacts)
     summary_card_items = [
@@ -500,6 +584,9 @@ def save_single_run_report_html(
     </div>"""
     summary_cards = "\n".join(summary_card_items)
     metrics_rows = _build_html_table_rows(rows)
+    review_table_rows = _build_html_table_rows(review_rows)
+    trading_behavior_table_rows = _build_html_table_rows(trading_behavior_rows)
+    data_quality_table_rows = _build_html_table_rows(data_quality_rows)
     factor_rows = "\n".join(
         f"<tr><th>因子 / {escape(name)}</th><td>{weight:.4f}</td></tr>"
         for name, weight in config.factor_weights.items()
@@ -539,6 +626,7 @@ def save_single_run_report_html(
     .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
     .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
     .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+    .compact td, .compact th {{ font-size: 14px; }}
   </style>
 </head>
 <body>
@@ -572,20 +660,57 @@ def save_single_run_report_html(
       <table>{metrics_rows}</table>
     </div>
     <div class="card">
+      <h2>复盘摘要</h2>
+      <table class="compact">{review_table_rows}</table>
+    </div>
+    <div class="card">
+      <h2>Trading Behavior Diagnostics</h2>
+      <table class="compact">{trading_behavior_table_rows}</table>
+    </div>
+    <div class="card">
+      <h2>Data Quality Diagnostics</h2>
+      <table class="compact">{data_quality_table_rows}</table>
+    </div>
+    <div class="card">
       <h2>配置摘要</h2>
       <table>
         <tr><th>{_display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
         <tr><th>{_display_label("top_n")}</th><td>{config.top_n}</td></tr>
         <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
+        <tr><th>{_display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
+        <tr><th>{_display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
+        <tr><th>{_display_label("max_allowed_drawdown")}</th><td>{config.max_allowed_drawdown:.2%}</td></tr>
+        <tr><th>{_display_label("max_allowed_daily_var")}</th><td>{config.max_allowed_daily_var:.2%}</td></tr>
+        <tr><th>{_display_label("min_allowed_rolling_return")}</th><td>{config.min_allowed_rolling_return:.2%}</td></tr>
+        <tr><th>{_display_label("min_allowed_information_ratio")}</th><td>{config.min_allowed_information_ratio:.3f}</td></tr>
+        <tr><th>{_display_label("min_allowed_fill_rate")}</th><td>{config.min_allowed_fill_rate:.2%}</td></tr>
+        <tr><th>{_display_label("min_allowed_execution_price_coverage")}</th><td>{config.min_allowed_execution_price_coverage:.2%}</td></tr>
+        <tr><th>{_display_label("max_allowed_position_weight")}</th><td>{config.max_allowed_position_weight:.2%}</td></tr>
+        <tr><th>{_display_label("max_allowed_group_weight")}</th><td>{config.max_allowed_group_weight:.2%}</td></tr>
+        <tr><th>{_display_label("max_allowed_attribution_residual")}</th><td>{config.max_allowed_attribution_residual:.2%}</td></tr>
         <tr><th>{_display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
         <tr><th>{_display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
         <tr><th>{_display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
         <tr><th>{_display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
         <tr><th>{_display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
+        <tr><th>{_display_label("buy_commission_rate")}</th><td>{_format_optional_rate(config.buy_commission_rate)}</td></tr>
+        <tr><th>{_display_label("sell_commission_rate")}</th><td>{_format_optional_rate(config.sell_commission_rate)}</td></tr>
         <tr><th>{_display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
+        <tr><th>{_display_label("market_impact_coefficient")}</th><td>{config.market_impact_coefficient:.6f}</td></tr>
+        <tr><th>{_display_label("market_impact_exponent")}</th><td>{config.market_impact_exponent:.6f}</td></tr>
         <tr><th>{_display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
         <tr><th>{_display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
         <tr><th>{_display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
+        <tr><th>{_display_label("target_cash_weight")}</th><td>{config.target_cash_weight:.2%}</td></tr>
+        <tr><th>{_display_label("max_position_weight")}</th><td>{config.max_position_weight:.2%}</td></tr>
+        <tr><th>{_display_label("infer_limit_flags")}</th><td>{config.infer_limit_flags}</td></tr>
+        <tr><th>{_display_label("forward_fill_suspended_bars")}</th><td>{config.forward_fill_suspended_bars}</td></tr>
+        <tr><th>{_display_label("limit_up_down_rate")}</th><td>{config.limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{_display_label("st_limit_up_down_rate")}</th><td>{config.st_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{_display_label("growth_limit_up_down_rate")}</th><td>{config.growth_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{_display_label("bse_limit_up_down_rate")}</th><td>{config.bse_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{_display_label("infer_limit_rate_by_symbol")}</th><td>{config.infer_limit_rate_by_symbol}</td></tr>
+        <tr><th>{_display_label("max_volume_participation")}</th><td>{config.max_volume_participation:.4f}</td></tr>
       </table>
       <h2 style="margin-top:20px;">因子权重</h2>
       <table>{factor_rows}</table>
@@ -690,6 +815,7 @@ def save_batch_rankings(
     leaderboard_payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "rank_by": rank_by,
+        "ranking_policy": "gate_pass_first_then_metric",
         "reader_friendly": _build_ranked_batch_json_summary(ranked_rows, rank_by),
         "rows": ranked_rows,
     }
@@ -699,6 +825,7 @@ def save_batch_rankings(
     best_payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "rank_by": rank_by,
+        "ranking_policy": "gate_pass_first_then_metric",
         "reader_friendly": _build_best_run_json_summary(ranked_rows[0] if ranked_rows else None, rank_by),
         "best_run": ranked_rows[0] if ranked_rows else None,
     }
@@ -736,9 +863,12 @@ def _build_ranked_batch_json_summary(
         "rank_metric": _display_label(rank_by),
         "best_scheme": None if best_row is None else _format_run_label(best_row, 1),
         "best_internal_id": None if best_row is None else str(best_row.get("run_id", "")),
+        "best_gate_status": None if best_row is None else str(best_row.get("gate_status", "")),
+        "best_health_score": None if best_row is None else _format_metric_value("health_score", best_row.get("health_score")),
         "best_metric_value": None if best_row is None else _format_metric_value(rank_by, best_row.get(rank_by)),
         "worst_scheme": None if worst_row is None else _format_run_label(worst_row, len(ranked_rows)),
         "worst_internal_id": None if worst_row is None else str(worst_row.get("run_id", "")),
+        "worst_gate_status": None if worst_row is None else str(worst_row.get("gate_status", "")),
         "worst_metric_value": None if worst_row is None else _format_metric_value(rank_by, worst_row.get(rank_by)),
         "notes": "rows 字段按排序后的完整结果保留。",
     }
@@ -752,12 +882,16 @@ def _build_best_run_json_summary(
         return {
             "best_scheme": None,
             "best_internal_id": None,
+            "best_gate_status": None,
+            "best_health_score": None,
             "rank_metric": _display_label(rank_by),
             "best_metric_value": None,
         }
     return {
         "best_scheme": _format_run_label(best_row, 1),
         "best_internal_id": str(best_row.get("run_id", "")),
+        "best_gate_status": str(best_row.get("gate_status", "")),
+        "best_health_score": _format_metric_value("health_score", best_row.get("health_score")),
         "rank_metric": _display_label(rank_by),
         "best_metric_value": _format_metric_value(rank_by, best_row.get(rank_by)),
     }
@@ -854,6 +988,9 @@ def save_batch_report_html(
     headers = [
         "scheme_label",
         "run_id",
+        "gate_status",
+        "health_score",
+        "gate_failures",
         rank_by,
         "total_return",
         "sharpe",
@@ -871,7 +1008,7 @@ def save_batch_report_html(
     )
     summary_cards = _build_batch_summary_cards(best_row, rank_by, len(sorted_rows))
     parameter_rows = _build_batch_parameter_rows(best_row)
-    observation_rows = _build_batch_observation_rows(sorted_rows, rank_by)
+    observation_rows = _build_batch_observation_rows(sorted_rows, rank_by, artifacts)
     artifact_links = _build_artifact_links(artifacts)
     chart_blocks = _build_batch_chart_blocks(artifacts)
     html = f"""<!DOCTYPE html>
@@ -970,6 +1107,8 @@ def _build_batch_summary_cards(
             _summary_card("试验组数", str(run_count)),
             _summary_card("最佳方案", _format_run_label(best_row, 1)),
             _summary_card("内部编号", str(best_row.get("run_id", "-"))),
+            _summary_card("Gate status", str(best_row.get("gate_status", "-"))),
+            _summary_card("Health score", _format_metric_value("health_score", best_row.get("health_score"))),
             _summary_card(_display_label(rank_by), _format_metric_value(rank_by, best_row.get(rank_by))),
         ]
     )
@@ -994,6 +1133,7 @@ def _build_batch_parameter_rows(best_row: dict[str, object] | None) -> str:
 def _build_batch_observation_rows(
     sorted_rows: list[dict[str, object]],
     rank_by: str,
+    artifacts: dict[str, Path],
 ) -> str:
     if not sorted_rows:
         return "<tr><th>观察</th><td>暂无结果</td></tr>"
@@ -1007,6 +1147,22 @@ def _build_batch_observation_rows(
         ("最弱方案内部编号", str(worst_row.get("run_id", "-"))),
         ("最弱排序指标", _format_metric_value(rank_by, worst_row.get(rank_by))),
     ]
+    stability_summary = _load_artifact_summary(artifacts, "batch_stability_json")
+    if stability_summary:
+        rows.extend(
+            [
+                ("稳健热区数量", _format_summary_number(stability_summary, "robust_region_run_count", decimals=0)),
+                ("稳健热区占比", _format_summary_pct(stability_summary, "robust_region_rate")),
+                ("热区平均指标", _format_summary_number(stability_summary, "robust_region_average_metric", decimals=3)),
+                ("参数孤岛", _format_summary_field(stability_summary, "is_parameter_island")),
+                ("Gate-passing runs", _format_summary_number(stability_summary, "gate_passing_run_count", decimals=0)),
+                ("Gate-failing runs", _format_summary_number(stability_summary, "gate_failing_run_count", decimals=0)),
+                ("Most common failed gate category", _format_count_map_top(stability_summary, "failed_gate_category_counts")),
+                ("Most common failed gate", _format_count_map_top(stability_summary, "failed_gate_name_counts")),
+                ("Recommended action", _format_list_first(stability_summary, "recommended_actions")),
+                ("Recommended action count", _format_list_count(stability_summary, "recommended_actions")),
+            ]
+        )
     return "\n".join(
         f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
         for label, value in rows
@@ -1117,6 +1273,291 @@ def _build_single_run_metric_rows(metrics: BacktestMetrics) -> list[tuple[str, s
     return rows
 
 
+def _build_single_run_review_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
+    drawdown_summary = _load_artifact_summary(artifacts, "drawdown_json")
+    exposure_summary = _load_artifact_summary(artifacts, "exposure_json")
+    group_exposure_summary = _load_artifact_summary(artifacts, "group_exposure_json")
+    rolling_risk_summary = _load_artifact_summary(artifacts, "rolling_risk_json")
+    relative_summary = _load_artifact_summary(artifacts, "relative_performance_json")
+    factor_ic_summary = _load_artifact_summary(artifacts, "factor_ic_json")
+    factor_decay_summary = _load_artifact_summary(artifacts, "factor_decay_json")
+    factor_correlation_summary = _load_artifact_summary(artifacts, "factor_correlation_json")
+    execution_summary = _load_artifact_summary(artifacts, "execution_quality_json")
+    return_attribution_summary = _load_artifact_summary(artifacts, "return_attribution_json")
+    cost_attribution_summary = _load_artifact_summary(artifacts, "cost_attribution_json")
+    pnl_ledger_summary = _load_artifact_summary(artifacts, "pnl_ledger_json")
+    strategy_health_summary = _load_artifact_summary(artifacts, "strategy_health_json")
+
+    return [
+        ("策略健康评分", _format_summary_number(strategy_health_summary, "score")),
+        ("策略健康等级", _format_summary_field(strategy_health_summary, "grade")),
+        ("策略闸门状态", _format_summary_field(strategy_health_summary, "gate_status")),
+        ("策略闸门失败数", _format_summary_number(strategy_health_summary, "gate_failures", decimals=0)),
+        ("策略预警数量", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
+        ("因子相关风险", _format_summary_pct(strategy_health_summary, "strongest_factor_correlation")),
+        ("最强相关因子对", _format_summary_field(strategy_health_summary, "strongest_factor_correlation_pair")),
+        ("最大回撤日期", _format_summary_field(drawdown_summary, "max_drawdown_date")),
+        ("最长水下天数", _format_summary_number(drawdown_summary, "longest_underwater_days")),
+        ("回撤是否修复", _format_summary_bool(drawdown_summary, "is_recovered")),
+        ("滚动最差收益", _format_summary_pct(rolling_risk_summary, "worst_rolling_return")),
+        ("滚动最差收益日", _format_summary_field(rolling_risk_summary, "worst_rolling_return_date")),
+        ("滚动平均夏普", _format_summary_number(rolling_risk_summary, "average_rolling_sharpe")),
+        ("滚动最大回撤", _format_summary_pct(rolling_risk_summary, "worst_rolling_drawdown")),
+        ("平均股票仓位", _format_summary_pct(exposure_summary, "average_stock_weight")),
+        ("平均持仓数量", _format_summary_number(exposure_summary, "average_holding_count")),
+        ("有效持仓数", _format_summary_number(exposure_summary, "average_effective_position_count")),
+        ("最大单票权重", _format_summary_pct(exposure_summary, "max_largest_position_weight")),
+        ("最大持仓集中度", _format_summary_number(exposure_summary, "max_hhi_concentration")),
+        ("最大风险贡献标的", _format_summary_field(exposure_summary, "max_largest_risk_contribution_symbol")),
+        ("最大风险贡献占比", _format_summary_pct(exposure_summary, "max_largest_risk_contribution_share")),
+        ("最大分组风险贡献", _format_summary_field(group_exposure_summary, "max_group_risk_contribution_group")),
+        ("最大分组贡献占比", _format_summary_pct(group_exposure_summary, "max_group_risk_contribution_share")),
+        ("总分平均IC", _format_nested_summary_number(factor_ic_summary, "total_score", "mean_ic")),
+        ("总分ICIR", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_ir")),
+        ("总分IC t值", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_t_stat")),
+        ("总分稳定性", _format_nested_summary_number(factor_decay_summary, "total_score", "average_rank_correlation")),
+        ("入选留存率", _format_nested_summary_pct(factor_decay_summary, "total_score", "average_selected_retention_rate")),
+        ("最强因子相关", _format_factor_pair(factor_correlation_summary, "strongest_pair")),
+        ("最强排序相关", _format_factor_pair(factor_correlation_summary, "strongest_rank_pair")),
+        ("累计主动收益", _format_summary_pct(relative_summary, "total_active_return")),
+        ("年化Alpha", _format_summary_pct(relative_summary, "annualized_alpha")),
+        ("Beta", _format_summary_number(relative_summary, "beta")),
+        ("R平方", _format_summary_pct(relative_summary, "r_squared")),
+        ("主动胜率", _format_summary_pct(relative_summary, "active_win_rate")),
+        ("最差主动日", _format_summary_field(relative_summary, "worst_active_return_date")),
+        ("主动最大回撤", _format_summary_pct(relative_summary, "max_active_drawdown")),
+        ("成交率", _format_summary_pct(execution_summary, "fill_rate")),
+        ("执行成本", _format_summary_bps(execution_summary, "cost_bps")),
+        ("主要执行约束", _format_summary_field(execution_summary, "dominant_constraint_category")),
+        ("市场约束拒单占比", _format_summary_pct(execution_summary, "market_constraint_rate")),
+        ("最严重执行阻塞日", _format_summary_field(execution_summary, "worst_constraint_date")),
+        ("阻塞日主要约束", _format_summary_field(execution_summary, "worst_constraint_dominant_category")),
+        ("收益归因残差", _format_summary_pct(return_attribution_summary, "total_residual_return")),
+        ("成本拖累", _format_summary_pct(return_attribution_summary, "total_cost_drag")),
+        ("总成本", _format_summary_money(cost_attribution_summary, "total_cost")),
+        ("固定滑点成本", _format_summary_money(cost_attribution_summary, "fixed_slippage_cost")),
+        ("市场冲击成本", _format_summary_money(cost_attribution_summary, "market_impact_cost")),
+        ("成本归因 bps", _format_summary_bps(cost_attribution_summary, "cost_bps")),
+        ("最大对账差异", _format_summary_money(pnl_ledger_summary, "max_abs_reconciliation_difference")),
+        ("对账状态", _format_reconciliation_status(pnl_ledger_summary)),
+    ]
+
+
+def _build_trading_behavior_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
+    turnover_summary = _load_artifact_summary(artifacts, "turnover_analysis_json")
+    strategy_health_summary = _load_artifact_summary(artifacts, "strategy_health_json")
+    average_entries = _summary_float(turnover_summary, "average_entries_per_rebalance")
+    average_exits = _summary_float(turnover_summary, "average_exits_per_rebalance")
+    average_rebalance_changes = (
+        None if average_entries is None or average_exits is None else average_entries + average_exits
+    )
+    return [
+        ("Average entries per rebalance", _format_summary_number(turnover_summary, "average_entries_per_rebalance")),
+        ("Average exits per rebalance", _format_summary_number(turnover_summary, "average_exits_per_rebalance")),
+        ("Average rebalance changes", _format_optional_number(average_rebalance_changes)),
+        ("Realized holding periods", _format_summary_number(turnover_summary, "realized_holding_count", decimals=0)),
+        ("Average realized holding days", _format_summary_number(turnover_summary, "average_realized_holding_days")),
+        ("Open positions after final bar", _format_summary_number(turnover_summary, "open_position_count", decimals=0)),
+        ("Turnover gate status", _format_summary_field(strategy_health_summary, "gate_status")),
+        ("Health warnings", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
+    ]
+
+
+def _build_data_quality_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
+    summary = _load_artifact_summary(artifacts, "price_data_quality_report_json")
+    return [
+        ("Price rows", _format_summary_number(summary, "row_count", decimals=0)),
+        ("Symbols", _format_summary_number(summary, "symbol_count", decimals=0)),
+        ("Trading dates", _format_summary_number(summary, "date_count", decimals=0)),
+        ("Date range", _format_date_range(summary)),
+        ("Symbols missing adjusted close", _format_summary_number(summary, "symbols_with_missing_adjusted_close", decimals=0)),
+        ("Execution price field", _format_summary_field(summary, "execution_price_field")),
+        ("Missing execution price rows", _format_summary_number(summary, "missing_execution_price_rows", decimals=0)),
+        ("Execution price coverage", _format_summary_pct(summary, "execution_price_coverage_rate")),
+        ("Missing open rows", _format_summary_number(summary, "missing_open_rows", decimals=0)),
+        ("Missing VWAP rows", _format_summary_number(summary, "missing_vwap_rows", decimals=0)),
+        ("Suspended rows", _format_summary_number(summary, "suspended_days", decimals=0)),
+        ("Limit-up rows", _format_summary_number(summary, "limit_up_days", decimals=0)),
+        ("Limit-down rows", _format_summary_number(summary, "limit_down_days", decimals=0)),
+        ("ST rows", _format_summary_number(summary, "st_days", decimals=0)),
+        ("Custom limit-rate rows", _format_summary_number(summary, "custom_limit_rate_days", decimals=0)),
+        ("Untradable rows", _format_summary_number(summary, "untradable_days", decimals=0)),
+        ("Cannot-buy rows", _format_summary_number(summary, "cannot_buy_days", decimals=0)),
+        ("Cannot-sell rows", _format_summary_number(summary, "cannot_sell_days", decimals=0)),
+    ]
+
+
+def _load_artifact_summary(artifacts: dict[str, Path], artifact_key: str) -> dict[str, object]:
+    path = artifacts.get(artifact_key)
+    if path is None or not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    summary = payload.get("summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _format_summary_field(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    return "-" if value in (None, "") else str(value)
+
+
+def _format_date_range(summary: dict[str, object]) -> str:
+    start_date = _format_summary_field(summary, "start_date")
+    end_date = _format_summary_field(summary, "end_date")
+    if start_date == "-" and end_date == "-":
+        return "-"
+    return f"{start_date} to {end_date}"
+
+
+def _summary_float(summary: dict[str, object], key: str) -> float | None:
+    value = summary.get(key)
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _format_summary_number(
+    summary: dict[str, object],
+    key: str,
+    *,
+    decimals: int = 2,
+) -> str:
+    value = summary.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:,.{decimals}f}"
+
+
+def _format_summary_bool(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    if value is True:
+        return "是"
+    if value is False:
+        return "否"
+    return "-"
+
+
+def _format_nested_summary_number(
+    summary: dict[str, object],
+    section: str,
+    key: str,
+    *,
+    decimals: int = 3,
+) -> str:
+    section_payload = summary.get(section)
+    if not isinstance(section_payload, dict):
+        return "-"
+    value = section_payload.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:,.{decimals}f}"
+
+
+def _format_nested_summary_pct(
+    summary: dict[str, object],
+    section: str,
+    key: str,
+) -> str:
+    section_payload = summary.get(section)
+    if not isinstance(section_payload, dict):
+        return "-"
+    value = section_payload.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:.2%}"
+
+
+def _format_factor_pair(summary: dict[str, object], key: str) -> str:
+    pair = summary.get(key)
+    if not isinstance(pair, dict):
+        return "-"
+    factor = pair.get("factor")
+    compared_factor = pair.get("compared_factor")
+    if not isinstance(factor, str) or not isinstance(compared_factor, str):
+        return "-"
+    correlation = pair.get("average_correlation", pair.get("average_rank_correlation"))
+    if not isinstance(correlation, int | float):
+        return f"{factor} vs {compared_factor}"
+    return f"{factor} vs {compared_factor}: {correlation:.3f}"
+
+
+def _format_count_map_top(summary: dict[str, object], key: str) -> str:
+    counts = summary.get(key)
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    top_key, top_count = max(
+        counts.items(),
+        key=lambda item: (_coerce_float(item[1]), str(item[0])),
+    )
+    return f"{top_key}: {_coerce_float(top_count):.0f}"
+
+
+def _format_list_first(summary: dict[str, object], key: str) -> str:
+    values = summary.get(key)
+    if not isinstance(values, list) or not values:
+        return "-"
+    return str(values[0])
+
+
+def _format_list_count(summary: dict[str, object], key: str) -> str:
+    values = summary.get(key)
+    if not isinstance(values, list):
+        return "0"
+    return str(len(values))
+
+
+def _coerce_float(value: object) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, int | float):
+        return float(value)
+    try:
+        return float(str(value))
+    except ValueError:
+        return 0.0
+
+
+def _format_optional_number(value: float | None, *, decimals: int = 2) -> str:
+    return "-" if value is None else f"{value:,.{decimals}f}"
+
+
+def _format_summary_pct(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:.2%}"
+
+
+def _format_summary_bps(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:.2f} bps"
+
+
+def _format_summary_money(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:,.2f}"
+
+
+def _format_reconciliation_status(summary: dict[str, object]) -> str:
+    value = summary.get("reconciled")
+    if value is True:
+        return "已对齐"
+    if value is False:
+        return "存在差异"
+    return "-"
+
+
 def _build_artifact_links(artifacts: dict[str, Path]) -> str:
     return "\n".join(
         f'<li><a href="{escape(path.name)}">{escape(_display_label(name))}</a></li>'
@@ -1144,9 +1585,24 @@ def _build_html_table_rows(rows: list[tuple[str, str]]) -> str:
 def _sort_rows_by_metric(rows: list[dict[str, object]], rank_by: str) -> list[dict[str, object]]:
     return sorted(
         rows,
-        key=lambda row: _float_metric(row, rank_by, default=float("-inf")),
+        key=lambda row: (
+            _gate_rank_value(row),
+            -_float_metric(row, "gate_failures", default=0.0),
+            -_float_metric(row, "critical_warnings", default=0.0),
+            -_float_metric(row, "health_warnings", default=0.0),
+            _float_metric(row, rank_by, default=float("-inf")),
+        ),
         reverse=True,
     )
+
+
+def _gate_rank_value(row: dict[str, object]) -> float:
+    gate_status = str(row.get("gate_status", "")).lower()
+    if gate_status == "pass":
+        return 1.0
+    if gate_status == "":
+        return 0.5
+    return 0.0
 
 
 def _validate_rank_metric(rows: list[dict[str, object]], rank_by: str) -> None:
@@ -1190,20 +1646,50 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "initial_cash": config.initial_cash,
         "top_n": config.top_n,
         "lot_size": config.lot_size,
+        "max_group_positions": config.max_group_positions,
         "lookback_momentum": config.lookback_momentum,
         "lookback_mean_reversion": config.lookback_mean_reversion,
         "lookback_volatility": config.lookback_volatility,
+        "rolling_risk_window": config.rolling_risk_window,
+        "execution_delay_days": config.execution_delay_days,
+        "max_allowed_drawdown": config.max_allowed_drawdown,
+        "max_allowed_daily_var": config.max_allowed_daily_var,
+        "min_allowed_rolling_return": config.min_allowed_rolling_return,
+        "min_allowed_information_ratio": config.min_allowed_information_ratio,
+        "min_allowed_fill_rate": config.min_allowed_fill_rate,
+        "min_allowed_execution_price_coverage": config.min_allowed_execution_price_coverage,
+        "max_allowed_position_weight": config.max_allowed_position_weight,
+        "max_allowed_group_weight": config.max_allowed_group_weight,
+        "max_allowed_attribution_residual": config.max_allowed_attribution_residual,
         "rebalance_every_n_days": config.rebalance_every_n_days,
         "commission_rate": config.commission_rate,
+        "buy_commission_rate": config.buy_commission_rate,
+        "sell_commission_rate": config.sell_commission_rate,
         "slippage_rate": config.slippage_rate,
+        "market_impact_coefficient": config.market_impact_coefficient,
+        "market_impact_exponent": config.market_impact_exponent,
         "stamp_duty_rate": config.stamp_duty_rate,
         "min_commission": config.min_commission,
         "transfer_fee_rate": config.transfer_fee_rate,
+        "target_cash_weight": config.target_cash_weight,
+        "max_position_weight": config.max_position_weight,
+        "infer_limit_flags": config.infer_limit_flags,
+        "forward_fill_suspended_bars": config.forward_fill_suspended_bars,
+        "limit_up_down_rate": config.limit_up_down_rate,
+        "st_limit_up_down_rate": config.st_limit_up_down_rate,
+        "growth_limit_up_down_rate": config.growth_limit_up_down_rate,
+        "bse_limit_up_down_rate": config.bse_limit_up_down_rate,
+        "infer_limit_rate_by_symbol": config.infer_limit_rate_by_symbol,
+        "max_volume_participation": config.max_volume_participation,
         "price_field": config.price_field,
+        "execution_price_field": config.execution_price_field,
+        "execution_price_field_effective": config.execution_price_field_effective,
         "start_date": None if config.start_date is None else config.start_date.isoformat(),
         "end_date": None if config.end_date is None else config.end_date.isoformat(),
         "output_dir": str(config.output_dir),
         "symbol_name_csv": None if config.symbol_name_csv is None else str(config.symbol_name_csv),
+        "stock_pool_csv": None if config.stock_pool_csv is None else str(config.stock_pool_csv),
+        "symbol_group_csv": None if config.symbol_group_csv is None else str(config.symbol_group_csv),
         "factor_weights": config.factor_weights,
     }
 
@@ -1212,7 +1698,7 @@ def _build_input_file_metadata(
     inputs: dict[str, str | bool | None],
 ) -> dict[str, dict[str, object]]:
     metadata: dict[str, dict[str, object]] = {}
-    for key in ("csv", "benchmark_csv", "config"):
+    for key in ("csv", "benchmark_csv", "stock_pool_csv", "symbol_group_csv", "config"):
         raw_path = inputs.get(key)
         if not isinstance(raw_path, str) or not raw_path:
             continue
@@ -1308,6 +1794,30 @@ def load_symbol_name_mapping(symbol_name_csv: Path | None) -> dict[str, str]:
                 if not is_a_share_symbol(symbol):
                     raise ValueError(f"Unsupported A-share symbol format: {symbol}")
                 mapping[symbol] = name
+    return mapping
+
+
+def load_symbol_group_mapping(symbol_group_csv: Path | None) -> dict[str, str]:
+    if symbol_group_csv is None:
+        return {}
+    if not symbol_group_csv.exists():
+        raise FileNotFoundError(f"Symbol group CSV not found: {symbol_group_csv}")
+
+    mapping: dict[str, str] = {}
+    with symbol_group_csv.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"symbol", "group"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            raise ValueError(f"Symbol group CSV missing required columns: {missing_str}")
+        for row in reader:
+            symbol = (row.get("symbol") or "").strip()
+            group = (row.get("group") or "").strip()
+            if symbol and group:
+                if not is_a_share_symbol(symbol):
+                    raise ValueError(f"Unsupported A-share symbol format: {symbol}")
+                mapping[symbol] = group
     return mapping
 
 
@@ -1424,6 +1934,14 @@ def _format_optional_date(value: object) -> str:
     if hasattr(value, "isoformat"):
         return str(value.isoformat())
     return str(value)
+
+
+def _format_optional_rate(value: float | None) -> str:
+    return "-" if value is None else f"{value:.6f}"
+
+
+def _format_optional_int(value: int | None) -> str:
+    return "-" if value is None else str(value)
 
 
 def _build_equity_curve_benchmark_columns(

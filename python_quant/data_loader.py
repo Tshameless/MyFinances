@@ -53,6 +53,16 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
                 "adjusted_close",
                 line_number,
             )
+            open_price = _parse_optional_float(
+                row.get("open"),
+                "open",
+                line_number,
+            )
+            vwap = _parse_optional_float(
+                row.get("vwap"),
+                "vwap",
+                line_number,
+            )
             volume = None
             if row.get("volume") not in (None, ""):
                 volume = _parse_positive_float(
@@ -73,16 +83,32 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
                 line_number,
                 default=tradable,
             )
+            is_suspended = _parse_boolean(
+                row.get("is_suspended") or row.get("suspended"),
+                line_number,
+                default=False,
+            )
+            is_limit_up = _parse_boolean(row.get("is_limit_up"), line_number, default=False)
+            is_limit_down = _parse_boolean(row.get("is_limit_down"), line_number, default=False)
+            is_st = _parse_boolean(row.get("is_st"), line_number, default=False)
+            limit_rate = _parse_optional_rate(row.get("limit_rate"), "limit_rate", line_number)
             bars.append(
                 PriceBar(
                     date=parsed_date,
                     symbol=symbol,
                     close=close_value,
                     adjusted_close=adjusted_close,
+                    open=open_price,
+                    vwap=vwap,
                     volume=volume,
                     tradable=tradable,
                     can_buy=can_buy,
                     can_sell=can_sell,
+                    is_suspended=is_suspended,
+                    is_limit_up=is_limit_up,
+                    is_limit_down=is_limit_down,
+                    is_st=is_st,
+                    limit_rate=limit_rate,
                 )
             )
 
@@ -125,11 +151,54 @@ def load_benchmark_bars_from_csv(
                         "adjusted_close",
                         line_number,
                     ),
+                    open=_parse_optional_float(row.get("open"), "open", line_number),
+                    vwap=_parse_optional_float(row.get("vwap"), "vwap", line_number),
+                    is_limit_up=_parse_boolean(row.get("is_limit_up"), line_number, default=False),
+                    is_limit_down=_parse_boolean(row.get("is_limit_down"), line_number, default=False),
                 )
             )
 
     bars.sort(key=lambda item: item.date)
     return bars
+
+
+def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Stock pool CSV file not found: {path}")
+
+    stock_pool: dict[date, set[str]] = {}
+    seen_keys: set[tuple[date, str]] = set()
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"date", "symbol"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            raise ValueError(f"Stock pool CSV missing required columns: {missing_str}")
+
+        for line_number, row in enumerate(reader, start=2):
+            parsed_date = _parse_date(row.get("date"), line_number)
+            symbol = (row.get("symbol") or "").strip()
+            if not symbol:
+                raise ValueError(f"Line {line_number}: symbol is empty.")
+            if not is_a_share_symbol(symbol):
+                raise ValueError(
+                    f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
+                )
+            key = (parsed_date, symbol)
+            if key in seen_keys:
+                raise ValueError(
+                    "Line "
+                    f"{line_number}: duplicate stock pool symbol {symbol} "
+                    f"on {parsed_date.isoformat()}."
+                )
+            seen_keys.add(key)
+            stock_pool.setdefault(parsed_date, set()).add(symbol)
+
+    if not stock_pool:
+        raise ValueError("Stock pool CSV does not contain any symbols.")
+    return dict(sorted(stock_pool.items()))
 
 
 def _parse_date(raw_value: str | None, line_number: int) -> date:
@@ -175,6 +244,20 @@ def _parse_optional_float(
     if not value:
         return None
     return _parse_positive_float(value, field_name, line_number)
+
+
+def _parse_optional_rate(
+    raw_value: str | None,
+    field_name: str,
+    line_number: int,
+) -> float | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    parsed = _parse_positive_float(value, field_name, line_number)
+    if parsed >= 1:
+        raise ValueError(f"Line {line_number}: {field_name} must be between 0 and 1.")
+    return parsed
 
 
 def _parse_boolean(raw_value: str | None, line_number: int, *, default: bool) -> bool:
