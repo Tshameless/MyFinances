@@ -28,232 +28,24 @@ from .reporting_csv import (
     save_trade_attempts_csv,
     save_trades_csv,
 )
+from .reporting_labels import (
+    chinese_label,
+    display_label,
+    format_symbol,
+    metric_explanation,
+)
 from .reporting_rank import (
     float_metric,
     sort_rows_by_metric,
     validate_rank_metric,
 )
-
-_ZH_LABELS = {
-    "date": "日期",
-    "equity": "权益",
-    "daily_return": "单期收益",
-    "holdings": "持仓",
-    "symbol": "代码",
-    "shares": "股数",
-    "price": "价格",
-    "market_value": "市值",
-    "weight": "权重",
-    "cash": "现金",
-    "total_equity": "总权益",
-    "side": "方向",
-    "target_shares": "目标股数",
-    "gross_value": "成交金额",
-    "commission": "佣金",
-    "slippage": "滑点",
-    "fixed_slippage": "固定滑点",
-    "market_impact": "市场冲击",
-    "transfer_fee": "过户费",
-    "stamp_duty": "印花税",
-    "cash_change": "现金变化",
-    "reason": "原因",
-    "momentum": "动量",
-    "mean_reversion": "均值回归",
-    "low_volatility": "低波动",
-    "normalized_momentum": "标准化动量",
-    "normalized_mean_reversion": "标准化均值回归",
-    "normalized_low_volatility": "标准化低波动",
-    "total_score": "总分",
-    "selected": "入选",
-    "benchmark_equity": "基准权益",
-    "benchmark_daily_return": "基准单期收益",
-    "excess_daily_return": "超额单期收益",
-    "buy_turnover": "买入换手",
-    "sell_turnover": "卖出换手",
-    "turnover": "总换手",
-    "cost": "交易成本",
-    "metric": "指标代码",
-    "label": "指标名称",
-    "value": "数值",
-    "total_return": "总收益",
-    "annualized_return": "年化收益",
-    "max_drawdown": "最大回撤",
-    "volatility": "波动率",
-    "downside_volatility": "下行波动率",
-    "sharpe": "夏普比率",
-    "sortino": "索提诺比率",
-    "calmar": "卡玛比率",
-    "win_rate": "胜率",
-    "average_turnover": "平均换手",
-    "total_cost": "总成本",
-    "health_score": "策略健康评分",
-    "health_grade": "策略健康等级",
-    "gate_status": "策略闸门状态",
-    "gate_failures": "策略闸门失败数",
-    "health_warnings": "策略预警数",
-    "critical_warnings": "严重预警数",
-    "failed_gate_count": "失败闸门数",
-    "primary_failed_gate_category": "主要失败闸门类别",
-    "primary_failed_gate_name": "主要失败闸门",
-    "failed_gate_summary": "失败闸门摘要",
-    "matches_recommended_parameters": "匹配推荐参数",
-    "recommended_parameter_mismatch": "推荐参数差异",
-    "periods": "周期数",
-    "benchmark_total_return": "基准总收益",
-    "benchmark_annualized_return": "基准年化收益",
-    "benchmark_volatility": "基准波动率",
-    "benchmark_max_drawdown": "基准最大回撤",
-    "excess_return": "超额收益",
-    "tracking_error": "跟踪误差",
-    "information_ratio": "信息比率",
-    "beta": "Beta",
-    "daily_alpha": "日度Alpha",
-    "annualized_alpha": "年化Alpha",
-    "correlation": "相关系数",
-    "r_squared": "R平方",
-    "run_id": "内部编号",
-    "scheme_label": "方案编号",
-    "output_dir": "输出目录",
-    "rank": "名次",
-    "initial_cash": "初始资金",
-    "top_n": "持仓数量TopN",
-    "selection_mode": "选股方向",
-    "score_source": "评分来源",
-    "lot_size": "每手股数",
-    "max_group_positions": "单组最多入选数",
-    "rebalance_every_n_days": "调仓间隔天数",
-    "lookback_momentum": "动量回看窗口",
-    "lookback_mean_reversion": "均值回归回看窗口",
-    "lookback_volatility": "波动率回看窗口",
-    "rolling_risk_window": "滚动风险窗口",
-    "max_allowed_drawdown": "闸门最大回撤",
-    "max_allowed_daily_var": "闸门最大日VaR",
-    "min_allowed_rolling_return": "闸门最差滚动收益",
-    "min_allowed_information_ratio": "闸门最低信息比率",
-    "min_allowed_fill_rate": "闸门最低成交率",
-    "min_allowed_execution_price_coverage": "闸门最低执行价覆盖率",
-    "min_allowed_factor_score_coverage": "闸门最低外部评分覆盖率",
-    "max_allowed_position_weight": "闸门最大单票权重",
-    "max_allowed_group_weight": "闸门最大分组权重",
-    "max_allowed_attribution_residual": "闸门最大归因残差",
-    "commission_rate": "佣金率",
-    "buy_commission_rate": "买入佣金率",
-    "sell_commission_rate": "卖出佣金率",
-    "slippage_rate": "滑点率",
-    "market_impact_coefficient": "冲击成本系数",
-    "market_impact_exponent": "冲击成本指数",
-    "stamp_duty_rate": "印花税率",
-    "min_commission": "最低佣金",
-    "transfer_fee_rate": "过户费率",
-    "target_cash_weight": "目标现金权重",
-    "max_position_weight": "单票目标权重上限",
-    "limit_up_down_rate": "涨跌停阈值",
-    "st_limit_up_down_rate": "ST涨跌停阈值",
-    "growth_limit_up_down_rate": "成长板涨跌停阈值",
-    "bse_limit_up_down_rate": "北交所涨跌停阈值",
-    "infer_limit_rate_by_symbol": "按代码推断涨跌停",
-    "max_volume_participation": "最大成交量参与率",
-    "infer_limit_flags": "自动推断涨跌停",
-    "forward_fill_suspended_bars": "缺失行情前值停牌估值",
-    "price_field": "价格字段",
-    "start_date": "开始日期",
-    "end_date": "结束日期",
-    "equity_curve_csv": "净值曲线CSV",
-    "config_effective_json": "最终生效配置JSON",
-    "config_sources_json": "配置来源JSON",
-    "run_manifest_json": "运行清单JSON",
-    "equity_curve_svg": "净值曲线图",
-    "positions_csv": "每日持仓账本CSV",
-    "trades_csv": "逐笔交易明细CSV",
-    "trade_attempts_csv": "未成交原因CSV",
-    "factor_scores_csv": "因子评分明细CSV",
-    "factor_ic_csv": "因子IC分析CSV",
-    "factor_ic_json": "因子IC分析JSON",
-    "factor_group_returns_csv": "因子分组收益CSV",
-    "factor_group_returns_json": "因子分组收益JSON",
-    "factor_decay_csv": "因子衰减分析CSV",
-    "factor_decay_json": "因子衰减分析JSON",
-    "factor_correlation_csv": "因子相关性矩阵CSV",
-    "factor_correlation_json": "因子相关性矩阵JSON",
-    "drawdown_csv": "回撤序列CSV",
-    "drawdown_json": "回撤序列JSON",
-    "monthly_returns_csv": "月度收益CSV",
-    "monthly_returns_json": "月度收益JSON",
-    "rolling_risk_csv": "滚动风险CSV",
-    "rolling_risk_json": "滚动风险JSON",
-    "relative_performance_csv": "相对基准表现CSV",
-    "relative_performance_json": "相对基准表现JSON",
-    "execution_quality_csv": "执行质量CSV",
-    "execution_quality_json": "执行质量JSON",
-    "exposure_csv": "持仓暴露CSV",
-    "exposure_json": "持仓暴露JSON",
-    "group_exposure_csv": "分组暴露CSV",
-    "group_exposure_json": "分组暴露JSON",
-    "return_attribution_csv": "收益归因CSV",
-    "return_attribution_json": "收益归因JSON",
-    "cost_attribution_csv": "成本归因CSV",
-    "cost_attribution_json": "成本归因JSON",
-    "pnl_ledger_csv": "盈亏对账CSV",
-    "pnl_ledger_json": "盈亏对账JSON",
-    "strategy_health_csv": "策略健康诊断CSV",
-    "strategy_health_gates_csv": "策略风险闸门CSV",
-    "strategy_health_json": "策略健康诊断JSON",
-    "rebalance_log_csv": "调仓日志CSV",
-    "performance_summary_csv": "绩效汇总CSV",
-    "performance_summary_json": "绩效汇总JSON",
-    "report_html": "单次回测报告",
-    "batch_summary_csv": "参数扫描汇总CSV",
-    "batch_summary_json": "参数扫描汇总JSON",
-    "batch_leaderboard_csv": "最优结果排行CSV",
-    "batch_leaderboard_json": "最优结果排行JSON",
-    "best_run_json": "最佳方案JSON",
-    "batch_chart_svg": "参数对比图",
-    "batch_heatmap_svg": "参数热力图",
-    "batch_stability_csv": "参数稳定性CSV",
-    "batch_stability_json": "参数稳定性JSON",
-    "parameter_sensitivity_csv": "参数敏感度CSV",
-    "walk_forward_csv": "Walk-forward汇总CSV",
-    "walk_forward_json": "Walk-forward汇总JSON",
-    "walk_forward_report_html": "Walk-forward报告",
-    "walk_forward_optimization_csv": "Walk-forward优化CSV",
-    "walk_forward_optimization_json": "Walk-forward优化JSON",
-    "walk_forward_optimization_report_html": "Walk-forward优化报告",
-}
+from .reporting_svg import (
+    build_bar_chart_svg,
+    build_heatmap_svg,
+    build_line_chart_svg,
+)
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
-
-_METRIC_EXPLANATIONS = {
-    "total_return": "总收益 = 期末权益 / 期初权益 - 1。",
-    "annualized_return": "按 252 个交易日折算后的年化收益率。",
-    "max_drawdown": "历史净值从阶段高点回落的最大幅度。",
-    "volatility": "组合日收益率折算后的年化波动率。",
-    "downside_volatility": "仅统计下跌收益后的年化波动率。",
-    "sharpe": "年化平均超额收益与总波动率之比。",
-    "sortino": "年化收益与下行波动率之比。",
-    "calmar": "年化收益与最大回撤绝对值之比。",
-    "win_rate": "收益为正的周期占全部周期的比例。",
-    "average_turnover": "每次调仓的平均换手比例。",
-    "total_cost": "全部调仓累计产生的交易成本。",
-    "periods": "本次回测实际计算的收益周期数量。",
-    "benchmark_total_return": "基准从期初到期末的总收益。",
-    "benchmark_annualized_return": "基准按 252 个交易日折算后的年化收益率。",
-    "benchmark_volatility": "基准日收益率折算后的年化波动率。",
-    "benchmark_max_drawdown": "基准净值从阶段高点回落的最大幅度。",
-    "excess_return": "组合总收益减去基准总收益。",
-    "tracking_error": "组合相对基准的超额收益波动率。",
-    "information_ratio": "平均超额收益与跟踪误差之比。",
-    "beta": "组合日收益相对基准日收益的市场暴露。",
-    "annualized_alpha": "在零无风险利率口径下，剔除 beta 暴露后的年化超额收益。",
-    "r_squared": "基准日收益解释组合日收益波动的比例。",
-}
-
-_DEFAULT_A_SHARE_SYMBOL_NAMES = {
-    "000001": "平安银行",
-    "600036": "招商银行",
-    "600519": "贵州茅台",
-    "601318": "中国平安",
-    "300750": "宁德时代",
-}
 
 
 def print_summary(
@@ -302,19 +94,19 @@ def save_equity_curve(
         writer = csv.writer(handle)
         writer.writerow(
             [
-                _display_label("date"),
-                _display_label("equity"),
+                display_label("date"),
+                display_label("equity"),
                 "权益展示 / equity_display",
-                _display_label("daily_return"),
+                display_label("daily_return"),
                 "单期收益率展示 / daily_return_pct",
-                _display_label("holdings"),
+                display_label("holdings"),
                 "持仓展示 / holdings_display",
                 "持仓数量 / holding_count",
-                _display_label("benchmark_equity"),
+                display_label("benchmark_equity"),
                 "基准权益展示 / benchmark_equity_display",
-                _display_label("benchmark_daily_return"),
+                display_label("benchmark_daily_return"),
                 "基准单期收益率展示 / benchmark_daily_return_pct",
-                _display_label("excess_daily_return"),
+                display_label("excess_daily_return"),
                 "超额单期收益率展示 / excess_daily_return_pct",
                 "备注 / note",
             ]
@@ -353,17 +145,17 @@ def save_rebalance_log(
         writer = csv.writer(handle)
         writer.writerow(
             [
-                _display_label("date"),
-                _display_label("holdings"),
+                display_label("date"),
+                display_label("holdings"),
                 "持仓展示 / holdings_display",
                 "持仓数量 / holding_count",
-                _display_label("buy_turnover"),
+                display_label("buy_turnover"),
                 "买入换手率展示 / buy_turnover_pct",
-                _display_label("sell_turnover"),
+                display_label("sell_turnover"),
                 "卖出换手率展示 / sell_turnover_pct",
-                _display_label("turnover"),
+                display_label("turnover"),
                 "总换手率展示 / turnover_pct",
-                _display_label("cost"),
+                display_label("cost"),
                 "交易成本展示 / cost_display",
                 "备注 / note",
             ]
@@ -403,18 +195,18 @@ def save_positions(
         writer = csv.writer(handle)
         writer.writerow(
             [
-                _display_label("date"),
-                _display_label("symbol"),
+                display_label("date"),
+                display_label("symbol"),
                 "代码展示 / symbol_display",
-                _display_label("shares"),
-                _display_label("price"),
-                _display_label("market_value"),
+                display_label("shares"),
+                display_label("price"),
+                display_label("market_value"),
                 "市值展示 / market_value_display",
-                _display_label("weight"),
+                display_label("weight"),
                 "权重展示 / weight_pct",
-                _display_label("cash"),
+                display_label("cash"),
                 "现金展示 / cash_display",
-                _display_label("total_equity"),
+                display_label("total_equity"),
                 "总权益展示 / total_equity_display",
             ]
         )
@@ -423,7 +215,7 @@ def save_positions(
                 [
                     point.date.isoformat(),
                     point.symbol,
-                    _format_symbol(point.symbol, symbol_names),
+                    format_symbol(point.symbol, symbol_names),
                     str(point.shares),
                     f"{point.price:.4f}",
                     f"{point.market_value:.2f}",
@@ -449,8 +241,8 @@ def save_trades(
     return save_trades_csv(
         trades,
         output_dir,
-        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
-        display_label=_display_label,
+        format_symbol=lambda symbol: format_symbol(symbol, symbol_names),
+        display_label=display_label,
         format_money=_format_money,
     )
 
@@ -464,8 +256,8 @@ def save_trade_attempts(
     return save_trade_attempts_csv(
         attempts,
         output_dir,
-        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
-        display_label=_display_label,
+        format_symbol=lambda symbol: format_symbol(symbol, symbol_names),
+        display_label=display_label,
         format_money=_format_money,
     )
 
@@ -479,8 +271,8 @@ def save_factor_scores(
     return save_factor_scores_csv(
         records,
         output_dir,
-        format_symbol=lambda symbol: _format_symbol(symbol, symbol_names),
-        display_label=_display_label,
+        format_symbol=lambda symbol: format_symbol(symbol, symbol_names),
+        display_label=display_label,
     )
 
 
@@ -494,10 +286,10 @@ def save_performance_summary(metrics: BacktestMetrics, output_dir: Path) -> Path
         writer = csv.writer(handle)
         writer.writerow(
             [
-                _display_label("metric"),
-                _display_label("label"),
+                display_label("metric"),
+                display_label("label"),
                 "说明 / description",
-                _display_label("value"),
+                display_label("value"),
             ]
         )
         writer.writerows(summary_items)
@@ -639,11 +431,11 @@ def save_single_run_report_html(
         for name, weight in config.factor_weights.items()
     )
     explanation_rows = "\n".join(
-        f"<tr><th>{escape(_display_label(key))}</th><td>{escape(_metric_explanation(key))}</td></tr>"
+        f"<tr><th>{escape(display_label(key))}</th><td>{escape(metric_explanation(key))}</td></tr>"
         for key in ("total_return", "annualized_return", "max_drawdown", "sharpe")
     )
     holdings_rows = "\n".join(
-        f"<tr><th>{escape(symbol)}</th><td>{escape(_format_symbol(symbol, symbol_names))}</td></tr>"
+        f"<tr><th>{escape(symbol)}</th><td>{escape(format_symbol(symbol, symbol_names))}</td></tr>"
         for symbol in latest_holdings
     )
     if not holdings_rows:
@@ -721,45 +513,45 @@ def save_single_run_report_html(
     <div class="card">
       <h2>配置摘要</h2>
       <table>
-        <tr><th>{_display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
-        <tr><th>{_display_label("top_n")}</th><td>{config.top_n}</td></tr>
-        <tr><th>{_display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
-        <tr><th>{_display_label("score_source")}</th><td>{escape(config.score_source)}</td></tr>
-        <tr><th>{_display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
-        <tr><th>{_display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
-        <tr><th>{_display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
-        <tr><th>{_display_label("max_allowed_drawdown")}</th><td>{config.max_allowed_drawdown:.2%}</td></tr>
-        <tr><th>{_display_label("max_allowed_daily_var")}</th><td>{config.max_allowed_daily_var:.2%}</td></tr>
-        <tr><th>{_display_label("min_allowed_rolling_return")}</th><td>{config.min_allowed_rolling_return:.2%}</td></tr>
-        <tr><th>{_display_label("min_allowed_information_ratio")}</th><td>{config.min_allowed_information_ratio:.3f}</td></tr>
-        <tr><th>{_display_label("min_allowed_fill_rate")}</th><td>{config.min_allowed_fill_rate:.2%}</td></tr>
-        <tr><th>{_display_label("min_allowed_execution_price_coverage")}</th><td>{config.min_allowed_execution_price_coverage:.2%}</td></tr>
-        <tr><th>{_display_label("max_allowed_position_weight")}</th><td>{config.max_allowed_position_weight:.2%}</td></tr>
-        <tr><th>{_display_label("max_allowed_group_weight")}</th><td>{config.max_allowed_group_weight:.2%}</td></tr>
-        <tr><th>{_display_label("max_allowed_attribution_residual")}</th><td>{config.max_allowed_attribution_residual:.2%}</td></tr>
-        <tr><th>{_display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
-        <tr><th>{_display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
-        <tr><th>{_display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
-        <tr><th>{_display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
-        <tr><th>{_display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
-        <tr><th>{_display_label("buy_commission_rate")}</th><td>{_format_optional_rate(config.buy_commission_rate)}</td></tr>
-        <tr><th>{_display_label("sell_commission_rate")}</th><td>{_format_optional_rate(config.sell_commission_rate)}</td></tr>
-        <tr><th>{_display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
-        <tr><th>{_display_label("market_impact_coefficient")}</th><td>{config.market_impact_coefficient:.6f}</td></tr>
-        <tr><th>{_display_label("market_impact_exponent")}</th><td>{config.market_impact_exponent:.6f}</td></tr>
-        <tr><th>{_display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
-        <tr><th>{_display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
-        <tr><th>{_display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
-        <tr><th>{_display_label("target_cash_weight")}</th><td>{config.target_cash_weight:.2%}</td></tr>
-        <tr><th>{_display_label("max_position_weight")}</th><td>{config.max_position_weight:.2%}</td></tr>
-        <tr><th>{_display_label("infer_limit_flags")}</th><td>{config.infer_limit_flags}</td></tr>
-        <tr><th>{_display_label("forward_fill_suspended_bars")}</th><td>{config.forward_fill_suspended_bars}</td></tr>
-        <tr><th>{_display_label("limit_up_down_rate")}</th><td>{config.limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{_display_label("st_limit_up_down_rate")}</th><td>{config.st_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{_display_label("growth_limit_up_down_rate")}</th><td>{config.growth_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{_display_label("bse_limit_up_down_rate")}</th><td>{config.bse_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{_display_label("infer_limit_rate_by_symbol")}</th><td>{config.infer_limit_rate_by_symbol}</td></tr>
-        <tr><th>{_display_label("max_volume_participation")}</th><td>{config.max_volume_participation:.4f}</td></tr>
+        <tr><th>{display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
+        <tr><th>{display_label("top_n")}</th><td>{config.top_n}</td></tr>
+        <tr><th>{display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
+        <tr><th>{display_label("score_source")}</th><td>{escape(config.score_source)}</td></tr>
+        <tr><th>{display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
+        <tr><th>{display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
+        <tr><th>{display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
+        <tr><th>{display_label("max_allowed_drawdown")}</th><td>{config.max_allowed_drawdown:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_daily_var")}</th><td>{config.max_allowed_daily_var:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_rolling_return")}</th><td>{config.min_allowed_rolling_return:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_information_ratio")}</th><td>{config.min_allowed_information_ratio:.3f}</td></tr>
+        <tr><th>{display_label("min_allowed_fill_rate")}</th><td>{config.min_allowed_fill_rate:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_execution_price_coverage")}</th><td>{config.min_allowed_execution_price_coverage:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_position_weight")}</th><td>{config.max_allowed_position_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_group_weight")}</th><td>{config.max_allowed_group_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_attribution_residual")}</th><td>{config.max_allowed_attribution_residual:.2%}</td></tr>
+        <tr><th>{display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
+        <tr><th>{display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
+        <tr><th>{display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
+        <tr><th>{display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
+        <tr><th>{display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
+        <tr><th>{display_label("buy_commission_rate")}</th><td>{_format_optional_rate(config.buy_commission_rate)}</td></tr>
+        <tr><th>{display_label("sell_commission_rate")}</th><td>{_format_optional_rate(config.sell_commission_rate)}</td></tr>
+        <tr><th>{display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
+        <tr><th>{display_label("market_impact_coefficient")}</th><td>{config.market_impact_coefficient:.6f}</td></tr>
+        <tr><th>{display_label("market_impact_exponent")}</th><td>{config.market_impact_exponent:.6f}</td></tr>
+        <tr><th>{display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
+        <tr><th>{display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
+        <tr><th>{display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
+        <tr><th>{display_label("target_cash_weight")}</th><td>{config.target_cash_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_position_weight")}</th><td>{config.max_position_weight:.2%}</td></tr>
+        <tr><th>{display_label("infer_limit_flags")}</th><td>{config.infer_limit_flags}</td></tr>
+        <tr><th>{display_label("forward_fill_suspended_bars")}</th><td>{config.forward_fill_suspended_bars}</td></tr>
+        <tr><th>{display_label("limit_up_down_rate")}</th><td>{config.limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("st_limit_up_down_rate")}</th><td>{config.st_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("growth_limit_up_down_rate")}</th><td>{config.growth_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("bse_limit_up_down_rate")}</th><td>{config.bse_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("infer_limit_rate_by_symbol")}</th><td>{config.infer_limit_rate_by_symbol}</td></tr>
+        <tr><th>{display_label("max_volume_participation")}</th><td>{config.max_volume_participation:.4f}</td></tr>
       </table>
       <h2 style="margin-top:20px;">因子权重</h2>
       <table>{factor_rows}</table>
@@ -796,7 +588,7 @@ def save_batch_summary(rows: list[dict[str, object]], output_dir: Path) -> tuple
 
     with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow([_display_label(header) for header in headers])
+        writer.writerow([display_label(header) for header in headers])
         for row_index, row in enumerate(rows, start=1):
             writer.writerow(_build_batch_export_row(row, headers, row_index))
 
@@ -826,7 +618,7 @@ def save_equity_chart_svg(
         else []
     )
     title = "策略与基准净值" if benchmark_points else "策略净值走势"
-    svg = _build_line_chart_svg(
+    svg = build_line_chart_svg(
         title=title,
         series=[
             ("策略净值", portfolio_points, "#0b7285"),
@@ -859,7 +651,7 @@ def save_batch_rankings(
     headers = _build_batch_export_headers(list(ranked_rows[0].keys())) if ranked_rows else ["rank", "scheme_label", "run_id"]
     with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow([_display_label(header) for header in headers])
+        writer.writerow([display_label(header) for header in headers])
         for row_index, row in enumerate(ranked_rows, start=1):
             writer.writerow(_build_batch_export_row(row, headers, row_index))
 
@@ -964,7 +756,7 @@ def _build_ranked_batch_json_summary(
     best_row = ranked_rows[0] if ranked_rows else None
     worst_row = ranked_rows[-1] if ranked_rows else None
     return {
-        "rank_metric": _display_label(rank_by),
+        "rank_metric": display_label(rank_by),
         "best_scheme": None if best_row is None else _format_run_label(best_row, 1),
         "best_internal_id": None if best_row is None else str(best_row.get("run_id", "")),
         "best_gate_status": None if best_row is None else str(best_row.get("gate_status", "")),
@@ -988,7 +780,7 @@ def _build_best_run_json_summary(
             "best_internal_id": None,
             "best_gate_status": None,
             "best_health_score": None,
-            "rank_metric": _display_label(rank_by),
+            "rank_metric": display_label(rank_by),
             "best_metric_value": None,
         }
     return {
@@ -996,7 +788,7 @@ def _build_best_run_json_summary(
         "best_internal_id": str(best_row.get("run_id", "")),
         "best_gate_status": str(best_row.get("gate_status", "")),
         "best_health_score": _format_metric_value("health_score", best_row.get("health_score")),
-        "rank_metric": _display_label(rank_by),
+        "rank_metric": display_label(rank_by),
         "best_metric_value": _format_metric_value(rank_by, best_row.get(rank_by)),
     }
 
@@ -1029,11 +821,11 @@ def save_batch_chart_svg(
         for row_index, row in enumerate(rows, start=1)
         if metric in row and row[metric] not in ("", None)
     ]
-    svg = _build_bar_chart_svg(
-        title=f"{_chinese_label(metric)}参数对比图",
+    svg = build_bar_chart_svg(
+        title=f"{chinese_label(metric)}参数对比图",
         points=points,
         bar_color="#5c7cfa",
-        y_axis_label=_display_label(metric),
+        y_axis_label=display_label(metric),
     )
     target_path.write_text(svg, encoding=_HUMAN_READABLE_ENCODING)
     return target_path
@@ -1066,10 +858,10 @@ def save_batch_heatmap_svg(
         for row in rows
         if x_field in row and y_field in row and metric in row
     ]
-    svg = _build_heatmap_svg(
-        title=f"{_chinese_label(metric)}参数热力图",
-        x_label=_display_label(x_field),
-        y_label=_display_label(y_field),
+    svg = build_heatmap_svg(
+        title=f"{chinese_label(metric)}参数热力图",
+        x_label=display_label(x_field),
+        y_label=display_label(y_field),
         points=points,
     )
     target_path.write_text(svg, encoding=_HUMAN_READABLE_ENCODING)
@@ -1124,7 +916,7 @@ def save_batch_report_html(
 </head>
 <body>
   <h1>A股参数扫描报告</h1>
-  <p class="muted">生成时间：{escape(datetime.now().isoformat(timespec="seconds"))}。排序指标：{escape(_display_label(rank_by))}。</p>
+  <p class="muted">生成时间：{escape(datetime.now().isoformat(timespec="seconds"))}。排序指标：{escape(display_label(rank_by))}。</p>
   <div class="grid">
     <div class="card wide hero">
       <h2>研究结论</h2>
@@ -1142,7 +934,7 @@ def save_batch_report_html(
     <div class="card">
       <h2>最优结果</h2>
       <table>
-        <thead><tr>{"".join(f"<th>{escape(_display_label(header))}</th>" for header in headers)}</tr></thead>
+        <thead><tr>{"".join(f"<th>{escape(display_label(header))}</th>" for header in headers)}</tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
     </div>
@@ -1242,7 +1034,7 @@ def save_walk_forward_report_html(
     <div class="card wide">
       <h2>窗口预览</h2>
       <table>
-        <thead><tr>{"".join(f"<th>{escape(_display_label(header))}</th>" for header in headers)}</tr></thead>
+        <thead><tr>{"".join(f"<th>{escape(display_label(header))}</th>" for header in headers)}</tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
     </div>
@@ -1266,7 +1058,7 @@ def _build_batch_conclusion(
     run_id = str(best_row.get("run_id", "-"))
     return (
         f"本次共完成 {run_count} 组 A 股参数试验，当前最佳方案为 {run_label}（{run_id}），"
-        f"排序指标 {_display_label(rank_by)} 为 {best_value}。"
+        f"排序指标 {display_label(rank_by)} 为 {best_value}。"
     )
 
 
@@ -1415,7 +1207,7 @@ def _build_walk_forward_chart_blocks(
         f'<div class="card wide"><h2>{escape(title)}</h2>{svg}</div>'
         for title, points, color, y_label in chart_specs
         for svg in [
-            _build_bar_chart_svg(
+            build_bar_chart_svg(
                 title=title,
                 points=points,
                 bar_color=color,
@@ -1520,7 +1312,7 @@ def _build_batch_summary_cards(
             _summary_card("内部编号", str(best_row.get("run_id", "-"))),
             _summary_card("Gate status", str(best_row.get("gate_status", "-"))),
             _summary_card("Health score", _format_metric_value("health_score", best_row.get("health_score"))),
-            _summary_card(_display_label(rank_by), _format_metric_value(rank_by, best_row.get(rank_by))),
+            _summary_card(display_label(rank_by), _format_metric_value(rank_by, best_row.get(rank_by))),
         ]
     )
 
@@ -1536,7 +1328,7 @@ def _build_batch_parameter_rows(best_row: dict[str, object] | None) -> str:
     if not parameter_items:
         return "<tr><th>参数</th><td>本次没有参数扫描字段</td></tr>"
     return "\n".join(
-        f"<tr><th>{escape(_display_label(key))}</th><td>{escape(str(value))}</td></tr>"
+        f"<tr><th>{escape(display_label(key))}</th><td>{escape(str(value))}</td></tr>"
         for key, value in parameter_items
     )
 
@@ -1669,8 +1461,8 @@ def _build_performance_summary_items(
     return [
         (
             metric_name,
-            _chinese_label(metric_name),
-            _metric_explanation(metric_name),
+            chinese_label(metric_name),
+            metric_explanation(metric_name),
             _format_performance_summary_value(metrics, metric_name),
         )
         for metric_name in metric_order
@@ -1694,25 +1486,25 @@ def _has_benchmark_metrics(metrics: BacktestMetrics) -> bool:
 
 def _build_single_run_metric_rows(metrics: BacktestMetrics) -> list[tuple[str, str]]:
     rows = [
-        (_display_label("total_return"), f"{metrics.total_return:.2%}"),
-        (_display_label("annualized_return"), f"{metrics.annualized_return:.2%}"),
-        (_display_label("max_drawdown"), f"{metrics.max_drawdown:.2%}"),
-        (_display_label("volatility"), f"{metrics.volatility:.2%}"),
-        (_display_label("downside_volatility"), f"{metrics.downside_volatility:.2%}"),
-        (_display_label("sharpe"), f"{metrics.sharpe:.3f}"),
-        (_display_label("sortino"), f"{metrics.sortino:.3f}"),
-        (_display_label("calmar"), f"{metrics.calmar:.3f}"),
-        (_display_label("win_rate"), f"{metrics.win_rate:.2%}"),
-        (_display_label("average_turnover"), f"{metrics.average_turnover:.2%}"),
-        (_display_label("total_cost"), f"{metrics.total_cost:,.2f}"),
+        (display_label("total_return"), f"{metrics.total_return:.2%}"),
+        (display_label("annualized_return"), f"{metrics.annualized_return:.2%}"),
+        (display_label("max_drawdown"), f"{metrics.max_drawdown:.2%}"),
+        (display_label("volatility"), f"{metrics.volatility:.2%}"),
+        (display_label("downside_volatility"), f"{metrics.downside_volatility:.2%}"),
+        (display_label("sharpe"), f"{metrics.sharpe:.3f}"),
+        (display_label("sortino"), f"{metrics.sortino:.3f}"),
+        (display_label("calmar"), f"{metrics.calmar:.3f}"),
+        (display_label("win_rate"), f"{metrics.win_rate:.2%}"),
+        (display_label("average_turnover"), f"{metrics.average_turnover:.2%}"),
+        (display_label("total_cost"), f"{metrics.total_cost:,.2f}"),
     ]
     if _has_benchmark_metrics(metrics):
         rows.extend(
             [
-                (_display_label("benchmark_total_return"), f"{metrics.benchmark_total_return:.2%}"),
-                (_display_label("excess_return"), f"{metrics.excess_return:.2%}"),
-                (_display_label("tracking_error"), f"{metrics.tracking_error:.2%}"),
-                (_display_label("information_ratio"), f"{metrics.information_ratio:.3f}"),
+                (display_label("benchmark_total_return"), f"{metrics.benchmark_total_return:.2%}"),
+                (display_label("excess_return"), f"{metrics.excess_return:.2%}"),
+                (display_label("tracking_error"), f"{metrics.tracking_error:.2%}"),
+                (display_label("information_ratio"), f"{metrics.information_ratio:.3f}"),
             ]
         )
     return rows
@@ -1994,7 +1786,7 @@ def _format_reconciliation_status(summary: dict[str, object]) -> str:
 
 def _build_artifact_links(artifacts: dict[str, Path]) -> str:
     return "\n".join(
-        f'<li><a href="{escape(path.name)}">{escape(_display_label(name))}</a></li>'
+        f'<li><a href="{escape(path.name)}">{escape(display_label(name))}</a></li>'
         for name, path in artifacts.items()
     )
 
@@ -2004,7 +1796,7 @@ def _build_batch_chart_blocks(artifacts: dict[str, Path]) -> list[str]:
     for key in ("batch_chart_svg", "batch_heatmap_svg"):
         if key in artifacts:
             chart_blocks.append(
-                f'<div class="card"><h2>{escape(_display_label(key))}</h2><img src="{escape(artifacts[key].name)}" alt="{escape(_display_label(key))}" /></div>'
+                f'<div class="card"><h2>{escape(display_label(key))}</h2><img src="{escape(artifacts[key].name)}" alt="{escape(display_label(key))}" /></div>'
             )
     return chart_blocks
 
@@ -2304,21 +2096,6 @@ def load_symbol_group_mapping(symbol_group_csv: Path | None) -> dict[str, str]:
     return mapping
 
 
-def _display_label(key: str) -> str:
-    return f"{_chinese_label(key)} / {key}"
-
-
-def _chinese_label(key: str) -> str:
-    if key.startswith("param_"):
-        param_name = key.removeprefix("param_")
-        return f"参数_{_chinese_label(param_name)}"
-    return _ZH_LABELS.get(key, key)
-
-
-def _metric_explanation(key: str) -> str:
-    return _METRIC_EXPLANATIONS.get(key, "")
-
-
 def _build_report_conclusion(metrics: BacktestMetrics) -> str:
     conclusion = (
         f"本次回测总收益为 {metrics.total_return:.2%}，年化收益为 "
@@ -2446,295 +2223,5 @@ def _rebalance_note(record: RebalanceRecord) -> str:
 def _format_holdings(holdings: tuple[str, ...], symbol_names: dict[str, str] | None = None) -> str:
     if not holdings:
         return "空仓"
-    return " | ".join(_format_symbol(symbol, symbol_names) for symbol in holdings)
+    return " | ".join(format_symbol(symbol, symbol_names) for symbol in holdings)
 
-
-def _format_symbol(symbol: str, symbol_names: dict[str, str] | None = None) -> str:
-    if symbol_names and symbol in symbol_names:
-        return f"{symbol}（{symbol_names[symbol]}）"
-    if symbol in _DEFAULT_A_SHARE_SYMBOL_NAMES:
-        return f"{symbol}（{_DEFAULT_A_SHARE_SYMBOL_NAMES[symbol]}）"
-    return symbol
-def _build_line_chart_svg(
-    *,
-    title: str,
-    series: list[tuple[str, list[tuple[str, float]], str]],
-    y_axis_label: str,
-) -> str:
-    width = 960
-    height = 540
-    margin_left = 80
-    margin_right = 40
-    margin_top = 60
-    margin_bottom = 80
-
-    non_empty_series = [item for item in series if item[1]]
-    if not non_empty_series:
-        return _empty_chart_svg(title, width, height)
-
-    all_values = [value for _, points, _ in non_empty_series for _, value in points]
-    min_value = min(all_values)
-    max_value = max(all_values)
-    if min_value == max_value:
-        min_value *= 0.99
-        max_value *= 1.01
-
-    plot_width = width - margin_left - margin_right
-    plot_height = height - margin_top - margin_bottom
-
-    def x_position(index: int, total: int) -> float:
-        if total <= 1:
-            return margin_left + plot_width / 2
-        return margin_left + plot_width * index / (total - 1)
-
-    def y_position(value: float) -> float:
-        scale = (value - min_value) / (max_value - min_value)
-        return margin_top + plot_height * (1 - scale)
-
-    grid_lines = []
-    labels = []
-    for step in range(5):
-        ratio = step / 4
-        y = margin_top + plot_height * ratio
-        value = max_value - (max_value - min_value) * ratio
-        grid_lines.append(
-            f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#d0d7de" stroke-width="1" />'
-        )
-        labels.append(
-            f'<text x="{margin_left - 10}" y="{y + 4:.1f}" font-size="12" text-anchor="end" fill="#495057">{value:.2f}</text>'
-        )
-
-    line_paths: list[str] = []
-    legend_items: list[str] = []
-    for index, (label, points, color) in enumerate(non_empty_series):
-        commands = []
-        for point_index, (_, value) in enumerate(points):
-            x = x_position(point_index, len(points))
-            y = y_position(value)
-            prefix = "M" if point_index == 0 else "L"
-            commands.append(f"{prefix} {x:.1f} {y:.1f}")
-        line_paths.append(
-            f'<path d="{" ".join(commands)}" fill="none" stroke="{color}" stroke-width="3" />'
-        )
-        legend_y = margin_top - 18 + index * 18
-        legend_items.append(
-            f'<rect x="{width - 180}" y="{legend_y - 10}" width="12" height="12" fill="{color}" />'
-            f'<text x="{width - 160}" y="{legend_y}" font-size="12" fill="#212529">{label}</text>'
-        )
-
-    first_series_points = non_empty_series[0][1]
-    x_labels = []
-    label_indexes = sorted({0, len(first_series_points) // 2, len(first_series_points) - 1})
-    for label_index in label_indexes:
-        x = x_position(label_index, len(first_series_points))
-        label = first_series_points[label_index][0]
-        x_labels.append(
-            f'<text x="{x:.1f}" y="{height - margin_bottom + 24}" font-size="12" text-anchor="middle" fill="#495057">{label}</text>'
-        )
-
-    return "\n".join(
-        [
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-            '<rect width="100%" height="100%" fill="#ffffff" />',
-            f'<text x="{margin_left}" y="30" font-size="24" font-weight="bold" fill="#212529">{title}</text>',
-            *grid_lines,
-            f'<line x1="{margin_left}" y1="{height - margin_bottom}" x2="{width - margin_right}" y2="{height - margin_bottom}" stroke="#495057" stroke-width="1.5" />',
-            f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{height - margin_bottom}" stroke="#495057" stroke-width="1.5" />',
-            *labels,
-            *line_paths,
-            *legend_items,
-            *x_labels,
-            f'<text x="24" y="{margin_top + plot_height / 2:.1f}" font-size="12" fill="#495057" transform="rotate(-90 24 {margin_top + plot_height / 2:.1f})">{y_axis_label}</text>',
-            "</svg>",
-        ]
-    )
-
-
-def _build_bar_chart_svg(
-    *,
-    title: str,
-    points: list[tuple[str, float]],
-    bar_color: str,
-    y_axis_label: str,
-) -> str:
-    width = 960
-    height = 540
-    margin_left = 80
-    margin_right = 40
-    margin_top = 60
-    margin_bottom = 100
-    if not points:
-        return _empty_chart_svg(title, width, height)
-
-    values = [value for _, value in points]
-    max_value = max(max(values), 0.0)
-    min_value = min(min(values), 0.0)
-    if min_value == max_value:
-        max_value = max_value + 1.0
-        min_value = min_value - 1.0
-
-    plot_width = width - margin_left - margin_right
-    plot_height = height - margin_top - margin_bottom
-    zero_y = margin_top + plot_height * (max_value / (max_value - min_value))
-
-    def y_position(value: float) -> float:
-        scale = (value - min_value) / (max_value - min_value)
-        return margin_top + plot_height * (1 - scale)
-
-    bar_width = plot_width / max(len(points), 1) * 0.65
-    gap = plot_width / max(len(points), 1)
-
-    grid_lines = []
-    labels = []
-    for step in range(5):
-        ratio = step / 4
-        y = margin_top + plot_height * ratio
-        value = max_value - (max_value - min_value) * ratio
-        grid_lines.append(
-            f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#d0d7de" stroke-width="1" />'
-        )
-        labels.append(
-            f'<text x="{margin_left - 10}" y="{y + 4:.1f}" font-size="12" text-anchor="end" fill="#495057">{value:.2f}</text>'
-        )
-
-    bars = []
-    x_labels = []
-    for index, (label, value) in enumerate(points):
-        x = margin_left + index * gap + (gap - bar_width) / 2
-        y = y_position(max(value, 0.0))
-        bar_base = y_position(min(value, 0.0))
-        bar_height = abs(bar_base - y)
-        bars.append(
-            f'<rect x="{x:.1f}" y="{min(y, bar_base):.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" fill="{bar_color}" rx="4" />'
-        )
-        x_labels.append(
-            f'<text x="{x + bar_width / 2:.1f}" y="{height - margin_bottom + 24}" font-size="12" text-anchor="middle" fill="#495057">{label}</text>'
-        )
-
-    return "\n".join(
-        [
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-            '<rect width="100%" height="100%" fill="#ffffff" />',
-            f'<text x="{margin_left}" y="30" font-size="24" font-weight="bold" fill="#212529">{title}</text>',
-            *grid_lines,
-            f'<line x1="{margin_left}" y1="{zero_y:.1f}" x2="{width - margin_right}" y2="{zero_y:.1f}" stroke="#495057" stroke-width="1.5" />',
-            f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{height - margin_bottom}" stroke="#495057" stroke-width="1.5" />',
-            *labels,
-            *bars,
-            *x_labels,
-            f'<text x="24" y="{margin_top + plot_height / 2:.1f}" font-size="12" fill="#495057" transform="rotate(-90 24 {margin_top + plot_height / 2:.1f})">{y_axis_label}</text>',
-            "</svg>",
-        ]
-    )
-
-
-def _empty_chart_svg(title: str, width: int, height: int) -> str:
-    return "\n".join(
-        [
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-            '<rect width="100%" height="100%" fill="#ffffff" />',
-            f'<text x="40" y="40" font-size="24" font-weight="bold" fill="#212529">{title}</text>',
-            '<text x="40" y="90" font-size="16" fill="#6c757d">暂无可展示数据</text>',
-            "</svg>",
-        ]
-    )
-
-
-def _build_heatmap_svg(
-    *,
-    title: str,
-    x_label: str,
-    y_label: str,
-    points: list[tuple[str, str, float]],
-) -> str:
-    width = 960
-    height = 540
-    margin_left = 120
-    margin_right = 120
-    margin_top = 60
-    margin_bottom = 100
-    if not points:
-        return _empty_chart_svg(title, width, height)
-
-    x_values = sorted({x for x, _, _ in points})
-    y_values = sorted({y for _, y, _ in points})
-    value_map = {(x, y): value for x, y, value in points}
-    all_values = list(value_map.values())
-    min_value = min(all_values)
-    max_value = max(all_values)
-    if min_value == max_value:
-        min_value -= 1.0
-        max_value += 1.0
-
-    plot_width = width - margin_left - margin_right
-    plot_height = height - margin_top - margin_bottom
-    cell_width = plot_width / max(len(x_values), 1)
-    cell_height = plot_height / max(len(y_values), 1)
-
-    cells: list[str] = []
-    x_labels: list[str] = []
-    y_labels: list[str] = []
-
-    for x_index, x_value in enumerate(x_values):
-        x = margin_left + x_index * cell_width
-        x_labels.append(
-            f'<text x="{x + cell_width / 2:.1f}" y="{height - margin_bottom + 24}" font-size="12" text-anchor="middle" fill="#495057">{x_value}</text>'
-        )
-
-    for y_index, y_value in enumerate(y_values):
-        y = margin_top + y_index * cell_height
-        y_labels.append(
-            f'<text x="{margin_left - 10}" y="{y + cell_height / 2 + 4:.1f}" font-size="12" text-anchor="end" fill="#495057">{y_value}</text>'
-        )
-        for x_index, x_value in enumerate(x_values):
-            x = margin_left + x_index * cell_width
-            value = value_map.get((x_value, y_value))
-            if value is None:
-                fill = "#f1f3f5"
-                label = ""
-            else:
-                fill = _heatmap_color(value, min_value, max_value)
-                label = f"{value:.2f}"
-            cells.append(
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{cell_width:.1f}" height="{cell_height:.1f}" fill="{fill}" stroke="#ffffff" stroke-width="2" />'
-            )
-            if label:
-                cells.append(
-                    f'<text x="{x + cell_width / 2:.1f}" y="{y + cell_height / 2 + 4:.1f}" font-size="12" text-anchor="middle" fill="#212529">{label}</text>'
-                )
-
-    legend_x = width - margin_right + 20
-    legend_items = []
-    for index in range(5):
-        ratio = index / 4
-        value = min_value + (max_value - min_value) * ratio
-        y = margin_top + plot_height - (plot_height * ratio)
-        legend_items.append(
-            f'<rect x="{legend_x}" y="{y - 10:.1f}" width="20" height="20" fill="{_heatmap_color(value, min_value, max_value)}" />'
-        )
-        legend_items.append(
-            f'<text x="{legend_x + 28}" y="{y + 5:.1f}" font-size="12" fill="#495057">{value:.2f}</text>'
-        )
-
-    return "\n".join(
-        [
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-            '<rect width="100%" height="100%" fill="#ffffff" />',
-            f'<text x="{margin_left}" y="30" font-size="24" font-weight="bold" fill="#212529">{title}</text>',
-            *cells,
-            *x_labels,
-            *y_labels,
-            *legend_items,
-            f'<text x="{margin_left + plot_width / 2:.1f}" y="{height - 28}" font-size="12" text-anchor="middle" fill="#495057">{x_label}</text>',
-            f'<text x="30" y="{margin_top + plot_height / 2:.1f}" font-size="12" fill="#495057" transform="rotate(-90 30 {margin_top + plot_height / 2:.1f})">{y_label}</text>',
-            "</svg>",
-        ]
-    )
-
-
-def _heatmap_color(value: float, min_value: float, max_value: float) -> str:
-    ratio = (value - min_value) / (max_value - min_value)
-    red = int(240 - 120 * ratio)
-    green = int(245 - 40 * ratio)
-    blue = int(255 - 180 * ratio)
-    return f"rgb({red},{green},{blue})"
