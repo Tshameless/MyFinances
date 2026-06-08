@@ -6,5 +6,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+dist/
+build/
+.env
+.DS_Store

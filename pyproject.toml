@@ -4,12 +4,25 @@ version = "0.1.0"
 description = "Practical local quant backtesting toolkit for MyFinances."
 requires-python = ">=3.12"
 dependencies = []
+readme = "README.md"
+license = {text = "MIT"}
+keywords = ["quant", "backtesting", "A-share", "factor"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 
 [project.optional-dependencies]
 dev = [
     "mypy>=1.18",
     "ruff>=0.12",
 ]
+
+[project.urls]
+Repository = "https://github.com/Tshameless/MyFinances"
 
 [project.scripts]
 myfinances-quant = "python_quant.main:main"
@@ -20,7 +33,7 @@ line-length = 100
 src = ["python_quant", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["E501"]
 
 [tool.mypy]

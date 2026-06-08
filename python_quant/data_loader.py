@@ -1,16 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 from datetime import date, datetime
 from math import isfinite
 from pathlib import Path
-
-from .market import BENCHMARK_SYMBOL, is_a_share_symbol
-from .models import PriceBar
-
-_DATE_FORMATS = (
-    "%Y-%m-%d",
-    "%Y/%m/%d",
     "%Y%m%d",
 )
 
@@ -28,14 +21,14 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_str = ", ".join(sorted(missing))
-            raise ValueError(f"CSV missing required columns: {missing_str}")
+            raise DataValidationError(f"CSV missing required columns: {missing_str}")
 
         for line_number, row in enumerate(reader, start=2):
             symbol = (row.get("symbol") or "").strip()
             if not symbol:
-                raise ValueError(f"Line {line_number}: symbol is empty.")
+                raise DataValidationError(f"Line {line_number}: symbol is empty.")
             if not is_a_share_symbol(symbol):
-                raise ValueError(
+                raise DataValidationError(
                     f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
                 )
 
@@ -44,7 +37,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
 
             key = (parsed_date, symbol)
             if key in seen_keys:
-                raise ValueError(
+                raise DataValidationError(
                     f"Line {line_number}: duplicate bar for {symbol} on {parsed_date.isoformat()}."
                 )
             seen_keys.add(key)
@@ -132,12 +125,12 @@ def load_benchmark_bars_from_csv(
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_str = ", ".join(sorted(missing))
-            raise ValueError(f"Benchmark CSV missing required columns: {missing_str}")
+            raise DataValidationError(f"Benchmark CSV missing required columns: {missing_str}")
 
         for line_number, row in enumerate(reader, start=2):
             parsed_date = _parse_date(row.get("date"), line_number)
             if parsed_date in seen_dates:
-                raise ValueError(
+                raise DataValidationError(
                     f"Line {line_number}: duplicate benchmark bar on {parsed_date.isoformat()}."
                 )
             seen_dates.add(parsed_date)
@@ -176,20 +169,20 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_str = ", ".join(sorted(missing))
-            raise ValueError(f"Stock pool CSV missing required columns: {missing_str}")
+            raise DataValidationError(f"Stock pool CSV missing required columns: {missing_str}")
 
         for line_number, row in enumerate(reader, start=2):
             parsed_date = _parse_date(row.get("date"), line_number)
             symbol = (row.get("symbol") or "").strip()
             if not symbol:
-                raise ValueError(f"Line {line_number}: symbol is empty.")
+                raise DataValidationError(f"Line {line_number}: symbol is empty.")
             if not is_a_share_symbol(symbol):
-                raise ValueError(
+                raise DataValidationError(
                     f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
                 )
             key = (parsed_date, symbol)
             if key in seen_keys:
-                raise ValueError(
+                raise DataValidationError(
                     "Line "
                     f"{line_number}: duplicate stock pool symbol {symbol} "
                     f"on {parsed_date.isoformat()}."
@@ -198,7 +191,7 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
             stock_pool.setdefault(parsed_date, set()).add(symbol)
 
     if not stock_pool:
-        raise ValueError("Stock pool CSV does not contain any symbols.")
+        raise DataValidationError("Stock pool CSV does not contain any symbols.")
     return dict(sorted(stock_pool.items()))
 
 
@@ -215,20 +208,20 @@ def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, fl
         missing = required - set(reader.fieldnames or [])
         if missing:
             missing_str = ", ".join(sorted(missing))
-            raise ValueError(f"Factor score CSV missing required columns: {missing_str}")
+            raise DataValidationError(f"Factor score CSV missing required columns: {missing_str}")
 
         for line_number, row in enumerate(reader, start=2):
             parsed_date = _parse_date(row.get("date"), line_number)
             symbol = (row.get("symbol") or "").strip()
             if not symbol:
-                raise ValueError(f"Line {line_number}: symbol is empty.")
+                raise DataValidationError(f"Line {line_number}: symbol is empty.")
             if not is_a_share_symbol(symbol):
-                raise ValueError(
+                raise DataValidationError(
                     f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
                 )
             key = (parsed_date, symbol)
             if key in seen_keys:
-                raise ValueError(
+                raise DataValidationError(
                     "Line "
                     f"{line_number}: duplicate factor score for {symbol} "
                     f"on {parsed_date.isoformat()}."
@@ -241,7 +234,7 @@ def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, fl
             )
 
     if not scores:
-        raise ValueError("Factor score CSV does not contain any scores.")
+        raise DataValidationError("Factor score CSV does not contain any scores.")
     return dict(sorted(scores.items()))
 
 
@@ -252,7 +245,7 @@ def _parse_date(raw_value: str | None, line_number: int) -> date:
             return datetime.strptime(value, fmt).date()
         except ValueError:
             continue
-    raise ValueError(f"Line {line_number}: unsupported date format '{value}'.")
+    raise DataValidationError(f"Line {line_number}: unsupported date format '{value}'.")
 
 
 def _parse_positive_float(
@@ -264,20 +257,20 @@ def _parse_positive_float(
 ) -> float:
     value = (raw_value or "").strip()
     if not value:
-        raise ValueError(f"Line {line_number}: {field_name} is empty.")
+        raise DataValidationError(f"Line {line_number}: {field_name} is empty.")
 
     try:
         parsed = float(value)
     except ValueError as exc:
-        raise ValueError(f"Line {line_number}: invalid {field_name} '{value}'.") from exc
+        raise DataValidationError(f"Line {line_number}: invalid {field_name} '{value}'.") from exc
 
     if allow_zero:
         if parsed < 0:
-            raise ValueError(f"Line {line_number}: {field_name} must be >= 0.")
+            raise DataValidationError(f"Line {line_number}: {field_name} must be >= 0.")
     elif parsed <= 0:
-        raise ValueError(f"Line {line_number}: {field_name} must be > 0.")
+        raise DataValidationError(f"Line {line_number}: {field_name} must be > 0.")
     if not isfinite(parsed):
-        raise ValueError(f"Line {line_number}: {field_name} must be finite.")
+        raise DataValidationError(f"Line {line_number}: {field_name} must be finite.")
     return parsed
 
 
@@ -288,14 +281,14 @@ def _parse_float(
 ) -> float:
     value = (raw_value or "").strip()
     if not value:
-        raise ValueError(f"Line {line_number}: {field_name} is empty.")
+        raise DataValidationError(f"Line {line_number}: {field_name} is empty.")
 
     try:
         parsed = float(value)
     except ValueError as exc:
-        raise ValueError(f"Line {line_number}: invalid {field_name} '{value}'.") from exc
+        raise DataValidationError(f"Line {line_number}: invalid {field_name} '{value}'.") from exc
     if not isfinite(parsed):
-        raise ValueError(f"Line {line_number}: {field_name} must be finite.")
+        raise DataValidationError(f"Line {line_number}: {field_name} must be finite.")
     return parsed
 
 
@@ -320,7 +313,7 @@ def _parse_optional_rate(
         return None
     parsed = _parse_positive_float(value, field_name, line_number)
     if parsed >= 1:
-        raise ValueError(f"Line {line_number}: {field_name} must be between 0 and 1.")
+        raise DataValidationError(f"Line {line_number}: {field_name} must be between 0 and 1.")
     return parsed
 
 
@@ -332,4 +325,4 @@ def _parse_boolean(raw_value: str | None, line_number: int, *, default: bool) ->
         return True
     if value in {"0", "false", "no", "n"}:
         return False
-    raise ValueError(f"Line {line_number}: unsupported tradable flag '{raw_value}'.")
+    raise DataValidationError(f"Line {line_number}: unsupported tradable flag '{raw_value}'.")

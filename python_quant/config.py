@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import KeysView
+from collections.abc import KeysView, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import cast
+
+from .exceptions import ConfigValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "output" / "python"
@@ -201,28 +204,28 @@ class BacktestConfig:
         if self.factor_score_csv is not None:
             object.__setattr__(self, "factor_score_csv", self.factor_score_csv.resolve())
         if self.initial_cash <= 0:
-            raise ValueError("initial_cash must be greater than 0.")
+            raise ConfigValidationError("initial_cash must be greater than 0.")
         if self.top_n <= 0:
-            raise ValueError("top_n must be greater than 0.")
+            raise ConfigValidationError("top_n must be greater than 0.")
         if self.selection_mode not in {"top", "bottom"}:
-            raise ValueError("selection_mode must be one of: top, bottom.")
+            raise ConfigValidationError("selection_mode must be one of: top, bottom.")
         if self.score_source not in {"auto", "builtin", "external"}:
-            raise ValueError("score_source must be one of: auto, builtin, external.")
+            raise ConfigValidationError("score_source must be one of: auto, builtin, external.")
         if self.lot_size <= 0:
-            raise ValueError("lot_size must be greater than 0.")
+            raise ConfigValidationError("lot_size must be greater than 0.")
         if self.max_group_positions is not None and self.max_group_positions <= 0:
-            raise ValueError("max_group_positions must be greater than 0.")
+            raise ConfigValidationError("max_group_positions must be greater than 0.")
         if self.rebalance_every_n_days <= 0:
-            raise ValueError("rebalance_every_n_days must be greater than 0.")
+            raise ConfigValidationError("rebalance_every_n_days must be greater than 0.")
         if min(
             self.lookback_momentum,
             self.lookback_mean_reversion,
             self.lookback_volatility,
             self.rolling_risk_window,
         ) <= 0:
-            raise ValueError("All lookback and rolling windows must be greater than 0.")
+            raise ConfigValidationError("All lookback and rolling windows must be greater than 0.")
         if self.execution_delay_days < 0:
-            raise ValueError("execution_delay_days must be greater than or equal to 0.")
+            raise ConfigValidationError("execution_delay_days must be greater than or equal to 0.")
         if min(
             self.commission_rate,
             0.0 if self.buy_commission_rate is None else self.buy_commission_rate,
@@ -250,78 +253,78 @@ class BacktestConfig:
             self.bse_limit_up_down_rate,
             self.max_volume_participation,
         ) < 0:
-            raise ValueError("Cost rates cannot be negative.")
+            raise ConfigValidationError("Cost rates cannot be negative.")
         if min(
             self.limit_up_down_rate,
             self.st_limit_up_down_rate,
             self.growth_limit_up_down_rate,
             self.bse_limit_up_down_rate,
         ) <= 0:
-            raise ValueError("Limit rates must be greater than 0.")
+            raise ConfigValidationError("Limit rates must be greater than 0.")
         if max(
             self.limit_up_down_rate,
             self.st_limit_up_down_rate,
             self.growth_limit_up_down_rate,
             self.bse_limit_up_down_rate,
         ) >= 1:
-            raise ValueError("Limit rates must be less than 1.")
+            raise ConfigValidationError("Limit rates must be less than 1.")
         if self.max_volume_participation > 1:
-            raise ValueError("max_volume_participation must be between 0 and 1.")
+            raise ConfigValidationError("max_volume_participation must be between 0 and 1.")
         if self.market_impact_exponent <= 0:
-            raise ValueError("market_impact_exponent must be greater than 0.")
+            raise ConfigValidationError("market_impact_exponent must be greater than 0.")
         if self.target_cash_weight < 0 or self.target_cash_weight >= 1:
-            raise ValueError("target_cash_weight must be between 0 and 1.")
+            raise ConfigValidationError("target_cash_weight must be between 0 and 1.")
         if self.max_position_weight <= 0 or self.max_position_weight > 1:
-            raise ValueError("max_position_weight must be between 0 and 1.")
+            raise ConfigValidationError("max_position_weight must be between 0 and 1.")
         if self.max_allowed_drawdown <= 0 or self.max_allowed_drawdown > 1:
-            raise ValueError("max_allowed_drawdown must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_drawdown must be between 0 and 1.")
         if self.max_allowed_daily_var < 0 or self.max_allowed_daily_var > 1:
-            raise ValueError("max_allowed_daily_var must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_daily_var must be between 0 and 1.")
         if self.min_allowed_rolling_return < -1 or self.min_allowed_rolling_return > 1:
-            raise ValueError("min_allowed_rolling_return must be between -1 and 1.")
+            raise ConfigValidationError("min_allowed_rolling_return must be between -1 and 1.")
         if self.min_allowed_information_ratio < -10 or self.min_allowed_information_ratio > 10:
-            raise ValueError("min_allowed_information_ratio must be between -10 and 10.")
+            raise ConfigValidationError("min_allowed_information_ratio must be between -10 and 10.")
         if self.min_allowed_fill_rate < 0 or self.min_allowed_fill_rate > 1:
-            raise ValueError("min_allowed_fill_rate must be between 0 and 1.")
+            raise ConfigValidationError("min_allowed_fill_rate must be between 0 and 1.")
         if self.min_allowed_execution_price_coverage < 0 or self.min_allowed_execution_price_coverage > 1:
-            raise ValueError("min_allowed_execution_price_coverage must be between 0 and 1.")
+            raise ConfigValidationError("min_allowed_execution_price_coverage must be between 0 and 1.")
         if self.min_allowed_factor_score_coverage < 0 or self.min_allowed_factor_score_coverage > 1:
-            raise ValueError("min_allowed_factor_score_coverage must be between 0 and 1.")
+            raise ConfigValidationError("min_allowed_factor_score_coverage must be between 0 and 1.")
         if self.max_allowed_market_constraint_rate < 0 or self.max_allowed_market_constraint_rate > 1:
-            raise ValueError("max_allowed_market_constraint_rate must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_market_constraint_rate must be between 0 and 1.")
         if self.max_allowed_position_weight <= 0 or self.max_allowed_position_weight > 1:
-            raise ValueError("max_allowed_position_weight must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_position_weight must be between 0 and 1.")
         if self.max_allowed_group_weight <= 0 or self.max_allowed_group_weight > 1:
-            raise ValueError("max_allowed_group_weight must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_group_weight must be between 0 and 1.")
         if self.max_allowed_attribution_residual < 0 or self.max_allowed_attribution_residual > 1:
-            raise ValueError("max_allowed_attribution_residual must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_attribution_residual must be between 0 and 1.")
         if self.max_allowed_factor_correlation < 0 or self.max_allowed_factor_correlation > 1:
-            raise ValueError("max_allowed_factor_correlation must be between 0 and 1.")
+            raise ConfigValidationError("max_allowed_factor_correlation must be between 0 and 1.")
         if self.max_allowed_rebalance_changes < 0:
-            raise ValueError("max_allowed_rebalance_changes must be greater than or equal to 0.")
+            raise ConfigValidationError("max_allowed_rebalance_changes must be greater than or equal to 0.")
         if self.min_allowed_holding_days < 0:
-            raise ValueError("min_allowed_holding_days must be greater than or equal to 0.")
+            raise ConfigValidationError("min_allowed_holding_days must be greater than or equal to 0.")
         if self.price_field not in {"close", "adjusted_close"}:
-            raise ValueError("price_field must be one of: close, adjusted_close.")
+            raise ConfigValidationError("price_field must be one of: close, adjusted_close.")
         if self.execution_price_field_effective not in {"close", "adjusted_close", "open", "vwap"}:
-            raise ValueError(
+            raise ConfigValidationError(
                 "execution_price_field must be one of: close, adjusted_close, open, vwap."
             )
         if self.start_date is not None and self.end_date is not None:
             if self.start_date > self.end_date:
-                raise ValueError("start_date must be earlier than or equal to end_date.")
+                raise ConfigValidationError("start_date must be earlier than or equal to end_date.")
         if not self.factor_weights:
-            raise ValueError("factor_weights cannot be empty.")
+            raise ConfigValidationError("factor_weights cannot be empty.")
         unsupported_factors = sorted(set(self.factor_weights) - SUPPORTED_FACTORS)
         if unsupported_factors:
             unsupported_text = ", ".join(unsupported_factors)
-            raise ValueError(
+            raise ConfigValidationError(
                 f"factor_weights contains unsupported factors: {unsupported_text}."
             )
         if any(weight < 0 for weight in self.factor_weights.values()):
-            raise ValueError("factor_weights cannot contain negative values.")
+            raise ConfigValidationError("factor_weights cannot contain negative values.")
         if sum(self.factor_weights.values()) <= 0:
-            raise ValueError("factor_weights must sum to a positive value.")
+            raise ConfigValidationError("factor_weights must sum to a positive value.")
 
     @property
     def per_side_cost_rate(self) -> float:
@@ -358,6 +361,127 @@ class BacktestConfig:
             factor_name: weight / total_weight
             for factor_name, weight in self.factor_weights.items()
         }
+
+    def to_dict(self) -> dict[str, object]:
+        """将当前配置序列化为字典，适合 JSON 或重建配置。"""
+        return {
+            "initial_cash": self.initial_cash,
+            "top_n": self.top_n,
+            "selection_mode": self.selection_mode,
+            "score_source": self.score_source,
+            "lot_size": self.lot_size,
+            "max_group_positions": self.max_group_positions,
+            "lookback_momentum": self.lookback_momentum,
+            "lookback_mean_reversion": self.lookback_mean_reversion,
+            "lookback_volatility": self.lookback_volatility,
+            "rolling_risk_window": self.rolling_risk_window,
+            "execution_delay_days": self.execution_delay_days,
+            "max_allowed_drawdown": self.max_allowed_drawdown,
+            "max_allowed_daily_var": self.max_allowed_daily_var,
+            "min_allowed_rolling_return": self.min_allowed_rolling_return,
+            "min_allowed_information_ratio": self.min_allowed_information_ratio,
+            "min_allowed_fill_rate": self.min_allowed_fill_rate,
+            "min_allowed_execution_price_coverage": self.min_allowed_execution_price_coverage,
+            "min_allowed_factor_score_coverage": self.min_allowed_factor_score_coverage,
+            "max_allowed_market_constraint_rate": self.max_allowed_market_constraint_rate,
+            "max_allowed_position_weight": self.max_allowed_position_weight,
+            "max_allowed_group_weight": self.max_allowed_group_weight,
+            "max_allowed_attribution_residual": self.max_allowed_attribution_residual,
+            "max_allowed_factor_correlation": self.max_allowed_factor_correlation,
+            "max_allowed_rebalance_changes": self.max_allowed_rebalance_changes,
+            "min_allowed_holding_days": self.min_allowed_holding_days,
+            "rebalance_every_n_days": self.rebalance_every_n_days,
+            "commission_rate": self.commission_rate,
+            "buy_commission_rate": self.buy_commission_rate,
+            "sell_commission_rate": self.sell_commission_rate,
+            "slippage_rate": self.slippage_rate,
+            "market_impact_coefficient": self.market_impact_coefficient,
+            "market_impact_exponent": self.market_impact_exponent,
+            "stamp_duty_rate": self.stamp_duty_rate,
+            "min_commission": self.min_commission,
+            "transfer_fee_rate": self.transfer_fee_rate,
+            "target_cash_weight": self.target_cash_weight,
+            "max_position_weight": self.max_position_weight,
+            "limit_up_down_rate": self.limit_up_down_rate,
+            "st_limit_up_down_rate": self.st_limit_up_down_rate,
+            "growth_limit_up_down_rate": self.growth_limit_up_down_rate,
+            "bse_limit_up_down_rate": self.bse_limit_up_down_rate,
+            "infer_limit_rate_by_symbol": self.infer_limit_rate_by_symbol,
+            "max_volume_participation": self.max_volume_participation,
+            "infer_limit_flags": self.infer_limit_flags,
+            "forward_fill_suspended_bars": self.forward_fill_suspended_bars,
+            "price_field": self.price_field,
+            "execution_price_field": self.execution_price_field,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "output_dir": self.output_dir,
+            "symbol_name_csv": self.symbol_name_csv,
+            "stock_pool_csv": self.stock_pool_csv,
+            "symbol_group_csv": self.symbol_group_csv,
+            "factor_score_csv": self.factor_score_csv,
+            "factor_weights": self.factor_weights.copy(),
+        }
+
+    @classmethod
+    def from_dict(cls, mapping: Mapping[str, object]) -> BacktestConfig:
+        """从字典创建 BacktestConfig 实例。"""
+        return cls(
+            initial_cash=cast(float, mapping["initial_cash"]),
+            top_n=cast(int, mapping["top_n"]),
+            selection_mode=cast(str, mapping["selection_mode"]),
+            score_source=cast(str, mapping["score_source"]),
+            lot_size=cast(int, mapping["lot_size"]),
+            max_group_positions=cast(int | None, mapping["max_group_positions"]),
+            lookback_momentum=cast(int, mapping["lookback_momentum"]),
+            lookback_mean_reversion=cast(int, mapping["lookback_mean_reversion"]),
+            lookback_volatility=cast(int, mapping["lookback_volatility"]),
+            rolling_risk_window=cast(int, mapping["rolling_risk_window"]),
+            execution_delay_days=cast(int, mapping["execution_delay_days"]),
+            max_allowed_drawdown=cast(float, mapping["max_allowed_drawdown"]),
+            max_allowed_daily_var=cast(float, mapping["max_allowed_daily_var"]),
+            min_allowed_rolling_return=cast(float, mapping["min_allowed_rolling_return"]),
+            min_allowed_information_ratio=cast(float, mapping["min_allowed_information_ratio"]),
+            min_allowed_fill_rate=cast(float, mapping["min_allowed_fill_rate"]),
+            min_allowed_execution_price_coverage=cast(float, mapping["min_allowed_execution_price_coverage"]),
+            min_allowed_factor_score_coverage=cast(float, mapping["min_allowed_factor_score_coverage"]),
+            max_allowed_market_constraint_rate=cast(float, mapping["max_allowed_market_constraint_rate"]),
+            max_allowed_position_weight=cast(float, mapping["max_allowed_position_weight"]),
+            max_allowed_group_weight=cast(float, mapping["max_allowed_group_weight"]),
+            max_allowed_attribution_residual=cast(float, mapping["max_allowed_attribution_residual"]),
+            max_allowed_factor_correlation=cast(float, mapping["max_allowed_factor_correlation"]),
+            max_allowed_rebalance_changes=cast(float, mapping["max_allowed_rebalance_changes"]),
+            min_allowed_holding_days=cast(float, mapping["min_allowed_holding_days"]),
+            rebalance_every_n_days=cast(int, mapping["rebalance_every_n_days"]),
+            commission_rate=cast(float, mapping["commission_rate"]),
+            buy_commission_rate=cast(float | None, mapping["buy_commission_rate"]),
+            sell_commission_rate=cast(float | None, mapping["sell_commission_rate"]),
+            slippage_rate=cast(float, mapping["slippage_rate"]),
+            market_impact_coefficient=cast(float, mapping["market_impact_coefficient"]),
+            market_impact_exponent=cast(float, mapping["market_impact_exponent"]),
+            stamp_duty_rate=cast(float, mapping["stamp_duty_rate"]),
+            min_commission=cast(float, mapping["min_commission"]),
+            transfer_fee_rate=cast(float, mapping["transfer_fee_rate"]),
+            target_cash_weight=cast(float, mapping["target_cash_weight"]),
+            max_position_weight=cast(float, mapping["max_position_weight"]),
+            limit_up_down_rate=cast(float, mapping["limit_up_down_rate"]),
+            st_limit_up_down_rate=cast(float, mapping["st_limit_up_down_rate"]),
+            growth_limit_up_down_rate=cast(float, mapping["growth_limit_up_down_rate"]),
+            bse_limit_up_down_rate=cast(float, mapping["bse_limit_up_down_rate"]),
+            infer_limit_rate_by_symbol=cast(bool, mapping["infer_limit_rate_by_symbol"]),
+            max_volume_participation=cast(float, mapping["max_volume_participation"]),
+            infer_limit_flags=cast(bool, mapping["infer_limit_flags"]),
+            forward_fill_suspended_bars=cast(bool, mapping["forward_fill_suspended_bars"]),
+            price_field=cast(str, mapping["price_field"]),
+            execution_price_field=cast(str | None, mapping["execution_price_field"]),
+            start_date=cast(date | None, mapping["start_date"]),
+            end_date=cast(date | None, mapping["end_date"]),
+            output_dir=cast(Path, mapping["output_dir"]),
+            symbol_name_csv=cast(Path | None, mapping["symbol_name_csv"]),
+            stock_pool_csv=cast(Path | None, mapping["stock_pool_csv"]),
+            symbol_group_csv=cast(Path | None, mapping["symbol_group_csv"]),
+            factor_score_csv=cast(Path | None, mapping["factor_score_csv"]),
+            factor_weights=cast(dict[str, float], mapping["factor_weights"]).copy(),
+        )
 
 
 def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object]:

@@ -1923,113 +1923,204 @@ def _format_factor_pair(summary: dict[str, object], key: str) -> str:
     if not isinstance(factor, str) or not isinstance(compared_factor, str):
         return "-"
     correlation = pair.get("average_correlation", pair.get("average_rank_correlation"))
+    return [
+        ("策略健康评分", _format_summary_number(strategy_health_summary, "score")),
+        ("策略健康等级", _format_summary_field(strategy_health_summary, "grade")),
+        ("策略闸门状态", _format_summary_field(strategy_health_summary, "gate_status")),
+        ("策略闸门失败数", _format_summary_number(strategy_health_summary, "gate_failures", decimals=0)),
+        ("策略预警数量", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
+        ("因子相关风险", _format_summary_pct(strategy_health_summary, "strongest_factor_correlation")),
+        ("最强相关因子对", _format_summary_field(strategy_health_summary, "strongest_factor_correlation_pair")),
+        ("最大回撤日期", _format_summary_field(drawdown_summary, "max_drawdown_date")),
+        ("最长水下天数", _format_summary_number(drawdown_summary, "longest_underwater_days")),
+        ("回撤是否修复", _format_summary_bool(drawdown_summary, "is_recovered")),
+        ("滚动最差收益", _format_summary_pct(rolling_risk_summary, "worst_rolling_return")),
+        ("滚动最差收益日", _format_summary_field(rolling_risk_summary, "worst_rolling_return_date")),
+        ("滚动平均夏普", _format_summary_number(rolling_risk_summary, "average_rolling_sharpe")),
+        ("滚动最大回撤", _format_summary_pct(rolling_risk_summary, "worst_rolling_drawdown")),
+        ("平均股票仓位", _format_summary_pct(exposure_summary, "average_stock_weight")),
+        ("平均持仓数量", _format_summary_number(exposure_summary, "average_holding_count")),
+        ("有效持仓数", _format_summary_number(exposure_summary, "average_effective_position_count")),
+        ("最大单票权重", _format_summary_pct(exposure_summary, "max_largest_position_weight")),
+        ("最大持仓集中度", _format_summary_number(exposure_summary, "max_hhi_concentration")),
+        ("最大风险贡献标的", _format_summary_field(exposure_summary, "max_largest_risk_contribution_symbol")),
+        ("最大风险贡献占比", _format_summary_pct(exposure_summary, "max_largest_risk_contribution_share")),
+        ("最大分组风险贡献", _format_summary_field(group_exposure_summary, "max_group_risk_contribution_group")),
+        ("最大分组贡献占比", _format_summary_pct(group_exposure_summary, "max_group_risk_contribution_share")),
+        ("总分平均IC", _format_nested_summary_number(factor_ic_summary, "total_score", "mean_ic")),
+        ("总分ICIR", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_ir")),
+        ("总分IC t值", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_t_stat")),
+        ("总分稳定性", _format_nested_summary_number(factor_decay_summary, "total_score", "average_rank_correlation")),
+        ("入选留存率", _format_nested_summary_pct(factor_decay_summary, "total_score", "average_selected_retention_rate")),
+        ("最强因子相关", _format_factor_pair(factor_correlation_summary, "strongest_pair")),
+        ("最强排序相关", _format_factor_pair(factor_correlation_summary, "strongest_rank_pair")),
+        ("累计主动收益", _format_summary_pct(relative_summary, "total_active_return")),
+        ("年化Alpha", _format_summary_pct(relative_summary, "annualized_alpha")),
+        ("Beta", _format_summary_number(relative_summary, "beta")),
+        ("R平方", _format_summary_pct(relative_summary, "r_squared")),
+        ("主动胜率", _format_summary_pct(relative_summary, "active_win_rate")),
+        ("最差主动日", _format_summary_field(relative_summary, "worst_active_return_date")),
+        ("主动最大回撤", _format_summary_pct(relative_summary, "max_active_drawdown")),
+        ("成交率", _format_summary_pct(execution_summary, "fill_rate")),
+        ("执行成本", _format_summary_bps(execution_summary, "cost_bps")),
+        ("主要执行约束", _format_summary_field(execution_summary, "dominant_constraint_category")),
+        ("市场约束拒单占比", _format_summary_pct(execution_summary, "market_constraint_rate")),
+        ("最严重执行阻塞日", _format_summary_field(execution_summary, "worst_constraint_date")),
+        ("阻塞日主要约束", _format_summary_field(execution_summary, "worst_constraint_dominant_category")),
+        ("收益归因残差", _format_summary_pct(return_attribution_summary, "total_residual_return")),
+        ("成本拖累", _format_summary_pct(return_attribution_summary, "total_cost_drag")),
+        ("总成本", _format_summary_money(cost_attribution_summary, "total_cost")),
+        ("固定滑点成本", _format_summary_money(cost_attribution_summary, "fixed_slippage_cost")),
+        ("市场冲击成本", _format_summary_money(cost_attribution_summary, "market_impact_cost")),
+        ("成本归因 bps", _format_summary_bps(cost_attribution_summary, "cost_bps")),
+        ("最大对账差异", _format_summary_money(pnl_ledger_summary, "max_abs_reconciliation_difference")),
+        ("对账状态", _format_reconciliation_status(pnl_ledger_summary)),
+    ]
+
+
+def _build_trading_behavior_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
+    turnover_summary = _load_artifact_summary(artifacts, "turnover_analysis_json")
+    strategy_health_summary = _load_artifact_summary(artifacts, "strategy_health_json")
+    average_entries = _summary_float(turnover_summary, "average_entries_per_rebalance")
+    average_exits = _summary_float(turnover_summary, "average_exits_per_rebalance")
+    average_rebalance_changes = (
+        None if average_entries is None or average_exits is None else average_entries + average_exits
+    )
+    return [
+        ("Average entries per rebalance", _format_summary_number(turnover_summary, "average_entries_per_rebalance")),
+        ("Average exits per rebalance", _format_summary_number(turnover_summary, "average_exits_per_rebalance")),
+        ("Average rebalance changes", _format_optional_number(average_rebalance_changes)),
+        ("Realized holding periods", _format_summary_number(turnover_summary, "realized_holding_count", decimals=0)),
+        ("Average realized holding days", _format_summary_number(turnover_summary, "average_realized_holding_days")),
+        ("Open positions after final bar", _format_summary_number(turnover_summary, "open_position_count", decimals=0)),
+        ("Turnover gate status", _format_summary_field(strategy_health_summary, "gate_status")),
+        ("Health warnings", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
+    ]
+
+
+def _build_data_quality_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
+    summary = _load_artifact_summary(artifacts, "price_data_quality_report_json")
+    return [
+        ("Price rows", _format_summary_number(summary, "row_count", decimals=0)),
+        ("Symbols", _format_summary_number(summary, "symbol_count", decimals=0)),
+        ("Trading dates", _format_summary_number(summary, "date_count", decimals=0)),
+        ("Date range", _format_date_range(summary)),
+        ("Symbols missing adjusted close", _format_summary_number(summary, "symbols_with_missing_adjusted_close", decimals=0)),
+        ("Execution price field", _format_summary_field(summary, "execution_price_field")),
+        ("Missing execution price rows", _format_summary_number(summary, "missing_execution_price_rows", decimals=0)),
+        ("Execution price coverage", _format_summary_pct(summary, "execution_price_coverage_rate")),
+        ("Missing open rows", _format_summary_number(summary, "missing_open_rows", decimals=0)),
+        ("Missing VWAP rows", _format_summary_number(summary, "missing_vwap_rows", decimals=0)),
+        ("Suspended rows", _format_summary_number(summary, "suspended_days", decimals=0)),
+        ("Limit-up rows", _format_summary_number(summary, "limit_up_days", decimals=0)),
+        ("Limit-down rows", _format_summary_number(summary, "limit_down_days", decimals=0)),
+        ("ST rows", _format_summary_number(summary, "st_days", decimals=0)),
+        ("Custom limit-rate rows", _format_summary_number(summary, "custom_limit_rate_days", decimals=0)),
+        ("Untradable rows", _format_summary_number(summary, "untradable_days", decimals=0)),
+        ("Cannot-buy rows", _format_summary_number(summary, "cannot_buy_days", decimals=0)),
+        ("Cannot-sell rows", _format_summary_number(summary, "cannot_sell_days", decimals=0)),
+    ]
+
+
+def _load_artifact_summary(artifacts: dict[str, Path], artifact_key: str) -> dict[str, object]:
+    path = artifacts.get(artifact_key)
+    if path is None or not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    summary = payload.get("summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _format_summary_field(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    return "-" if value in (None, "") else str(value)
+
+
+def _format_date_range(summary: dict[str, object]) -> str:
+    start_date = _format_summary_field(summary, "start_date")
+    end_date = _format_summary_field(summary, "end_date")
+    if start_date == "-" and end_date == "-":
+        return "-"
+    return f"{start_date} to {end_date}"
+
+
+def _summary_float(summary: dict[str, object], key: str) -> float | None:
+    value = summary.get(key)
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _format_summary_number(
+    summary: dict[str, object],
+    key: str,
+    *,
+    decimals: int = 2,
+) -> str:
+    value = summary.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:,.{decimals}f}"
+
+
+def _format_summary_bool(summary: dict[str, object], key: str) -> str:
+    value = summary.get(key)
+    if value is True:
+        return "是"
+    if value is False:
+        return "否"
+    return "-"
+
+
+def _format_nested_summary_number(
+    summary: dict[str, object],
+    section: str,
+    key: str,
+    *,
+    decimals: int = 3,
+) -> str:
+    section_payload = summary.get(section)
+    if not isinstance(section_payload, dict):
+        return "-"
+    value = section_payload.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:,.{decimals}f}"
+
+
+def _format_nested_summary_pct(
+    summary: dict[str, object],
+    section: str,
+    key: str,
+) -> str:
+    section_payload = summary.get(section)
+    if not isinstance(section_payload, dict):
+        return "-"
+    value = section_payload.get(key)
+    if not isinstance(value, int | float):
+        return "-"
+    return f"{value:.2%}"
+
+
+def _format_factor_pair(summary: dict[str, object], key: str) -> str:
+    pair = summary.get(key)
+    if not isinstance(pair, dict):
+        return "-"
+    factor = pair.get("factor")
+    compared_factor = pair.get("compared_factor")
+    if not isinstance(factor, str) or not isinstance(compared_factor, str):
+        return "-"
+    correlation = pair.get("average_correlation", pair.get("average_rank_correlation"))
     if not isinstance(correlation, int | float):
         return f"{factor} vs {compared_factor}"
     return f"{factor} vs {compared_factor}: {correlation:.3f}"
-
-
-def _format_count_map_top(summary: dict[str, object], key: str) -> str:
-    counts = summary.get(key)
-    if not isinstance(counts, dict) or not counts:
-        return "-"
-    top_key, top_count = max(
-        counts.items(),
-        key=lambda item: (_coerce_float(item[1]), str(item[0])),
-    )
-    return f"{top_key}: {_coerce_float(top_count):.0f}"
-
-
-def _format_best_parameter_values(summary: dict[str, object]) -> str:
-    values = summary.get("best_parameter_values")
-    if not isinstance(values, dict) or not values:
-        return "-"
-    parts = [
-        f"{key}={value}"
-        for key, value in sorted(values.items())
-    ]
-    return "; ".join(parts)
-
-
-def _format_parameter_recommendation_rationale(summary: dict[str, object]) -> str:
-    rationale = summary.get("parameter_recommendation_rationale")
-    if not isinstance(rationale, dict) or not rationale:
-        return "-"
-    parts = []
-    for parameter, payload in sorted(rationale.items()):
-        if not isinstance(payload, dict):
-            continue
-        recommended_value = payload.get("recommended_value", "-")
-        reason = _format_recommendation_reason(payload.get("reason", "-"))
-        best_by_metric = payload.get("best_value_by_metric", "-")
-        composite = _coerce_float(payload.get("average_composite_score", 0.0))
-        gate_rate = _coerce_float(payload.get("gate_passing_rate", 0.0))
-        metric_note = ""
-        if not payload.get("is_also_best_by_metric", False):
-            metric_note = f", 排序指标最优={best_by_metric}"
-        parts.append(
-            f"{parameter}={recommended_value} ({reason}{metric_note}, 综合分={composite:.3f}, 通过率={gate_rate:.2%})"
-        )
-    return "; ".join(parts) if parts else "-"
-
-
-def _format_parameter_recommendation_summary(summary: dict[str, object]) -> str:
-    value = summary.get("parameter_recommendation_summary")
-    if not isinstance(value, str) or not value:
-        return "-"
-    return _format_recommendation_summary_text(value)
-
-
-def _format_recommendation_reason(reason: object) -> str:
-    reason_key = str(reason)
-    labels = {
-        "highest_average_composite_score": "平均综合分最高",
-    }
-    return labels.get(reason_key, reason_key)
-
-
-def _format_recommended_action_first(summary: dict[str, object]) -> str:
-    values = summary.get("recommended_actions")
-    if not isinstance(values, list) or not values:
-        return "-"
-    return _format_recommended_action_text(str(values[0]))
-
-
-def _format_recommendation_summary_text(value: str) -> str:
-    text = value.replace(
-        "Recommended parameter values by average composite score:",
-        "按平均综合分推荐参数：",
-    )
-    text = text.replace(
-        "Metric and composite recommendations diverge for:",
-        "排序指标最优与综合分推荐不一致：",
-    )
-    text = text.replace("composite ", "综合分 ")
-    text = text.replace("gate pass ", "闸门通过率 ")
-    text = text.replace("metric-best=", "排序指标最优=")
-    return text
-
-
-def _format_recommended_action_text(value: str) -> str:
-    translations = {
-        "Most parameter sets passed health gates; focus on robustness, live trading assumptions, and out-of-sample validation.": "多数参数组合通过健康闸门；下一步重点检查稳健性、实盘交易假设和样本外验证。",
-        "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.": "风险闸门频繁失败：降低持仓集中度、提高现金缓冲、缩短调仓暴露，或加入回撤感知过滤。",
-        "Stability gates fail often: prefer parameter regions with smoother rolling returns and validate on longer walk-forward windows.": "稳定性闸门频繁失败：优先选择滚动收益更平滑的参数区域，并用更长 walk-forward 窗口验证。",
-        "Execution gates fail often: reduce volume participation, avoid illiquid names, increase cash buffer, or relax target turnover.": "执行闸门频繁失败：降低成交量参与率、避开低流动性标的、增加现金缓冲，或放宽目标换手。",
-        "Exposure gates fail often: tighten max_position_weight or add group constraints to reduce concentration.": "暴露闸门频繁失败：收紧 max_position_weight，或增加分组约束以降低集中度。",
-        "Attribution gates fail often: inspect return attribution residuals before trusting parameter rankings.": "归因闸门频繁失败：在信任参数排名前，先检查收益归因残差。",
-        "Turnover gates fail often: lengthen rebalance interval, require stronger signal changes, or raise holding-period constraints.": "换手闸门频繁失败：拉长调仓间隔、要求更强信号变化，或提高持仓周期约束。",
-        "Factor gates fail often: remove redundant factors, lower highly correlated factor weights, or add orthogonal signals.": "因子闸门频繁失败：移除冗余因子、降低高相关因子权重，或加入正交信号。",
-        "Ledger gates fail often: resolve accounting reconciliation issues before comparing parameter performance.": "对账闸门频繁失败：先解决账务对齐问题，再比较参数表现。",
-    }
-    translated = translations.get(value)
-    if translated is not None:
-        return translated
-    prefix = "Most common failed gate is '"
-    suffix = "'; review the single-run strategy_health_gates.csv files for affected runs first."
-    if value.startswith(prefix) and value.endswith(suffix):
-        gate_name = value[len(prefix):-len(suffix)]
-        return f"最常失败闸门是“{gate_name}”；请优先查看受影响运行的 strategy_health_gates.csv。"
-    return value
 
 
 def _format_list_first(summary: dict[str, object], key: str) -> str:
@@ -2140,6 +2231,132 @@ def _gate_rank_value(row: dict[str, object]) -> float:
 
 def _validate_rank_metric(rows: list[dict[str, object]], rank_by: str) -> None:
     if not rows:
+        return
+
+    available_metrics = sorted(
+        {
+            key
+            for row in rows
+            for key, value in row.items()
+            if _is_numeric_metric_value(value)
+        }
+    )
+    if rank_by not in available_metrics:
+        available_text = ", ".join(available_metrics) or "<none>"
+        raise ValueError(
+            f"Rank metric '{rank_by}' is not available. "
+            f"Available numeric metrics: {available_text}."
+        )
+
+
+def _format_count_map_top(summary: dict[str, object], key: str) -> str:
+    counts = summary.get(key)
+    if not isinstance(counts, dict) or not counts:
+        return "-"
+    top_key, top_count = max(
+        counts.items(),
+        key=lambda item: (_coerce_float(item[1]), str(item[0])),
+    )
+    return f"{top_key}: {_coerce_float(top_count):.0f}"
+
+
+def _format_best_parameter_values(summary: dict[str, object]) -> str:
+    values = summary.get("best_parameter_values")
+    if not isinstance(values, dict) or not values:
+        return "-"
+    parts = [
+        f"{key}={value}"
+        for key, value in sorted(values.items())
+    ]
+    return "; ".join(parts)
+
+
+def _format_parameter_recommendation_rationale(summary: dict[str, object]) -> str:
+    rationale = summary.get("parameter_recommendation_rationale")
+    if not isinstance(rationale, dict) or not rationale:
+        return "-"
+    parts = []
+    for parameter, payload in sorted(rationale.items()):
+        if not isinstance(payload, dict):
+            continue
+        recommended_value = payload.get("recommended_value", "-")
+        reason = _format_recommendation_reason(payload.get("reason", "-"))
+        best_by_metric = payload.get("best_value_by_metric", "-")
+        composite = _coerce_float(payload.get("average_composite_score", 0.0))
+        gate_rate = _coerce_float(payload.get("gate_passing_rate", 0.0))
+        metric_note = ""
+        if not payload.get("is_also_best_by_metric", False):
+            metric_note = f", 排序指标最优={best_by_metric}"
+        parts.append(
+            f"{parameter}={recommended_value} ({reason}{metric_note}, 综合分={composite:.3f}, 通过率={gate_rate:.2%})"
+        )
+    return "; ".join(parts) if parts else "-"
+
+
+def _format_parameter_recommendation_summary(summary: dict[str, object]) -> str:
+    value = summary.get("parameter_recommendation_summary")
+    if not isinstance(value, str) or not value:
+        return "-"
+    return _format_recommendation_summary_text(value)
+
+
+def _format_recommendation_reason(reason: object) -> str:
+    reason_key = str(reason)
+    labels = {
+        "highest_average_composite_score": "平均综合分最高",
+    }
+    return labels.get(reason_key, reason_key)
+
+
+def _format_recommended_action_first(summary: dict[str, object]) -> str:
+    values = summary.get("recommended_actions")
+    if not isinstance(values, list) or not values:
+        return "-"
+    return _format_recommended_action_text(str(values[0]))
+
+
+def _format_recommendation_summary_text(value: str) -> str:
+    text = value.replace(
+        "Recommended parameter values by average composite score:",
+        "按平均综合分推荐参数：",
+    )
+    text = text.replace(
+        "Metric and composite recommendations diverge for:",
+        "排序指标最优与综合分推荐不一致：",
+    )
+    text = text.replace("composite ", "综合分 ")
+    text = text.replace("gate pass ", "闸门通过率 ")
+    text = text.replace("metric-best=", "排序指标最优=")
+    return text
+
+
+def _format_recommended_action_text(value: str) -> str:
+    translations = {
+        "Most parameter sets passed health gates; focus on robustness, live trading assumptions, and out-of-sample validation.": "多数参数组合通过健康闸门；下一步重点检查稳健性、实盘交易假设和样本外验证。",
+        "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.": "风险闸门频繁失败：降低持仓集中度、提高现金缓冲、缩短调仓暴露，或加入回撤感知过滤。",
+        "Stability gates fail often: prefer parameter regions with smoother rolling returns and validate on longer walk-forward windows.": "稳定性闸门频繁失败：优先选择滚动收益更平滑的参数区域，并用更长 walk-forward 窗口验证。",
+        "Execution gates fail often: reduce volume participation, avoid illiquid names, increase cash buffer, or relax target turnover.": "执行闸门频繁失败：降低成交量参与率、避开低流动性标的、增加现金缓冲，或放宽目标换手。",
+        "Exposure gates fail often: tighten max_position_weight or add group constraints to reduce concentration.": "暴露闸门频繁失败：收紧 max_position_weight，或增加分组约束以降低集中度。",
+        "Attribution gates fail often: inspect return attribution residuals before trusting parameter rankings.": "归因闸门频繁失败：在信任参数排名前，先检查收益归因残差。",
+        "Turnover gates fail often: lengthen rebalance interval, require stronger signal changes, or raise holding-period constraints.": "换手闸门频繁失败：拉长调仓间隔、要求更强信号变化，或提高持仓周期约束。",
+        "Factor gates fail often: remove redundant factors, lower highly correlated factor weights, or add orthogonal signals.": "因子闸门频繁失败：移除冗余因子、降低高相关因子权重，或加入正交信号。",
+        "Ledger gates fail often: resolve accounting reconciliation issues before comparing parameter performance.": "对账闸门频繁失败：先解决账务对齐问题，再比较参数表现。",
+    }
+    translated = translations.get(value)
+    if translated is not None:
+        return translated
+    prefix = "Most common failed gate is '"
+    suffix = "'; review the single-run strategy_health_gates.csv files for affected runs first."
+    if value.startswith(prefix) and value.endswith(suffix):
+        gate_name = value[len(prefix):-len(suffix)]
+        return f"最常失败闸门是“{gate_name}”；请优先查看受影响运行的 strategy_health_gates.csv。"
+    return value
+
+
+def _format_list_first(summary: dict[str, object], key: str) -> str:
+    values = summary.get(key)
+    if not isinstance(values, list) or not values:
+        return "-"
         return
 
     available_metrics = sorted(

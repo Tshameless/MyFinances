@@ -5,6 +5,7 @@ from datetime import date
 from math import sqrt
 
 from .config import BacktestConfig
+from .exceptions import InsufficientDataError
 from .execution_model import (
     calculate_account_equity,
     is_buyable,
@@ -44,7 +45,7 @@ def run_backtest(
     config = config or BacktestConfig()
     history_by_symbol = group_prices_by_symbol(bars)
     if not history_by_symbol:
-        raise ValueError("No price data available for backtest.")
+        raise InsufficientDataError("No price data available for backtest.")
 
     if config.forward_fill_suspended_bars:
         calendar, aligned_history = align_history_with_suspended_fills(history_by_symbol)
@@ -53,7 +54,7 @@ def run_backtest(
         aligned_history = align_history_to_calendar(history_by_symbol, calendar)
     common_length = len(calendar)
     if common_length < config.max_lookback + config.execution_delay_days + 2:
-        raise ValueError("Not enough history to run the strategy.")
+        raise InsufficientDataError("Not enough history to run the strategy.")
 
     cash = config.initial_cash
     positions: dict[str, int] = {}
@@ -214,7 +215,7 @@ def _factor_records_for_date(
     if config.score_source == "builtin":
         external_scores = None
     if config.score_source == "external" and external_scores is None:
-        raise ValueError(
+        raise InsufficientDataError(
             f"External factor scores are required for {current_date.isoformat()} "
             "when score_source is 'external'."
         )
@@ -394,7 +395,7 @@ def _calculate_metrics(
     rebalance_count: int,
 ) -> BacktestMetrics:
     if not equity_curve:
-        raise ValueError("Equity curve is too short to calculate metrics.")
+        raise InsufficientDataError("Equity curve is too short to calculate metrics.")
 
     daily_returns = [point.daily_return for point in equity_curve]
     peak = initial_cash
@@ -458,7 +459,7 @@ def _build_benchmark_curve(
     ]
     if missing_dates:
         missing_preview = ", ".join(missing_dates[:5])
-        raise ValueError(f"Benchmark data missing required dates: {missing_preview}")
+        raise InsufficientDataError(f"Benchmark data missing required dates: {missing_preview}")
 
     equity = initial_cash
     benchmark_curve: list[BenchmarkPoint] = []
@@ -485,7 +486,7 @@ def _attach_benchmark_metrics(
     benchmark_curve: list[BenchmarkPoint],
 ) -> BacktestMetrics:
     if len(equity_curve) != len(benchmark_curve):
-        raise ValueError("Benchmark curve length does not match portfolio curve length.")
+        raise InsufficientDataError("Benchmark curve length does not match portfolio curve length.")
 
     initial_benchmark_equity = benchmark_curve[0].equity / (1.0 + benchmark_curve[0].daily_return)
     benchmark_total_return = benchmark_curve[-1].equity / initial_benchmark_equity - 1.0

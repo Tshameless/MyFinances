@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
@@ -11,6 +12,8 @@ from datetime import date, datetime
 from itertools import product
 from pathlib import Path
 from typing import Mapping, TypedDict, TypeVar, cast
+
+logger = logging.getLogger(__name__)
 
 from .analysis import (
     build_batch_stability_analysis,
@@ -274,6 +277,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
@@ -341,36 +348,36 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         config_sources=_build_config_sources(args),
     )
     print(f"净值曲线 CSV 已保存：{artifact_paths['equity_curve_csv']}")
-    print(f"调仓日志 CSV 已保存：{artifact_paths['rebalance_log_csv']}")
-    print(f"每日持仓账本 CSV 已保存：{artifact_paths['positions_csv']}")
-    print(f"逐笔交易明细 CSV 已保存：{artifact_paths['trades_csv']}")
-    print(f"未成交原因 CSV 已保存：{artifact_paths['trade_attempts_csv']}")
-    print(f"因子评分明细 CSV 已保存：{artifact_paths['factor_scores_csv']}")
-    print(f"因子 IC 分析 CSV 已保存：{artifact_paths['factor_ic_csv']}")
-    print(f"因子分组收益 CSV 已保存：{artifact_paths['factor_group_returns_csv']}")
-    print(f"因子衰减分析 CSV 已保存：{artifact_paths['factor_decay_csv']}")
-    print(f"因子相关性矩阵 CSV 已保存：{artifact_paths['factor_correlation_csv']}")
-    print(f"回撤序列 CSV 已保存：{artifact_paths['drawdown_csv']}")
-    print(f"月度收益 CSV 已保存：{artifact_paths['monthly_returns_csv']}")
-    print(f"滚动风险 CSV 已保存：{artifact_paths['rolling_risk_csv']}")
-    print(f"相对基准表现 CSV 已保存：{artifact_paths['relative_performance_csv']}")
-    print(f"执行质量 CSV 已保存：{artifact_paths['execution_quality_csv']}")
-    print(f"持仓暴露 CSV 已保存：{artifact_paths['exposure_csv']}")
-    print(f"分组暴露 CSV 已保存：{artifact_paths['group_exposure_csv']}")
-    print(f"收益归因 CSV 已保存：{artifact_paths['return_attribution_csv']}")
-    print(f"成本归因 CSV 已保存：{artifact_paths['cost_attribution_csv']}")
-    print(f"盈亏对账 CSV 已保存：{artifact_paths['pnl_ledger_csv']}")
-    print(f"策略健康诊断 CSV 已保存：{artifact_paths['strategy_health_csv']}")
-    print(f"策略风险闸门 CSV 已保存：{artifact_paths['strategy_health_gates_csv']}")
-    print(f"绩效摘要 CSV 已保存：{artifact_paths['performance_summary_csv']}")
-    print(f"绩效摘要 JSON 已保存：{artifact_paths['performance_summary_json']}")
-    print(f"最终生效配置 JSON 已保存：{artifact_paths['config_effective_json']}")
-    print(f"配置来源 JSON 已保存：{artifact_paths['config_sources_json']}")
-    print(f"运行清单 JSON 已保存：{artifact_paths['run_manifest_json']}")
+    logger.info("调仓日志 CSV: %s", artifact_paths['rebalance_log_csv'])
+    logger.info("每日持仓账本 CSV: %s", artifact_paths['positions_csv'])
+    logger.info("逐笔交易明细 CSV: %s", artifact_paths['trades_csv'])
+    logger.info("未成交原因 CSV: %s", artifact_paths['trade_attempts_csv'])
+    logger.info("因子评分明细 CSV: %s", artifact_paths['factor_scores_csv'])
+    logger.info("因子 IC 分析 CSV: %s", artifact_paths['factor_ic_csv'])
+    logger.info("因子分组收益 CSV: %s", artifact_paths['factor_group_returns_csv'])
+    logger.info("因子衰减分析 CSV: %s", artifact_paths['factor_decay_csv'])
+    logger.info("因子相关性矩阵 CSV: %s", artifact_paths['factor_correlation_csv'])
+    logger.info("回撤序列 CSV: %s", artifact_paths['drawdown_csv'])
+    logger.info("月度收益 CSV: %s", artifact_paths['monthly_returns_csv'])
+    logger.info("滚动风险 CSV: %s", artifact_paths['rolling_risk_csv'])
+    logger.info("相对基准表现 CSV: %s", artifact_paths['relative_performance_csv'])
+    logger.info("执行质量 CSV: %s", artifact_paths['execution_quality_csv'])
+    logger.info("持仓暴露 CSV: %s", artifact_paths['exposure_csv'])
+    logger.info("分组暴露 CSV: %s", artifact_paths['group_exposure_csv'])
+    logger.info("收益归因 CSV: %s", artifact_paths['return_attribution_csv'])
+    logger.info("成本归因 CSV: %s", artifact_paths['cost_attribution_csv'])
+    logger.info("盈亏对账 CSV: %s", artifact_paths['pnl_ledger_csv'])
+    logger.info("策略健康诊断 CSV: %s", artifact_paths['strategy_health_csv'])
+    logger.info("策略风险闸门 CSV: %s", artifact_paths['strategy_health_gates_csv'])
+    logger.info("绩效摘要 CSV: %s", artifact_paths['performance_summary_csv'])
+    logger.info("绩效摘要 JSON: %s", artifact_paths['performance_summary_json'])
+    logger.info("最终生效配置 JSON: %s", artifact_paths['config_effective_json'])
+    logger.info("配置来源 JSON: %s", artifact_paths['config_sources_json'])
+    logger.info("运行清单 JSON: %s", artifact_paths['run_manifest_json'])
     print(f"净值图 SVG 已保存：{artifact_paths['equity_curve_svg']}")
     print(f"HTML 报告已保存：{artifact_paths['report_html']}")
-    print(f"停牌分析 CSV 已保存：{artifact_paths['suspension_analysis_csv']}")
-    print(f"停牌日汇总 CSV 已保存：{artifact_paths['suspension_daily_csv']}")
+    logger.info("停牌分析 CSV: %s", artifact_paths['suspension_analysis_csv'])
+    logger.info("停牌日汇总 CSV: %s", artifact_paths['suspension_daily_csv'])
 
 
 def _run_sweep(
@@ -492,11 +499,11 @@ def _run_walk_forward(
     for window_number, (start_date, end_date) in enumerate(windows, start=1):
         window_id = f"window_{window_number:03d}"
         run_output_dir = walk_output_dir / window_id
-        config_kwargs = _config_to_kwargs(base_config)
+        config_kwargs = base_config.to_dict()
         config_kwargs["start_date"] = start_date
         config_kwargs["end_date"] = end_date
         config_kwargs["output_dir"] = run_output_dir
-        run_config = _build_config_from_mapping(config_kwargs)
+        run_config = BacktestConfig.from_dict(config_kwargs)
         window_bars = _filter_bars_by_date_range(
             bars,
             start_date=start_date,
@@ -571,10 +578,10 @@ def _run_sweep_case(
 ) -> dict[str, object]:
     run_id = f"run_{run_number:03d}"
     run_output_dir = batch_output_dir / run_id
-    config_kwargs = _config_to_kwargs(base_config)
+    config_kwargs = base_config.to_dict()
     config_kwargs.update(override_values)
     config_kwargs["output_dir"] = run_output_dir
-    run_config = _build_config_from_mapping(config_kwargs)
+    run_config = BacktestConfig.from_dict(config_kwargs)
     result = run_backtest(
         bars,
         run_config,
@@ -711,12 +718,12 @@ def _run_walk_forward_optimization(
             raise ValueError(f"No train candidate completed for {window_id}.")
 
         test_output_dir = optimize_output_dir / window_id / "test"
-        test_config_kwargs = _config_to_kwargs(base_config)
+        test_config_kwargs = base_config.to_dict()
         test_config_kwargs.update(best_overrides)
         test_config_kwargs["start_date"] = test_start
         test_config_kwargs["end_date"] = test_end
         test_config_kwargs["output_dir"] = test_output_dir
-        test_config = _build_config_from_mapping(test_config_kwargs)
+        test_config = BacktestConfig.from_dict(test_config_kwargs)
         test_result = run_backtest(
             test_bars,
             test_config,
@@ -773,10 +780,10 @@ def _run_walk_forward_optimization(
             "walk_forward_optimization_json": paths["walk_forward_optimization_json"],
         },
     )
-    print(f"Walk-forward 优化完成，共运行 {len(rows)} 个训练/测试窗口。")
-    print(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
-    print(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
-    print(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
+    logger.info(f"Walk-forward 优化完成，共运行 {len(rows)} 个训练/测试窗口。")
+    logger.info(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
+    logger.info(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
+    logger.info(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
 
 
 def _run_walk_forward_train_candidate(
@@ -790,12 +797,12 @@ def _run_walk_forward_train_candidate(
     train_end: date,
     override_values: dict[str, object],
 ) -> _TrainCandidateResult:
-    config_kwargs = _config_to_kwargs(base_config)
+    config_kwargs = base_config.to_dict()
     config_kwargs.update(override_values)
     config_kwargs["start_date"] = train_start
     config_kwargs["end_date"] = train_end
     config_kwargs["output_dir"] = train_output_dir
-    train_config = _build_config_from_mapping(config_kwargs)
+    train_config = BacktestConfig.from_dict(config_kwargs)
     train_result = run_backtest(
         train_bars,
         train_config,
@@ -1059,7 +1066,7 @@ def _build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     if not has_explicit_output_dir:
         config_kwargs["output_dir"] = _build_default_run_output_dir(config_kwargs)
 
-    return _build_config_from_mapping(config_kwargs)
+    return BacktestConfig.from_dict(config_kwargs)
 
 
 def _parse_factor_weight_overrides(entries: list[str]) -> dict[str, float]:
@@ -1154,7 +1161,7 @@ def _build_config_sources(
         cli_overrides.add("factor_weights")
 
     field_sources: dict[str, str] = {}
-    field_names = sorted(set(_config_to_kwargs(BacktestConfig()).keys()) | set(toml_overrides) | cli_overrides)
+    field_names = sorted(set(BacktestConfig().to_dict().keys()) | set(toml_overrides) | cli_overrides)
     for field_name in field_names:
         if sweep_overrides and field_name in sweep_overrides:
             field_sources[field_name] = "sweep_override"
