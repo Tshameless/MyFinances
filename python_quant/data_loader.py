@@ -4,6 +4,14 @@ import csv
 from datetime import date, datetime
 from math import isfinite
 from pathlib import Path
+
+from .exceptions import DataValidationError
+from .market import BENCHMARK_SYMBOL, is_a_share_symbol
+from .models import PriceBar
+
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%Y/%m/%d",
     "%Y%m%d",
 )
 

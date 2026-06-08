@@ -341,8 +341,12 @@ def _factor_group_summary(
             for group_index in range(1, group_count + 1)
             if str(group_index) in average_by_group
         ]
-        monotonic_up = all(left <= right for left, right in zip(values_in_order, values_in_order[1:]))
-        monotonic_down = all(left >= right for left, right in zip(values_in_order, values_in_order[1:]))
+        monotonic_up = all(
+            left <= right for left, right in zip(values_in_order, values_in_order[1:], strict=False)
+        )
+        monotonic_down = all(
+            left >= right for left, right in zip(values_in_order, values_in_order[1:], strict=False)
+        )
         summary[factor_name] = {
             "periods": len({row["date"] for row in factor_rows}),
             "average_by_group": average_by_group,

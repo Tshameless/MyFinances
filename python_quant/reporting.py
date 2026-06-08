@@ -28,6 +28,11 @@ from .reporting_csv import (
     save_trade_attempts_csv,
     save_trades_csv,
 )
+from .reporting_rank import (
+    float_metric,
+    sort_rows_by_metric,
+    validate_rank_metric,
+)
 
 _ZH_LABELS = {
     "date": "日期",
@@ -841,8 +846,8 @@ def save_batch_rankings(
     recommended_parameters: dict[str, object] | None = None,
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    _validate_rank_metric(rows, rank_by)
-    ranked_rows = _sort_rows_by_metric(rows, rank_by)
+    validate_rank_metric(rows, rank_by)
+    ranked_rows = sort_rows_by_metric(rows, rank_by)
     for index, row in enumerate(ranked_rows, start=1):
         row["rank"] = index
         _attach_batch_leaderboard_diagnostics(row, recommended_parameters or {})
@@ -894,7 +899,7 @@ def _attach_batch_leaderboard_diagnostics(
 ) -> None:
     failed_categories = _split_delimited_text(row.get("failed_gate_categories"))
     failed_names = _split_delimited_text(row.get("failed_gate_names"))
-    row["failed_gate_count"] = max(len(failed_names), _float_metric(row, "gate_failures", default=0.0))
+    row["failed_gate_count"] = max(len(failed_names), float_metric(row, "gate_failures", default=0.0))
     row["primary_failed_gate_category"] = failed_categories[0] if failed_categories else ""
     row["primary_failed_gate_name"] = failed_names[0] if failed_names else ""
     row["failed_gate_summary"] = _failed_gate_summary(failed_categories, failed_names)
@@ -1017,10 +1022,10 @@ def save_batch_chart_svg(
     metric: str = "annualized_return",
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    _validate_rank_metric(rows, metric)
+    validate_rank_metric(rows, metric)
     target_path = output_dir / f"batch_{metric}.svg"
     points = [
-        (_format_run_label(row, row_index), _float_metric(row, metric))
+        (_format_run_label(row, row_index), float_metric(row, metric))
         for row_index, row in enumerate(rows, start=1)
         if metric in row and row[metric] not in ("", None)
     ]
@@ -1053,11 +1058,11 @@ def save_batch_heatmap_svg(
     metric: str,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    _validate_rank_metric(rows, metric)
+    validate_rank_metric(rows, metric)
     target_path = output_dir / f"batch_{metric}_heatmap.svg"
 
     points = [
-        (str(row[x_field]), str(row[y_field]), _float_metric(row, metric))
+        (str(row[x_field]), str(row[y_field]), float_metric(row, metric))
         for row in rows
         if x_field in row and y_field in row and metric in row
     ]
@@ -1079,9 +1084,9 @@ def save_batch_report_html(
     artifacts: dict[str, Path],
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    _validate_rank_metric(rows, rank_by)
+    validate_rank_metric(rows, rank_by)
     target_path = output_dir / "batch_report.html"
-    sorted_rows = _sort_rows_by_metric(rows, rank_by)
+    sorted_rows = sort_rows_by_metric(rows, rank_by)
     top_rows = sorted_rows[:10]
     best_row = sorted_rows[0] if sorted_rows else None
     headers = [
@@ -1923,201 +1928,6 @@ def _format_factor_pair(summary: dict[str, object], key: str) -> str:
     if not isinstance(factor, str) or not isinstance(compared_factor, str):
         return "-"
     correlation = pair.get("average_correlation", pair.get("average_rank_correlation"))
-    return [
-        ("策略健康评分", _format_summary_number(strategy_health_summary, "score")),
-        ("策略健康等级", _format_summary_field(strategy_health_summary, "grade")),
-        ("策略闸门状态", _format_summary_field(strategy_health_summary, "gate_status")),
-        ("策略闸门失败数", _format_summary_number(strategy_health_summary, "gate_failures", decimals=0)),
-        ("策略预警数量", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
-        ("因子相关风险", _format_summary_pct(strategy_health_summary, "strongest_factor_correlation")),
-        ("最强相关因子对", _format_summary_field(strategy_health_summary, "strongest_factor_correlation_pair")),
-        ("最大回撤日期", _format_summary_field(drawdown_summary, "max_drawdown_date")),
-        ("最长水下天数", _format_summary_number(drawdown_summary, "longest_underwater_days")),
-        ("回撤是否修复", _format_summary_bool(drawdown_summary, "is_recovered")),
-        ("滚动最差收益", _format_summary_pct(rolling_risk_summary, "worst_rolling_return")),
-        ("滚动最差收益日", _format_summary_field(rolling_risk_summary, "worst_rolling_return_date")),
-        ("滚动平均夏普", _format_summary_number(rolling_risk_summary, "average_rolling_sharpe")),
-        ("滚动最大回撤", _format_summary_pct(rolling_risk_summary, "worst_rolling_drawdown")),
-        ("平均股票仓位", _format_summary_pct(exposure_summary, "average_stock_weight")),
-        ("平均持仓数量", _format_summary_number(exposure_summary, "average_holding_count")),
-        ("有效持仓数", _format_summary_number(exposure_summary, "average_effective_position_count")),
-        ("最大单票权重", _format_summary_pct(exposure_summary, "max_largest_position_weight")),
-        ("最大持仓集中度", _format_summary_number(exposure_summary, "max_hhi_concentration")),
-        ("最大风险贡献标的", _format_summary_field(exposure_summary, "max_largest_risk_contribution_symbol")),
-        ("最大风险贡献占比", _format_summary_pct(exposure_summary, "max_largest_risk_contribution_share")),
-        ("最大分组风险贡献", _format_summary_field(group_exposure_summary, "max_group_risk_contribution_group")),
-        ("最大分组贡献占比", _format_summary_pct(group_exposure_summary, "max_group_risk_contribution_share")),
-        ("总分平均IC", _format_nested_summary_number(factor_ic_summary, "total_score", "mean_ic")),
-        ("总分ICIR", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_ir")),
-        ("总分IC t值", _format_nested_summary_number(factor_ic_summary, "total_score", "ic_t_stat")),
-        ("总分稳定性", _format_nested_summary_number(factor_decay_summary, "total_score", "average_rank_correlation")),
-        ("入选留存率", _format_nested_summary_pct(factor_decay_summary, "total_score", "average_selected_retention_rate")),
-        ("最强因子相关", _format_factor_pair(factor_correlation_summary, "strongest_pair")),
-        ("最强排序相关", _format_factor_pair(factor_correlation_summary, "strongest_rank_pair")),
-        ("累计主动收益", _format_summary_pct(relative_summary, "total_active_return")),
-        ("年化Alpha", _format_summary_pct(relative_summary, "annualized_alpha")),
-        ("Beta", _format_summary_number(relative_summary, "beta")),
-        ("R平方", _format_summary_pct(relative_summary, "r_squared")),
-        ("主动胜率", _format_summary_pct(relative_summary, "active_win_rate")),
-        ("最差主动日", _format_summary_field(relative_summary, "worst_active_return_date")),
-        ("主动最大回撤", _format_summary_pct(relative_summary, "max_active_drawdown")),
-        ("成交率", _format_summary_pct(execution_summary, "fill_rate")),
-        ("执行成本", _format_summary_bps(execution_summary, "cost_bps")),
-        ("主要执行约束", _format_summary_field(execution_summary, "dominant_constraint_category")),
-        ("市场约束拒单占比", _format_summary_pct(execution_summary, "market_constraint_rate")),
-        ("最严重执行阻塞日", _format_summary_field(execution_summary, "worst_constraint_date")),
-        ("阻塞日主要约束", _format_summary_field(execution_summary, "worst_constraint_dominant_category")),
-        ("收益归因残差", _format_summary_pct(return_attribution_summary, "total_residual_return")),
-        ("成本拖累", _format_summary_pct(return_attribution_summary, "total_cost_drag")),
-        ("总成本", _format_summary_money(cost_attribution_summary, "total_cost")),
-        ("固定滑点成本", _format_summary_money(cost_attribution_summary, "fixed_slippage_cost")),
-        ("市场冲击成本", _format_summary_money(cost_attribution_summary, "market_impact_cost")),
-        ("成本归因 bps", _format_summary_bps(cost_attribution_summary, "cost_bps")),
-        ("最大对账差异", _format_summary_money(pnl_ledger_summary, "max_abs_reconciliation_difference")),
-        ("对账状态", _format_reconciliation_status(pnl_ledger_summary)),
-    ]
-
-
-def _build_trading_behavior_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
-    turnover_summary = _load_artifact_summary(artifacts, "turnover_analysis_json")
-    strategy_health_summary = _load_artifact_summary(artifacts, "strategy_health_json")
-    average_entries = _summary_float(turnover_summary, "average_entries_per_rebalance")
-    average_exits = _summary_float(turnover_summary, "average_exits_per_rebalance")
-    average_rebalance_changes = (
-        None if average_entries is None or average_exits is None else average_entries + average_exits
-    )
-    return [
-        ("Average entries per rebalance", _format_summary_number(turnover_summary, "average_entries_per_rebalance")),
-        ("Average exits per rebalance", _format_summary_number(turnover_summary, "average_exits_per_rebalance")),
-        ("Average rebalance changes", _format_optional_number(average_rebalance_changes)),
-        ("Realized holding periods", _format_summary_number(turnover_summary, "realized_holding_count", decimals=0)),
-        ("Average realized holding days", _format_summary_number(turnover_summary, "average_realized_holding_days")),
-        ("Open positions after final bar", _format_summary_number(turnover_summary, "open_position_count", decimals=0)),
-        ("Turnover gate status", _format_summary_field(strategy_health_summary, "gate_status")),
-        ("Health warnings", _format_summary_number(strategy_health_summary, "warnings", decimals=0)),
-    ]
-
-
-def _build_data_quality_rows(artifacts: dict[str, Path]) -> list[tuple[str, str]]:
-    summary = _load_artifact_summary(artifacts, "price_data_quality_report_json")
-    return [
-        ("Price rows", _format_summary_number(summary, "row_count", decimals=0)),
-        ("Symbols", _format_summary_number(summary, "symbol_count", decimals=0)),
-        ("Trading dates", _format_summary_number(summary, "date_count", decimals=0)),
-        ("Date range", _format_date_range(summary)),
-        ("Symbols missing adjusted close", _format_summary_number(summary, "symbols_with_missing_adjusted_close", decimals=0)),
-        ("Execution price field", _format_summary_field(summary, "execution_price_field")),
-        ("Missing execution price rows", _format_summary_number(summary, "missing_execution_price_rows", decimals=0)),
-        ("Execution price coverage", _format_summary_pct(summary, "execution_price_coverage_rate")),
-        ("Missing open rows", _format_summary_number(summary, "missing_open_rows", decimals=0)),
-        ("Missing VWAP rows", _format_summary_number(summary, "missing_vwap_rows", decimals=0)),
-        ("Suspended rows", _format_summary_number(summary, "suspended_days", decimals=0)),
-        ("Limit-up rows", _format_summary_number(summary, "limit_up_days", decimals=0)),
-        ("Limit-down rows", _format_summary_number(summary, "limit_down_days", decimals=0)),
-        ("ST rows", _format_summary_number(summary, "st_days", decimals=0)),
-        ("Custom limit-rate rows", _format_summary_number(summary, "custom_limit_rate_days", decimals=0)),
-        ("Untradable rows", _format_summary_number(summary, "untradable_days", decimals=0)),
-        ("Cannot-buy rows", _format_summary_number(summary, "cannot_buy_days", decimals=0)),
-        ("Cannot-sell rows", _format_summary_number(summary, "cannot_sell_days", decimals=0)),
-    ]
-
-
-def _load_artifact_summary(artifacts: dict[str, Path], artifact_key: str) -> dict[str, object]:
-    path = artifacts.get(artifact_key)
-    if path is None or not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    summary = payload.get("summary")
-    return summary if isinstance(summary, dict) else {}
-
-
-def _format_summary_field(summary: dict[str, object], key: str) -> str:
-    value = summary.get(key)
-    return "-" if value in (None, "") else str(value)
-
-
-def _format_date_range(summary: dict[str, object]) -> str:
-    start_date = _format_summary_field(summary, "start_date")
-    end_date = _format_summary_field(summary, "end_date")
-    if start_date == "-" and end_date == "-":
-        return "-"
-    return f"{start_date} to {end_date}"
-
-
-def _summary_float(summary: dict[str, object], key: str) -> float | None:
-    value = summary.get(key)
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, int | float):
-        return float(value)
-    return None
-
-
-def _format_summary_number(
-    summary: dict[str, object],
-    key: str,
-    *,
-    decimals: int = 2,
-) -> str:
-    value = summary.get(key)
-    if not isinstance(value, int | float):
-        return "-"
-    return f"{value:,.{decimals}f}"
-
-
-def _format_summary_bool(summary: dict[str, object], key: str) -> str:
-    value = summary.get(key)
-    if value is True:
-        return "是"
-    if value is False:
-        return "否"
-    return "-"
-
-
-def _format_nested_summary_number(
-    summary: dict[str, object],
-    section: str,
-    key: str,
-    *,
-    decimals: int = 3,
-) -> str:
-    section_payload = summary.get(section)
-    if not isinstance(section_payload, dict):
-        return "-"
-    value = section_payload.get(key)
-    if not isinstance(value, int | float):
-        return "-"
-    return f"{value:,.{decimals}f}"
-
-
-def _format_nested_summary_pct(
-    summary: dict[str, object],
-    section: str,
-    key: str,
-) -> str:
-    section_payload = summary.get(section)
-    if not isinstance(section_payload, dict):
-        return "-"
-    value = section_payload.get(key)
-    if not isinstance(value, int | float):
-        return "-"
-    return f"{value:.2%}"
-
-
-def _format_factor_pair(summary: dict[str, object], key: str) -> str:
-    pair = summary.get(key)
-    if not isinstance(pair, dict):
-        return "-"
-    factor = pair.get("factor")
-    compared_factor = pair.get("compared_factor")
-    if not isinstance(factor, str) or not isinstance(compared_factor, str):
-        return "-"
-    correlation = pair.get("average_correlation", pair.get("average_rank_correlation"))
     if not isinstance(correlation, int | float):
         return f"{factor} vs {compared_factor}"
     return f"{factor} vs {compared_factor}: {correlation:.3f}"
@@ -2204,49 +2014,6 @@ def _build_html_table_rows(rows: list[tuple[str, str]]) -> str:
         f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
         for label, value in rows
     )
-
-
-def _sort_rows_by_metric(rows: list[dict[str, object]], rank_by: str) -> list[dict[str, object]]:
-    return sorted(
-        rows,
-        key=lambda row: (
-            _gate_rank_value(row),
-            -_float_metric(row, "gate_failures", default=0.0),
-            -_float_metric(row, "critical_warnings", default=0.0),
-            -_float_metric(row, "health_warnings", default=0.0),
-            _float_metric(row, rank_by, default=float("-inf")),
-        ),
-        reverse=True,
-    )
-
-
-def _gate_rank_value(row: dict[str, object]) -> float:
-    gate_status = str(row.get("gate_status", "")).lower()
-    if gate_status == "pass":
-        return 1.0
-    if gate_status == "":
-        return 0.5
-    return 0.0
-
-
-def _validate_rank_metric(rows: list[dict[str, object]], rank_by: str) -> None:
-    if not rows:
-        return
-
-    available_metrics = sorted(
-        {
-            key
-            for row in rows
-            for key, value in row.items()
-            if _is_numeric_metric_value(value)
-        }
-    )
-    if rank_by not in available_metrics:
-        available_text = ", ".join(available_metrics) or "<none>"
-        raise ValueError(
-            f"Rank metric '{rank_by}' is not available. "
-            f"Available numeric metrics: {available_text}."
-        )
 
 
 def _format_count_map_top(summary: dict[str, object], key: str) -> str:
@@ -2351,44 +2118,6 @@ def _format_recommended_action_text(value: str) -> str:
         gate_name = value[len(prefix):-len(suffix)]
         return f"最常失败闸门是“{gate_name}”；请优先查看受影响运行的 strategy_health_gates.csv。"
     return value
-
-
-def _format_list_first(summary: dict[str, object], key: str) -> str:
-    values = summary.get(key)
-    if not isinstance(values, list) or not values:
-        return "-"
-        return
-
-    available_metrics = sorted(
-        {
-            key
-            for row in rows
-            for key, value in row.items()
-            if _is_numeric_metric_value(value)
-        }
-    )
-    if rank_by not in available_metrics:
-        available_text = ", ".join(available_metrics) or "<none>"
-        raise ValueError(
-            f"Rank metric '{rank_by}' is not available. "
-            f"Available numeric metrics: {available_text}."
-        )
-
-
-def _is_numeric_metric_value(value: object) -> bool:
-    if value in ("", None):
-        return False
-    if isinstance(value, bool):
-        return True
-    if isinstance(value, (int, float)):
-        return True
-    if isinstance(value, str):
-        try:
-            float(value)
-        except ValueError:
-            return False
-        return True
-    return False
 
 
 def _serialize_config(config: BacktestConfig) -> dict[str, object]:
@@ -2573,24 +2302,6 @@ def load_symbol_group_mapping(symbol_group_csv: Path | None) -> dict[str, str]:
                     raise ValueError(f"Unsupported A-share symbol format: {symbol}")
                 mapping[symbol] = group
     return mapping
-
-
-def _float_metric(
-    row: dict[str, object],
-    key: str,
-    *,
-    default: float | None = None,
-) -> float:
-    value = row.get(key)
-    if value in ("", None):
-        if default is not None:
-            return default
-        raise ValueError(f"Metric '{key}' is missing from row.")
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float, str)):
-        return float(value)
-    raise TypeError(f"Metric '{key}' must be numeric, got {type(value).__name__}.")
 
 
 def _display_label(key: str) -> str:

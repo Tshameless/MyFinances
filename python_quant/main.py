@@ -6,14 +6,12 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from itertools import product
 from pathlib import Path
-from typing import Mapping, TypedDict, TypeVar, cast
-
-logger = logging.getLogger(__name__)
+from typing import TypedDict, cast
 
 from .analysis import (
     build_batch_stability_analysis,
@@ -65,8 +63,7 @@ from .run_outputs import persist_run_outputs
 from .sample_data import generate_demo_bars
 from .trading_rules import apply_inferred_limit_flags
 
-T = TypeVar("T")
-R = TypeVar("R")
+logger = logging.getLogger(__name__)
 
 
 class _TrainCandidateResult(TypedDict):
@@ -348,36 +345,39 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         config_sources=_build_config_sources(args),
     )
     print(f"净值曲线 CSV 已保存：{artifact_paths['equity_curve_csv']}")
-    logger.info("调仓日志 CSV: %s", artifact_paths['rebalance_log_csv'])
-    logger.info("每日持仓账本 CSV: %s", artifact_paths['positions_csv'])
-    logger.info("逐笔交易明细 CSV: %s", artifact_paths['trades_csv'])
-    logger.info("未成交原因 CSV: %s", artifact_paths['trade_attempts_csv'])
-    logger.info("因子评分明细 CSV: %s", artifact_paths['factor_scores_csv'])
-    logger.info("因子 IC 分析 CSV: %s", artifact_paths['factor_ic_csv'])
-    logger.info("因子分组收益 CSV: %s", artifact_paths['factor_group_returns_csv'])
-    logger.info("因子衰减分析 CSV: %s", artifact_paths['factor_decay_csv'])
-    logger.info("因子相关性矩阵 CSV: %s", artifact_paths['factor_correlation_csv'])
-    logger.info("回撤序列 CSV: %s", artifact_paths['drawdown_csv'])
-    logger.info("月度收益 CSV: %s", artifact_paths['monthly_returns_csv'])
-    logger.info("滚动风险 CSV: %s", artifact_paths['rolling_risk_csv'])
-    logger.info("相对基准表现 CSV: %s", artifact_paths['relative_performance_csv'])
-    logger.info("执行质量 CSV: %s", artifact_paths['execution_quality_csv'])
-    logger.info("持仓暴露 CSV: %s", artifact_paths['exposure_csv'])
-    logger.info("分组暴露 CSV: %s", artifact_paths['group_exposure_csv'])
-    logger.info("收益归因 CSV: %s", artifact_paths['return_attribution_csv'])
-    logger.info("成本归因 CSV: %s", artifact_paths['cost_attribution_csv'])
-    logger.info("盈亏对账 CSV: %s", artifact_paths['pnl_ledger_csv'])
-    logger.info("策略健康诊断 CSV: %s", artifact_paths['strategy_health_csv'])
-    logger.info("策略风险闸门 CSV: %s", artifact_paths['strategy_health_gates_csv'])
-    logger.info("绩效摘要 CSV: %s", artifact_paths['performance_summary_csv'])
-    logger.info("绩效摘要 JSON: %s", artifact_paths['performance_summary_json'])
-    logger.info("最终生效配置 JSON: %s", artifact_paths['config_effective_json'])
-    logger.info("配置来源 JSON: %s", artifact_paths['config_sources_json'])
-    logger.info("运行清单 JSON: %s", artifact_paths['run_manifest_json'])
+    for label, artifact_key in (
+        ("调仓日志 CSV", "rebalance_log_csv"),
+        ("每日持仓账本 CSV", "positions_csv"),
+        ("逐笔交易明细 CSV", "trades_csv"),
+        ("未成交原因 CSV", "trade_attempts_csv"),
+        ("因子评分明细 CSV", "factor_scores_csv"),
+        ("因子 IC 分析 CSV", "factor_ic_csv"),
+        ("因子分组收益 CSV", "factor_group_returns_csv"),
+        ("因子衰减分析 CSV", "factor_decay_csv"),
+        ("因子相关性矩阵 CSV", "factor_correlation_csv"),
+        ("回撤序列 CSV", "drawdown_csv"),
+        ("月度收益 CSV", "monthly_returns_csv"),
+        ("滚动风险 CSV", "rolling_risk_csv"),
+        ("相对基准表现 CSV", "relative_performance_csv"),
+        ("执行质量 CSV", "execution_quality_csv"),
+        ("持仓暴露 CSV", "exposure_csv"),
+        ("分组暴露 CSV", "group_exposure_csv"),
+        ("收益归因 CSV", "return_attribution_csv"),
+        ("成本归因 CSV", "cost_attribution_csv"),
+        ("盈亏对账 CSV", "pnl_ledger_csv"),
+        ("策略健康诊断 CSV", "strategy_health_csv"),
+        ("策略风险闸门 CSV", "strategy_health_gates_csv"),
+        ("绩效摘要 CSV", "performance_summary_csv"),
+        ("绩效摘要 JSON", "performance_summary_json"),
+        ("最终生效配置 JSON", "config_effective_json"),
+        ("配置来源 JSON", "config_sources_json"),
+        ("运行清单 JSON", "run_manifest_json"),
+    ):
+        print(f"{label} 已保存：{artifact_paths[artifact_key]}")
     print(f"净值图 SVG 已保存：{artifact_paths['equity_curve_svg']}")
     print(f"HTML 报告已保存：{artifact_paths['report_html']}")
-    logger.info("停牌分析 CSV: %s", artifact_paths['suspension_analysis_csv'])
-    logger.info("停牌日汇总 CSV: %s", artifact_paths['suspension_daily_csv'])
+    print(f"停牌分析 CSV 已保存：{artifact_paths['suspension_analysis_csv']}")
+    print(f"停牌日汇总 CSV 已保存：{artifact_paths['suspension_daily_csv']}")
 
 
 def _run_sweep(
@@ -607,7 +607,7 @@ def _run_sweep_case(
     )
 
 
-def _map_jobs(
+def _map_jobs[T, R](
     items: list[T],
     worker: Callable[[T], R],
     *,
@@ -682,12 +682,16 @@ def _run_walk_forward_optimization(
         best_overrides: dict[str, object] | None = None
         best_metric = float("-inf")
         best_candidate_key: tuple[float, float, float, float, float, float] | None = None
-        candidate_results: list[_TrainCandidateResult] = _map_jobs(
-            [
-                (combo_number, override_values)
-                for combo_number, override_values in enumerate(combinations, start=1)
-            ],
-            lambda item: _run_walk_forward_train_candidate(
+        def run_train_candidate(
+            item: tuple[int, dict[str, object]],
+            *,
+            train_bars: list[PriceBar] = train_bars,
+            train_benchmark_bars: list[PriceBar] | None = train_benchmark_bars,
+            window_id: str = window_id,
+            train_start: date = train_start,
+            train_end: date = train_end,
+        ) -> _TrainCandidateResult:
+            return _run_walk_forward_train_candidate(
                 args=args,
                 train_bars=train_bars,
                 train_benchmark_bars=train_benchmark_bars,
@@ -696,7 +700,14 @@ def _run_walk_forward_optimization(
                 train_start=train_start,
                 train_end=train_end,
                 override_values=item[1],
-            ),
+            )
+
+        candidate_results: list[_TrainCandidateResult] = _map_jobs(
+            [
+                (combo_number, override_values)
+                for combo_number, override_values in enumerate(combinations, start=1)
+            ],
+            run_train_candidate,
             jobs=args.jobs,
         )
         for candidate in candidate_results:
@@ -780,10 +791,10 @@ def _run_walk_forward_optimization(
             "walk_forward_optimization_json": paths["walk_forward_optimization_json"],
         },
     )
-    logger.info(f"Walk-forward 优化完成，共运行 {len(rows)} 个训练/测试窗口。")
-    logger.info(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
-    logger.info(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
-    logger.info(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
+    print(f"Walk-forward 优化完成，共运行 {len(rows)} 个训练/测试窗口。")
+    print(f"Walk-forward 优化 CSV 已保存：{paths['walk_forward_optimization_csv']}")
+    print(f"Walk-forward 优化 JSON 已保存：{paths['walk_forward_optimization_json']}")
+    print(f"Walk-forward 优化 HTML 报告已保存：{report_path}")
 
 
 def _run_walk_forward_train_candidate(

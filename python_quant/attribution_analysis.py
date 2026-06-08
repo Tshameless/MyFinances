@@ -29,7 +29,7 @@ def build_return_attribution_analysis(
     rows: list[dict[str, str | float]] = []
     residual_by_date: dict[str, float] = {}
     cost_drag_by_date: dict[str, float] = {}
-    for previous_date, current_date in zip(sorted_dates, sorted_dates[1:]):
+    for previous_date, current_date in zip(sorted_dates, sorted_dates[1:], strict=False):
         previous_positions = [
             point
             for point in positions_by_date.get(previous_date, [])
