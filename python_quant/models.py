@@ -1,6 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 
@@ -95,6 +95,8 @@ class FactorScoreRecord:
     normalized_low_volatility: float
     total_score: float
     selected: bool
+    raw_scores: dict[str, float] = field(default_factory=dict)
+    normalized_scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

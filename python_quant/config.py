@@ -17,7 +17,20 @@ DEFAULT_FACTOR_WEIGHTS = {
     "mean_reversion": 0.2,
     "low_volatility": 0.3,
 }
-SUPPORTED_FACTORS = frozenset(DEFAULT_FACTOR_WEIGHTS)
+class DynamicSupportedFactors:
+    def __contains__(self, item: object) -> bool:
+        from .factor_registry import get_registered_factors
+        return item in get_registered_factors()
+
+    def __sub__(self, other: object) -> set[str]:
+        from .factor_registry import get_registered_factors
+        return set(get_registered_factors()) - set(other)  # type: ignore
+
+    def __rsub__(self, other: object) -> set[str]:
+        from .factor_registry import get_registered_factors
+        return set(other) - set(get_registered_factors())  # type: ignore
+
+SUPPORTED_FACTORS = DynamicSupportedFactors()
 _BACKTEST_SIMPLE_FIELDS = frozenset(
     {
         "initial_cash",

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
@@ -7,6 +7,7 @@ from math import sqrt
 from .config import BacktestConfig
 from .market import price_for_bar
 from .models import FactorScoreRecord, PriceBar
+from .factor_registry import register_factor
 
 
 def group_prices_by_symbol(bars: list[PriceBar]) -> dict[str, list[PriceBar]]:
@@ -122,6 +123,24 @@ def _stddev(values: list[float]) -> float:
     return sqrt(max(variance, 0.0))
 
 
+@register_factor("momentum")
+def compute_momentum(closes: list[float], config: BacktestConfig) -> float:
+    momentum_close = closes[-1 - config.lookback_momentum]
+    return closes[-1] / momentum_close - 1.0
+
+
+@register_factor("mean_reversion")
+def compute_mean_reversion(closes: list[float], config: BacktestConfig) -> float:
+    mean_reversion_close = closes[-1 - config.lookback_mean_reversion]
+    return -(closes[-1] / mean_reversion_close - 1.0)
+
+
+@register_factor("low_volatility")
+def compute_low_volatility(closes: list[float], config: BacktestConfig) -> float:
+    trailing_returns = compute_daily_returns(closes[-1 - config.lookback_volatility :])
+    return -_stddev(trailing_returns)
+
+
 def calculate_factor_scores(
     history_by_symbol: dict[str, list[PriceBar]],
     up_to_index: int,
@@ -145,6 +164,8 @@ def calculate_factor_score_records(
     selected_symbols: set[str] | None = None,
 ) -> dict[str, FactorScoreRecord]:
     raw_scores: dict[str, dict[str, float]] = {}
+    from .factor_registry import get_registered_factors
+    registered_factors = get_registered_factors()
 
     for symbol, bars in history_by_symbol.items():
         if up_to_index >= len(bars):
@@ -154,25 +175,17 @@ def calculate_factor_score_records(
         if len(closes) <= config.max_lookback:
             continue
 
-        current_close = closes[-1]
-        momentum_close = closes[-1 - config.lookback_momentum]
-        mean_reversion_close = closes[-1 - config.lookback_mean_reversion]
-        trailing_returns = compute_daily_returns(closes[-1 - config.lookback_volatility :])
-
-        momentum = current_close / momentum_close - 1.0
-        mean_reversion = -(current_close / mean_reversion_close - 1.0)
-        low_volatility = -_stddev(trailing_returns)
-
-        raw_scores[symbol] = {
-            "momentum": momentum,
-            "mean_reversion": mean_reversion,
-            "low_volatility": low_volatility,
-        }
+        symbol_raw: dict[str, float] = {}
+        for factor_name in config.factor_weights.keys():
+            if factor_name in registered_factors:
+                calculator = registered_factors[factor_name]
+                symbol_raw[factor_name] = calculator(closes, config)
+        raw_scores[symbol] = symbol_raw
 
     normalized: dict[str, dict[str, float]] = {}
     factor_names = list(config.normalized_factor_weights.keys())
     for factor_name in factor_names:
-        factor_values = [metrics[factor_name] for metrics in raw_scores.values()]
+        factor_values = [metrics[factor_name] for metrics in raw_scores.values() if factor_name in metrics]
         if not factor_values:
             continue
 
@@ -182,11 +195,12 @@ def calculate_factor_score_records(
 
         for symbol, metrics in raw_scores.items():
             normalized.setdefault(symbol, {})
-            value = metrics[factor_name]
-            if spread == 0:
-                normalized[symbol][factor_name] = 0.5
-            else:
-                normalized[symbol][factor_name] = (value - factor_min) / spread
+            if factor_name in metrics:
+                value = metrics[factor_name]
+                if spread == 0:
+                    normalized[symbol][factor_name] = 0.5
+                else:
+                    normalized[symbol][factor_name] = (value - factor_min) / spread
 
     total_scores: dict[str, float] = {}
     for symbol, metrics in normalized.items():
@@ -203,13 +217,15 @@ def calculate_factor_score_records(
         records[symbol] = FactorScoreRecord(
             date=history_by_symbol[symbol][up_to_index].date,
             symbol=symbol,
-            momentum=raw["momentum"],
-            mean_reversion=raw["mean_reversion"],
-            low_volatility=raw["low_volatility"],
+            momentum=raw.get("momentum", 0.0),
+            mean_reversion=raw.get("mean_reversion", 0.0),
+            low_volatility=raw.get("low_volatility", 0.0),
             normalized_momentum=norm.get("momentum", 0.0),
             normalized_mean_reversion=norm.get("mean_reversion", 0.0),
             normalized_low_volatility=norm.get("low_volatility", 0.0),
             total_score=score,
             selected=symbol in selected_symbols,
+            raw_scores=raw,
+            normalized_scores=norm,
         )
     return records

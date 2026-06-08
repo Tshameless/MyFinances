@@ -5,6 +5,31 @@ from math import sqrt
 from .models import FactorScoreRecord, PositionPoint, PriceBar
 
 
+def _get_factor_value(record: FactorScoreRecord, factor_name: str) -> float:
+    if factor_name == "total_score":
+        return record.total_score
+    if hasattr(record, factor_name):
+        return float(getattr(record, factor_name))
+    if record.raw_scores and factor_name in record.raw_scores:
+        return float(record.raw_scores[factor_name])
+    return 0.0
+
+
+def _get_factor_names(factor_scores: list[FactorScoreRecord]) -> tuple[str, ...]:
+    dynamic_factors = set()
+    for record in factor_scores:
+        if record.raw_scores:
+            dynamic_factors.update(record.raw_scores.keys())
+    factor_names = []
+    for f in ("momentum", "mean_reversion", "low_volatility"):
+        factor_names.append(f)
+    for f in sorted(dynamic_factors):
+        if f not in factor_names:
+            factor_names.append(f)
+    factor_names.append("total_score")
+    return tuple(factor_names)
+
+
 def build_factor_ic_analysis(
     factor_scores: list[FactorScoreRecord],
     positions: list[PositionPoint],
@@ -20,7 +45,7 @@ def build_factor_ic_analysis(
         for index, current_date in enumerate(dates[:-1])
     }
     rows: list[dict[str, str | float | int]] = []
-    factor_names = ("momentum", "mean_reversion", "low_volatility", "total_score")
+    factor_names = _get_factor_names(factor_scores)
 
     for current_date, next_date in next_date_by_date.items():
         current_records = [record for record in factor_scores if record.date == current_date]
@@ -35,7 +60,7 @@ def build_factor_ic_analysis(
             continue
         for factor_name in factor_names:
             paired = [
-                (float(getattr(record, factor_name)), returns_by_symbol[record.symbol])
+                (_get_factor_value(record, factor_name), returns_by_symbol[record.symbol])
                 for record in current_records
                 if record.symbol in returns_by_symbol
             ]
@@ -101,7 +126,7 @@ def build_factor_group_return_analysis(
         current_date: dates[index + 1]
         for index, current_date in enumerate(dates[:-1])
     }
-    factor_names = ("momentum", "mean_reversion", "low_volatility", "total_score")
+    factor_names = _get_factor_names(factor_scores)
     rows: list[dict[str, str | float | int]] = []
 
     for current_date, next_date in next_date_by_date.items():
@@ -117,7 +142,7 @@ def build_factor_group_return_analysis(
             continue
         for factor_name in factor_names:
             paired = [
-                (record.symbol, float(getattr(record, factor_name)), returns_by_symbol[record.symbol])
+                (record.symbol, _get_factor_value(record, factor_name), returns_by_symbol[record.symbol])
                 for record in current_records
                 if record.symbol in returns_by_symbol
             ]
@@ -152,7 +177,7 @@ def build_factor_decay_analysis(factor_scores: list[FactorScoreRecord]) -> dict[
         return {"rows": [], "summary": {}}
 
     dates = sorted({record.date for record in factor_scores})
-    factor_names = ("momentum", "mean_reversion", "low_volatility", "total_score")
+    factor_names = _get_factor_names(factor_scores)
     rows: list[dict[str, str | float | int]] = []
 
     for current_date, next_date in zip(dates, dates[1:], strict=False):
@@ -186,8 +211,8 @@ def build_factor_decay_analysis(factor_scores: list[FactorScoreRecord]) -> dict[
         )
         selected_turnover_rate = 1.0 - selected_retention_rate
         for factor_name in factor_names:
-            current_values = [float(getattr(current_by_symbol[symbol], factor_name)) for symbol in common_symbols]
-            next_values = [float(getattr(next_by_symbol[symbol], factor_name)) for symbol in common_symbols]
+            current_values = [_get_factor_value(current_by_symbol[symbol], factor_name) for symbol in common_symbols]
+            next_values = [_get_factor_value(next_by_symbol[symbol], factor_name) for symbol in common_symbols]
             rows.append(
                 {
                     "date": current_date.isoformat(),
@@ -227,7 +252,7 @@ def build_factor_correlation_analysis(factor_scores: list[FactorScoreRecord]) ->
     if not factor_scores:
         return {"rows": [], "summary": {}}
 
-    factor_names = ("momentum", "mean_reversion", "low_volatility", "total_score")
+    factor_names = _get_factor_names(factor_scores)
     rows: list[dict[str, str | float | int]] = []
     dates = sorted({record.date for record in factor_scores})
 
@@ -236,7 +261,7 @@ def build_factor_correlation_analysis(factor_scores: list[FactorScoreRecord]) ->
         if len(records) < 2:
             continue
         values_by_factor = {
-            factor_name: [float(getattr(record, factor_name)) for record in records]
+            factor_name: [_get_factor_value(record, factor_name) for record in records]
             for factor_name in factor_names
         }
         for left_factor in factor_names:

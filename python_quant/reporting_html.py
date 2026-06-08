@@ -17,58 +17,187 @@ _HUMAN_READABLE_ENCODING = "utf-8-sig"
 def save_single_run_report_html(
     *,
     output_dir: Path,
-    run_id: str,
+    config: BacktestConfig,
     metrics: BacktestMetrics,
     artifacts: dict[str, Path],
+    latest_holdings: tuple[str, ...] = (),
+    latest_rebalance: RebalanceRecord | None = None,
+    symbol_names: dict[str, str] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    target_path = output_dir / f"{run_id}_report.html"
-
+    target_path = output_dir / "report.html"
     conclusion = _build_report_conclusion(metrics)
-    metric_rows = _build_html_table_rows(_build_single_run_metric_rows(metrics))
-    review_rows = _build_html_table_rows(_build_single_run_review_rows(artifacts))
-    behavior_rows = _build_html_table_rows(_build_trading_behavior_rows(artifacts))
-    quality_rows = _build_html_table_rows(_build_data_quality_rows(artifacts))
-    artifact_links = _build_artifact_links(artifacts)
+    holdings_summary = _format_holdings(latest_holdings, symbol_names)
+    turnover_summary = _format_pct(metrics.average_turnover)
+    rebalance_rows = _build_rebalance_summary_rows(latest_rebalance, symbol_names)
+    has_benchmark = _has_benchmark_metrics(metrics)
+    benchmark_section = ""
+    rows = _build_single_run_metric_rows(metrics)
+    review_rows = _build_single_run_review_rows(artifacts)
+    trading_behavior_rows = _build_trading_behavior_rows(artifacts)
+    data_quality_rows = _build_data_quality_rows(artifacts)
 
+    artifact_links = _build_artifact_links(artifacts)
+    summary_card_items = [
+        _summary_card("总收益", f"{metrics.total_return:.2%}"),
+        _summary_card("年化收益", f"{metrics.annualized_return:.2%}"),
+        _summary_card("最大回撤", f"{metrics.max_drawdown:.2%}"),
+        _summary_card("夏普比率", f"{metrics.sharpe:.3f}"),
+    ]
+    if has_benchmark:
+        summary_card_items.append(_summary_card("超额收益", f"{metrics.excess_return:.2%}"))
+        benchmark_section = f"""
+    <div class="card">
+      <h2>基准复盘</h2>
+      <p class="lead">{escape(_build_benchmark_conclusion(metrics))}</p>
+      <table>{_build_benchmark_summary_rows(metrics)}</table>
+    </div>"""
+    summary_cards = "\n".join(summary_card_items)
+    metrics_rows = _build_html_table_rows(rows)
+    review_table_rows = _build_html_table_rows(review_rows)
+    trading_behavior_table_rows = _build_html_table_rows(trading_behavior_rows)
+    data_quality_table_rows = _build_html_table_rows(data_quality_rows)
+    factor_rows = "\n".join(
+        f"<tr><th>因子 / {escape(name)}</th><td>{weight:.4f}</td></tr>"
+        for name, weight in config.factor_weights.items()
+    )
+    explanation_rows = "\n".join(
+        f"<tr><th>{escape(display_label(key))}</th><td>{escape(metric_explanation(key))}</td></tr>"
+        for key in ("total_return", "annualized_return", "max_drawdown", "sharpe")
+    )
+    holdings_rows = "\n".join(
+        f"<tr><th>{escape(symbol)}</th><td>{escape(format_symbol(symbol, symbol_names))}</td></tr>"
+        for symbol in latest_holdings
+    )
+    if not holdings_rows:
+        holdings_rows = "<tr><th>-</th><td>当前结果没有持仓数据。</td></tr>"
+    chart_name = artifacts["equity_curve_svg"].name if "equity_curve_svg" in artifacts else ""
+    chart_title = "策略与基准净值" if has_benchmark else "策略净值走势"
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>A股单次运行报告 - {escape(run_id)}</title>
-  <style>{_report_base_css(include_images=True)}</style>
+  <title>回测报告</title>
+  <style>
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
+    h1, h2 {{ margin: 0 0 16px; }}
+    .grid {{ display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: start; }}
+    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid #eef2f7; }}
+    th {{ width: 55%; color: #52606d; font-weight: 600; }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    img {{ width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }}
+    .muted {{ color: #52606d; margin-bottom: 16px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 20px; }}
+    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
+    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
+    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
+    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+    .compact td, .compact th {{ font-size: 14px; }}
+  </style>
 </head>
 <body>
-  <h1>A股回测单次运行报告：{escape(run_id)}</h1>
+  <h1>回测报告</h1>
   <p class="muted">生成时间：{escape(datetime.now().isoformat(timespec="seconds"))}</p>
   <div class="grid">
     <div class="card wide hero">
-      <h2>回测结论</h2>
+      <h2>核心结论</h2>
       <p class="lead">{escape(conclusion)}</p>
+      <div class="summary-grid">{summary_cards}</div>
     </div>
     <div class="card">
-      <h2>核心指标</h2>
-      <table>{metric_rows}</table>
+      <h2>{chart_title}</h2>
+      <img src="{escape(chart_name)}" alt="{escape(chart_title)}" />
     </div>
     <div class="card">
-      <h2>诊断审查</h2>
-      <table>{review_rows}</table>
+      <h2>当前持仓</h2>
+      <table>
+        <tr><th>持仓概览</th><td>{escape(holdings_summary)}</td></tr>
+        <tr><th>持仓数量</th><td>{len(latest_holdings)}</td></tr>
+        <tr><th>平均换手</th><td>{escape(turnover_summary)}</td></tr>
+      </table>
     </div>
     <div class="card">
-      <h2>交易行为</h2>
-      <table>{behavior_rows}</table>
+      <h2>调仓摘要</h2>
+      <table>{rebalance_rows}</table>
+    </div>
+    {benchmark_section}
+    <div class="card">
+      <h2>指标明细</h2>
+      <table>{metrics_rows}</table>
     </div>
     <div class="card">
-      <h2>数据质量</h2>
-      <table>{quality_rows}</table>
+      <h2>复盘摘要</h2>
+      <table class="compact">{review_table_rows}</table>
     </div>
-    <div class="card wide">
-      <h2>资产曲线</h2>
-      <img src="equity_curve.svg" alt="资产曲线图" />
+    <div class="card">
+      <h2>Trading Behavior Diagnostics</h2>
+      <table class="compact">{trading_behavior_table_rows}</table>
     </div>
-    <div class="card wide">
+    <div class="card">
+      <h2>Data Quality Diagnostics</h2>
+      <table class="compact">{data_quality_table_rows}</table>
+    </div>
+    <div class="card">
+      <h2>配置摘要</h2>
+      <table>
+        <tr><th>{display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
+        <tr><th>{display_label("top_n")}</th><td>{config.top_n}</td></tr>
+        <tr><th>{display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
+        <tr><th>{display_label("score_source")}</th><td>{escape(config.score_source)}</td></tr>
+        <tr><th>{display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
+        <tr><th>{display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
+        <tr><th>{display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
+        <tr><th>{display_label("max_allowed_drawdown")}</th><td>{config.max_allowed_drawdown:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_daily_var")}</th><td>{config.max_allowed_daily_var:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_rolling_return")}</th><td>{config.min_allowed_rolling_return:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_information_ratio")}</th><td>{config.min_allowed_information_ratio:.3f}</td></tr>
+        <tr><th>{display_label("min_allowed_fill_rate")}</th><td>{config.min_allowed_fill_rate:.2%}</td></tr>
+        <tr><th>{display_label("min_allowed_execution_price_coverage")}</th><td>{config.min_allowed_execution_price_coverage:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_position_weight")}</th><td>{config.max_allowed_position_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_group_weight")}</th><td>{config.max_allowed_group_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_allowed_attribution_residual")}</th><td>{config.max_allowed_attribution_residual:.2%}</td></tr>
+        <tr><th>{display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
+        <tr><th>{display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
+        <tr><th>{display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
+        <tr><th>{display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
+        <tr><th>{display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
+        <tr><th>{display_label("buy_commission_rate")}</th><td>{_format_optional_rate(config.buy_commission_rate)}</td></tr>
+        <tr><th>{display_label("sell_commission_rate")}</th><td>{_format_optional_rate(config.sell_commission_rate)}</td></tr>
+        <tr><th>{display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
+        <tr><th>{display_label("market_impact_coefficient")}</th><td>{config.market_impact_coefficient:.6f}</td></tr>
+        <tr><th>{display_label("market_impact_exponent")}</th><td>{config.market_impact_exponent:.6f}</td></tr>
+        <tr><th>{display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
+        <tr><th>{display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
+        <tr><th>{display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
+        <tr><th>{display_label("target_cash_weight")}</th><td>{config.target_cash_weight:.2%}</td></tr>
+        <tr><th>{display_label("max_position_weight")}</th><td>{config.max_position_weight:.2%}</td></tr>
+        <tr><th>{display_label("infer_limit_flags")}</th><td>{config.infer_limit_flags}</td></tr>
+        <tr><th>{display_label("forward_fill_suspended_bars")}</th><td>{config.forward_fill_suspended_bars}</td></tr>
+        <tr><th>{display_label("limit_up_down_rate")}</th><td>{config.limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("st_limit_up_down_rate")}</th><td>{config.st_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("growth_limit_up_down_rate")}</th><td>{config.growth_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("bse_limit_up_down_rate")}</th><td>{config.bse_limit_up_down_rate:.4f}</td></tr>
+        <tr><th>{display_label("infer_limit_rate_by_symbol")}</th><td>{config.infer_limit_rate_by_symbol}</td></tr>
+        <tr><th>{display_label("max_volume_participation")}</th><td>{config.max_volume_participation:.4f}</td></tr>
+      </table>
+      <h2 style="margin-top:20px;">因子权重</h2>
+      <table>{factor_rows}</table>
+    </div>
+    <div class="card">
       <h2>产物清单</h2>
       <ul>{artifact_links}</ul>
+    </div>
+    <div class="card wide">
+      <h2>指标怎么看</h2>
+      <table>{explanation_rows}</table>
+    </div>
+    <div class="card wide">
+      <h2>持仓代码说明</h2>
+      <table>{holdings_rows}</table>
     </div>
   </div>
 </body>
@@ -1060,22 +1189,15 @@ def _format_parameter_recommendation_rationale(summary: dict[str, object]) -> st
     return "; ".join(parts) if parts else "-"
 
 def _format_parameter_recommendation_summary(summary: dict[str, object]) -> str:
-    rationale = summary.get("parameter_recommendation_rationale")
-    if not isinstance(rationale, dict) or not rationale:
+    value = summary.get("parameter_recommendation_summary")
+    if not isinstance(value, str) or not value:
         return "-"
-    reasons = [
-        _format_recommendation_summary_text(payload.get("reason", "-"))
-        for payload in rationale.values()
-        if isinstance(payload, dict)
-    ]
-    if not reasons:
-        return "-"
-    return "; ".join(sorted(set(reasons)))
+    return _format_recommendation_summary_text(value)
 
 
 def _format_recommendation_reason(reason: str) -> str:
     reason_map = {
-        "highest_average_composite_score": "综合平均分最高",
+        "highest_average_composite_score": "平均综合分最高",
         "best_passing_rate_tie_breaker": "同分下闸门通过率最高",
         "highest_average_metric": "平均排序指标最高",
         "only_value_with_passes": "唯一通过测试的取值",
@@ -1092,27 +1214,42 @@ def _format_recommended_action_first(summary: dict[str, object]) -> str:
     return _format_recommended_action_text(str(actions[0]))
 
 
-def _format_recommendation_summary_text(reason: str) -> str:
-    summary_map = {
-        "highest_average_composite_score": "基于综合多维评分优选",
-        "best_passing_rate_tie_breaker": "在多项表现相近时考虑了抗跌存活率",
-        "highest_average_metric": "基于目标优化指标最大化优选",
-        "only_value_with_passes": "排除了导致严重亏损或违规的参数域",
-        "fallback_highest_metric": "在缺乏稳定性特征时基于绝对收益优选",
-        "insufficient_data": "样本量不足以支持参数稳定性推断",
-    }
-    return summary_map.get(reason, reason)
+def _format_recommendation_summary_text(value: str) -> str:
+    text = value.replace(
+        "Recommended parameter values by average composite score:",
+        "按平均综合分推荐参数：",
+    )
+    text = text.replace(
+        "Metric and composite recommendations diverge for:",
+        "排序指标最优与综合分推荐不一致：",
+    )
+    text = text.replace("composite ", "综合分 ")
+    text = text.replace("gate pass ", "闸门通过率 ")
+    text = text.replace("metric-best=", "排序指标最优=")
+    return text
 
 
-def _format_recommended_action_text(action: str) -> str:
-    action_map = {
-        "deploy_with_recommended_parameters": "考虑使用推荐的稳健参数档位实盘部署。",
-        "further_optimize_strongest_parameter": "强烈建议围绕最具影响力的参数进行细粒度二次网格搜索。",
-        "review_gate_failures": "策略在健康检查闸门上的失败率极高，请立刻检查导致失败的主要原因（见诊断面板）。",
-        "beware_parameter_island": "警告：当前的最佳参数表现出孤岛特征，周围参数效果大幅劣化，过拟合风险极高！",
-        "insufficient_data_for_island_detection": "扫描的参数组合太少，无法判断是否存在参数孤岛过拟合风险。",
+def _format_recommended_action_text(value: str) -> str:
+    translations = {
+        "Most parameter sets passed health gates; focus on robustness, live trading assumptions, and out-of-sample validation.": "多数参数组合通过健康闸门；下一步重点检查稳健性、实盘交易假设和样本外验证。",
+        "Risk gates fail often: reduce position concentration, raise cash buffer, shorten rebalance exposure, or add drawdown-aware filters.": "风险闸门频繁失败：降低持仓集中度、提高现金缓冲、缩短调仓暴露，或加入回撤感知过滤。",
+        "Stability gates fail often: prefer parameter regions with smoother rolling returns and validate on longer walk-forward windows.": "稳定性闸门频繁失败：优先选择滚动收益更平滑的参数区域，并用更长 walk-forward 窗口验证。",
+        "Execution gates fail often: reduce volume participation, avoid illiquid names, increase cash buffer, or relax target turnover.": "执行闸门频繁失败：降低成交量参与率、避开低流动性标的、增加现金缓冲，或放宽目标换手。",
+        "Exposure gates fail often: tighten max_position_weight or add group constraints to reduce concentration.": "暴露闸门频繁失败：收紧 max_position_weight，或增加分组约束以降低集中度。",
+        "Attribution gates fail often: inspect return attribution residuals before trusting parameter rankings.": "归因闸门频繁失败：在信任参数排名前，先检查收益归因残差。",
+        "Turnover gates fail often: lengthen rebalance interval, require stronger signal changes, or raise holding-period constraints.": "换手闸门频繁失败：拉长调仓间隔、要求更强信号变化，或提高持仓周期约束。",
+        "Factor gates fail often: remove redundant factors, lower highly correlated factor weights, or add orthogonal signals.": "因子闸门频繁失败：移除冗余因子、降低高相关因子权重，或加入正交信号。",
+        "Ledger gates fail often: resolve accounting reconciliation issues before comparing parameter performance.": "对账闸门频繁失败：先解决账务对齐问题，再比较参数表现。",
     }
-    return action_map.get(action, action)
+    translated = translations.get(value)
+    if translated is not None:
+        return translated
+    prefix = "Most common failed gate is '"
+    suffix = "'; review the single-run strategy_health_gates.csv files for affected runs first."
+    if value.startswith(prefix) and value.endswith(suffix):
+        gate_name = value[len(prefix):-len(suffix)]
+        return f"最常失败闸门是“{gate_name}”；请优先查看受影响运行的 strategy_health_gates.csv。"
+    return value
 
 
 def _build_report_conclusion(metrics: BacktestMetrics) -> str:
@@ -1212,6 +1349,15 @@ def _format_holdings(holdings: dict[str, float]) -> str:
 
 
 def _format_run_label(row: dict[str, object], default_index: int) -> str:
+    scheme_label = row.get("scheme_label")
+    if scheme_label:
+        return str(scheme_label)
+    run_id = str(row.get("run_id", "")).strip()
+    if run_id.startswith("run_"):
+        numeric_part = run_id.removeprefix("run_").lstrip("0") or "0"
+        return f"方案{numeric_part}"
+    if run_id:
+        return run_id
     return str(row.get("scheme_label") or f"方案 {default_index:03d}")
 
 
@@ -1234,4 +1380,124 @@ def _build_batch_display_value(
     if header in ("gate_failures", "health_warnings", "critical_warnings"):
         return "-" if _coerce_float(value) == 0 else int(_coerce_float(value))
     return _format_metric_value(header, value)
+
+
+def _build_benchmark_conclusion(metrics: BacktestMetrics) -> str:
+    if metrics.benchmark_total_return is None or metrics.excess_return is None:
+        return "本次回测未提供基准对比。"
+    benchmark_return = f"{metrics.benchmark_total_return:.2%}"
+    excess_return = abs(metrics.excess_return)
+    if metrics.excess_return >= 0:
+        return f"同期基准收益为 {benchmark_return}，策略跑赢基准 {excess_return:.2%}。"
+    return f"同期基准收益为 {benchmark_return}，策略跑输基准 {excess_return:.2%}。"
+
+
+def _summary_card(label: str, value: str) -> str:
+    return (
+        '<div class="summary-tile">'
+        f'<div class="summary-label">{escape(label)}</div>'
+        f'<div class="summary-value">{escape(value)}</div>'
+        "</div>"
+    )
+
+
+def _build_rebalance_summary_rows(
+    latest_rebalance: RebalanceRecord | None,
+    symbol_names: dict[str, str] | None,
+) -> str:
+    if latest_rebalance is None:
+        return "<tr><th>最近调仓</th><td>本次回测没有发生调仓。</td></tr>"
+
+    rows = [
+        ("最近调仓日期", latest_rebalance.date.isoformat()),
+        ("调仓后持仓", _format_holdings(latest_rebalance.holdings, symbol_names)),
+        ("买入换手", _format_pct(latest_rebalance.buy_turnover)),
+        ("卖出换手", _format_pct(latest_rebalance.sell_turnover)),
+        ("总换手", _format_pct(latest_rebalance.turnover)),
+        ("交易成本", _format_money(latest_rebalance.cost)),
+        ("调仓备注", _rebalance_note(latest_rebalance)),
+    ]
+    return "\n".join(
+        f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
+        for label, value in rows
+    )
+
+
+def _build_benchmark_summary_rows(metrics: BacktestMetrics) -> str:
+    rows = [
+        ("基准总收益", "-" if metrics.benchmark_total_return is None else f"{metrics.benchmark_total_return:.2%}"),
+        ("基准年化收益", "-" if metrics.benchmark_annualized_return is None else f"{metrics.benchmark_annualized_return:.2%}"),
+        ("超额收益", "-" if metrics.excess_return is None else f"{metrics.excess_return:.2%}"),
+        ("跟踪误差", "-" if metrics.tracking_error is None else f"{metrics.tracking_error:.2%}"),
+        ("信息比率", "-" if metrics.information_ratio is None else f"{metrics.information_ratio:.3f}"),
+        ("基准最大回撤", "-" if metrics.benchmark_max_drawdown is None else f"{metrics.benchmark_max_drawdown:.2%}"),
+    ]
+    return "\n".join(
+        f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
+        for label, value in rows
+    )
+
+
+def _format_pct(value: float) -> str:
+    return f"{value:.2%}"
+
+
+def _format_money(value: float) -> str:
+    return f"{value:,.2f}"
+
+
+def _format_optional_date(value: object) -> str:
+    if value is None:
+        return "-"
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
+def _format_optional_rate(value: float | None) -> str:
+    return "-" if value is None else f"{value:.6f}"
+
+
+def _format_optional_int(value: int | None) -> str:
+    return "-" if value is None else str(value)
+
+
+def _build_equity_curve_benchmark_columns(
+    point: EquityPoint,
+    benchmark_point: BenchmarkPoint | None,
+) -> tuple[str, str, str, str, str, str]:
+    if benchmark_point is None:
+        return ("", "", "", "", "", "")
+    excess_daily_return = point.daily_return - benchmark_point.daily_return
+    return (
+        f"{benchmark_point.equity:.2f}",
+        _format_money(benchmark_point.equity),
+        f"{benchmark_point.daily_return:.8f}",
+        _format_pct(benchmark_point.daily_return),
+        f"{excess_daily_return:.8f}",
+        _format_pct(excess_daily_return),
+    )
+
+
+def _equity_curve_note(point: EquityPoint, has_benchmark: bool) -> str:
+    benchmark_note = "含基准对比" if has_benchmark else "无基准对比"
+    if not point.holdings:
+        return f"空仓；{benchmark_note}"
+    return f"{len(point.holdings)}只持仓；{benchmark_note}"
+
+
+def _rebalance_note(record: RebalanceRecord) -> str:
+    if record.buy_turnover > 0 and record.sell_turnover > 0:
+        return "有买有卖"
+    if record.buy_turnover > 0:
+        return "仅买入"
+    if record.sell_turnover > 0:
+        return "仅卖出"
+    return "无实际换手"
+
+
+def _format_holdings(holdings: tuple[str, ...], symbol_names: dict[str, str] | None = None) -> str:
+    if not holdings:
+        return "空仓"
+    return " | ".join(format_symbol(symbol, symbol_names) for symbol in holdings)
 

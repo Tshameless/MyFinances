@@ -70,7 +70,8 @@ def save_run_manifest(
         "inputs": inputs,
         "input_files": _build_input_file_metadata(inputs),
         "config": _serialize_config(config),
-        "artifacts": _build_artifact_file_metadata(artifacts),
+        "artifacts": {name: str(path) for name, path in artifacts.items()},
+        "artifact_files": _build_artifact_file_metadata(artifacts),
     }
     if metrics is not None:
         payload["metrics"] = asdict(metrics)
@@ -104,28 +105,33 @@ def save_config_sources(
     return target_path
 
 
-def save_batch_summary(rows: list[dict[str, object]], output_dir: Path) -> tuple[Path, Path]:
+def save_batch_summary(
+    rows: list[dict[str, object]],
+    output_dir: Path,
+) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "batch_summary.csv"
     json_path = output_dir / "batch_summary.json"
 
     if not rows:
-        csv_path.write_text("无有效参数扫描结果\n", encoding=_HUMAN_READABLE_ENCODING)
-        json_path.write_text("{}", encoding="utf-8")
-        return csv_path, json_path
+        headers = ["scheme_label", "run_id"]
+    else:
+        headers = _build_batch_export_headers(list(rows[0].keys()))
 
-    headers = _build_batch_export_headers(rows)
     with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow([display_label(header) for header in headers])
-        for index, row in enumerate(rows, start=1):
-            writer.writerow(_build_batch_export_row(row, headers, index))
+        for row_index, row in enumerate(rows, start=1):
+            writer.writerow(_build_batch_export_row(row, headers, row_index))
 
-    payload = _build_batch_json_summary(rows)
-    json_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    summary_payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "reader_friendly": _build_batch_json_summary(rows),
+        "rows": rows,
+    }
+    with json_path.open("w", encoding="utf-8") as handle:
+        json.dump(summary_payload, handle, ensure_ascii=False, indent=2)
+
     return csv_path, json_path
 
 
@@ -133,198 +139,172 @@ def save_batch_rankings(
     rows: list[dict[str, object]],
     output_dir: Path,
     *,
-    rank_by: str,
+    rank_by: str = "annualized_return",
     recommended_parameters: dict[str, object] | None = None,
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"batch_leaderboard_{rank_by}.csv"
-    json_path = output_dir / f"batch_leaderboard_{rank_by}.json"
-    best_run_path = output_dir / "best_run_summary.json"
-
-    if not rows:
-        csv_path.write_text("无有效参数扫描结果\n", encoding=_HUMAN_READABLE_ENCODING)
-        json_path.write_text("{}", encoding="utf-8")
-        best_run_path.write_text("{}", encoding="utf-8")
-        return csv_path, json_path, best_run_path
-
     from .reporting_rank import sort_rows_by_metric, validate_rank_metric
     validate_rank_metric(rows, rank_by)
-    sorted_rows = sort_rows_by_metric(rows, rank_by)
+    ranked_rows = sort_rows_by_metric(rows, rank_by)
+    for index, row in enumerate(ranked_rows, start=1):
+        row["rank"] = index
+        _attach_batch_leaderboard_diagnostics(row, recommended_parameters or {})
 
-    if recommended_parameters:
-        _attach_batch_leaderboard_diagnostics(sorted_rows, recommended_parameters)
+    csv_path = output_dir / "batch_leaderboard.csv"
+    json_path = output_dir / "batch_leaderboard.json"
+    best_run_path = output_dir / "best_run.json"
 
-    headers = _build_batch_export_headers(sorted_rows)
+    headers = _build_batch_export_headers(list(ranked_rows[0].keys())) if ranked_rows else ["rank", "scheme_label", "run_id"]
     with csv_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow([display_label(header) for header in headers])
-        for index, row in enumerate(sorted_rows, start=1):
-            writer.writerow(_build_batch_export_row(row, headers, index))
+        for row_index, row in enumerate(ranked_rows, start=1):
+            writer.writerow(_build_batch_export_row(row, headers, row_index))
 
-    json_payload = _build_ranked_batch_json_summary(sorted_rows, rank_by)
-    json_path.write_text(
-        json.dumps(json_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    leaderboard_payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "rank_by": rank_by,
+        "ranking_policy": "gate_pass_first_then_metric",
+        "reader_friendly": _build_ranked_batch_json_summary(ranked_rows, rank_by),
+        "rows": ranked_rows,
+    }
+    with json_path.open("w", encoding="utf-8") as handle:
+        json.dump(leaderboard_payload, handle, ensure_ascii=False, indent=2)
 
-    best_payload = _build_best_run_json_summary(sorted_rows[0], rank_by)
-    best_run_path.write_text(
-        json.dumps(best_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    best_payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "rank_by": rank_by,
+        "ranking_policy": "gate_pass_first_then_metric",
+        "reader_friendly": _build_best_run_json_summary(ranked_rows[0] if ranked_rows else None, rank_by),
+        "best_run": ranked_rows[0] if ranked_rows else None,
+    }
+    with best_run_path.open("w", encoding="utf-8") as handle:
+        json.dump(best_payload, handle, ensure_ascii=False, indent=2)
 
     return csv_path, json_path, best_run_path
 
 
-def _build_batch_export_headers(rows: list[dict[str, object]]) -> list[str]:
-    headers: list[str] = ["scheme_label", "run_id"]
-    param_keys = sorted({key for row in rows for key in row if key.startswith("param_")})
-    headers.extend(param_keys)
-    metric_keys = [
-        "gate_status",
-        "health_score",
-        "gate_failures",
-        "failed_gate_categories",
-        "failed_gate_names",
-        "total_return",
-        "annualized_return",
-        "max_drawdown",
-        "sharpe",
-        "sortino",
-        "calmar",
-        "win_rate",
-        "total_cost",
-    ]
-    for key in metric_keys:
-        if any(key in row for row in rows):
-            headers.append(key)
-    diagnostic_keys = [
-        "matches_recommended_parameters",
-        "health_warnings",
-        "critical_warnings",
-        "equity_curve_csv",
-        "run_manifest_json",
-        "output_dir",
-    ]
-    for key in diagnostic_keys:
-        if any(key in row for row in rows):
-            headers.append(key)
-    return headers
+def _build_batch_export_headers(headers: list[str]) -> list[str]:
+    ordered_headers = [header for header in headers if header != "run_id"]
+    insert_at = ordered_headers.index("rank") + 1 if "rank" in ordered_headers else 0
+    ordered_headers[insert_at:insert_at] = ["scheme_label", "run_id"]
+    return ordered_headers
 
 
 def _attach_batch_leaderboard_diagnostics(
-    rows: list[dict[str, object]],
+    row: dict[str, object],
     recommended_parameters: dict[str, object],
 ) -> None:
-    for row in rows:
-        row["matches_recommended_parameters"] = _recommended_parameter_match(row, recommended_parameters)
+    failed_categories = _split_delimited_text(row.get("failed_gate_categories"))
+    failed_names = _split_delimited_text(row.get("failed_gate_names"))
+    row["failed_gate_count"] = max(len(failed_names), float_metric(row, "gate_failures", default=0.0))
+    row["primary_failed_gate_category"] = failed_categories[0] if failed_categories else ""
+    row["primary_failed_gate_name"] = failed_names[0] if failed_names else ""
+    row["failed_gate_summary"] = _failed_gate_summary(failed_categories, failed_names)
+    matches, mismatches = _recommended_parameter_match(row, recommended_parameters)
+    row["matches_recommended_parameters"] = matches
+    row["recommended_parameter_mismatch"] = "; ".join(mismatches)
 
 
 def _split_delimited_text(value: object) -> list[str]:
-    if not isinstance(value, str) or not value:
+    if value in (None, ""):
         return []
-    return [item.strip() for item in value.split(";") if item.strip()]
+    return [
+        item.strip()
+        for item in str(value).split(";")
+        if item.strip()
+    ]
 
 
-def _failed_gate_summary(row: dict[str, object]) -> dict[str, object] | None:
-    gate_status = str(row.get("gate_status", "")).lower()
-    if gate_status == "pass":
-        return None
-    categories = _split_delimited_text(row.get("failed_gate_categories"))
-    names = _split_delimited_text(row.get("failed_gate_names"))
-    return {
-        "status": row.get("gate_status"),
-        "failures": row.get("gate_failures"),
-        "categories": categories,
-        "names": names,
-    }
+def _failed_gate_summary(categories: list[str], names: list[str]) -> str:
+    if not categories and not names:
+        return ""
+    category_text = ",".join(categories) if categories else "-"
+    name_text = ",".join(names) if names else "-"
+    return f"{category_text} | {name_text}"
 
 
 def _recommended_parameter_match(
     row: dict[str, object],
     recommended_parameters: dict[str, object],
-) -> bool:
+) -> tuple[bool, list[str]]:
     if not recommended_parameters:
-        return False
-    for key, recommended_value in recommended_parameters.items():
-        row_value = row.get(f"param_{key}")
+        return False, []
+    mismatches = []
+    matched_any = False
+    for parameter, recommended_value in sorted(recommended_parameters.items()):
+        row_value = row.get(parameter)
         if row_value is None:
-            return False
-        if str(row_value) != str(recommended_value):
-            return False
-    return True
+            mismatches.append(f"{parameter}=<missing> expected {recommended_value}")
+            continue
+        if str(row_value) == str(recommended_value):
+            matched_any = True
+            continue
+        mismatches.append(f"{parameter}={row_value} expected {recommended_value}")
+    return matched_any and not mismatches, mismatches
 
 
 def _build_batch_json_summary(rows: list[dict[str, object]]) -> dict[str, object]:
     from .reporting_html import _format_run_label
     return {
-        "run_count": len(rows),
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "runs": [
-            {
-                "scheme_label": _format_run_label(row, index),
-                "run_id": row.get("run_id"),
-                "total_return": float_metric(row, "total_return"),
-                "annualized_return": float_metric(row, "annualized_return"),
-                "max_drawdown": float_metric(row, "max_drawdown"),
-                "sharpe": float_metric(row, "sharpe"),
-                "gate_status": row.get("gate_status"),
-                "health_score": float_metric(row, "health_score"),
-                "gate_failures": row.get("gate_failures"),
-            }
-            for index, row in enumerate(rows, start=1)
+        "trial_count": len(rows),
+        "trial_labels": [
+            _format_run_label(row, row_index)
+            for row_index, row in enumerate(rows, start=1)
         ],
+        "notes": "rows 字段保留完整机器可读结果；reader_friendly 字段用于直接阅读。",
     }
 
 
 def _build_ranked_batch_json_summary(
-    sorted_rows: list[dict[str, object]],
+    ranked_rows: list[dict[str, object]],
     rank_by: str,
 ) -> dict[str, object]:
     from .reporting_html import _format_run_label
-    payload = _build_batch_json_summary(sorted_rows)
-    payload["rank_by"] = rank_by
-    payload["runs"] = [
-        {
-            "rank": index,
-            "scheme_label": _format_run_label(row, index),
-            "run_id": row.get("run_id"),
-            "rank_metric_value": float_metric(row, rank_by),
-            "gate_status": row.get("gate_status"),
-            "health_score": float_metric(row, "health_score"),
-            "gate_failures": row.get("gate_failures"),
-            "matches_recommended_parameters": row.get("matches_recommended_parameters"),
-            "failed_gates": _failed_gate_summary(row),
-        }
-        for index, row in enumerate(sorted_rows, start=1)
-    ]
-    return payload
+    best_row = ranked_rows[0] if ranked_rows else None
+    worst_row = ranked_rows[-1] if ranked_rows else None
+    return {
+        "rank_metric": display_label(rank_by),
+        "best_scheme": None if best_row is None else _format_run_label(best_row, 1),
+        "best_internal_id": None if best_row is None else str(best_row.get("run_id", "")),
+        "best_gate_status": None if best_row is None else str(best_row.get("gate_status", "")),
+        "best_health_score": None if best_row is None else _format_metric_value_helper(
+            "health_score", best_row.get("health_score")
+        ),
+        "best_metric_value": None if best_row is None else _format_metric_value_helper(
+            rank_by, best_row.get(rank_by)
+        ),
+        "worst_scheme": None if worst_row is None else _format_run_label(worst_row, len(ranked_rows)),
+        "worst_internal_id": None if worst_row is None else str(worst_row.get("run_id", "")),
+        "worst_gate_status": None if worst_row is None else str(worst_row.get("gate_status", "")),
+        "worst_metric_value": None if worst_row is None else _format_metric_value_helper(
+            rank_by, worst_row.get(rank_by)
+        ),
+        "notes": "rows 字段按排序后的完整结果保留。",
+    }
 
 
 def _build_best_run_json_summary(
-    best_row: dict[str, object],
+    best_row: dict[str, object] | None,
     rank_by: str,
 ) -> dict[str, object]:
     from .reporting_html import _format_run_label
+    if best_row is None:
+        return {
+            "best_scheme": None,
+            "best_internal_id": None,
+            "best_gate_status": None,
+            "best_health_score": None,
+            "rank_metric": display_label(rank_by),
+            "best_metric_value": None,
+        }
     return {
-        "scheme_label": _format_run_label(best_row, 1),
-        "run_id": best_row.get("run_id"),
-        "rank_by": rank_by,
-        "rank_metric_value": float_metric(best_row, rank_by),
-        "total_return": float_metric(best_row, "total_return"),
-        "annualized_return": float_metric(best_row, "annualized_return"),
-        "max_drawdown": float_metric(best_row, "max_drawdown"),
-        "sharpe": float_metric(best_row, "sharpe"),
-        "gate_status": best_row.get("gate_status"),
-        "health_score": float_metric(best_row, "health_score"),
-        "gate_failures": best_row.get("gate_failures"),
-        "failed_gates": _failed_gate_summary(best_row),
-        "matches_recommended_parameters": best_row.get("matches_recommended_parameters"),
-        "parameters": {
-            key.removeprefix("param_"): value
-            for key, value in best_row.items()
-            if key.startswith("param_")
-        },
+        "best_scheme": _format_run_label(best_row, 1),
+        "best_internal_id": str(best_row.get("run_id", "")),
+        "best_gate_status": str(best_row.get("gate_status", "")),
+        "best_health_score": _format_metric_value_helper("health_score", best_row.get("health_score")),
+        "rank_metric": display_label(rank_by),
+        "best_metric_value": _format_metric_value_helper(rank_by, best_row.get(rank_by)),
     }
 
 
@@ -333,8 +313,19 @@ def _build_batch_export_row(
     headers: list[str],
     row_index: int,
 ) -> list[object]:
-    from .reporting_html import _build_batch_display_value
     return [_build_batch_display_value(row, header, row_index) for header in headers]
+
+
+def _build_batch_display_value(row: dict[str, object], header: str, row_index: int) -> object:
+    from .reporting_html import _format_run_label
+    if header == "scheme_label":
+        return _format_run_label(row, row_index)
+    return row.get(header, "")
+
+
+def _format_metric_value_helper(metric: str, value: object) -> str:
+    from .reporting_html import _format_metric_value
+    return _format_metric_value(metric, value)
 
 
 def _serialize_config(config: BacktestConfig) -> dict[str, object]:

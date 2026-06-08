@@ -128,39 +128,66 @@ def save_factor_scores_csv(
     output_dir.mkdir(parents=True, exist_ok=True)
     target_path = output_dir / "factor_scores.csv"
 
+    # Identify all factor names dynamically from raw_scores
+    dynamic_factors = set()
+    for record in records:
+        if record.raw_scores:
+            dynamic_factors.update(record.raw_scores.keys())
+
+    standard_factors = ["momentum", "mean_reversion", "low_volatility"]
+    custom_factors = sorted(list(dynamic_factors - set(standard_factors)))
+    all_raw_factors = standard_factors + custom_factors
+
+    headers = [
+        display_label("date"),
+        display_label("symbol"),
+        "代码展示 / symbol_display",
+    ]
+    for factor in all_raw_factors:
+        headers.append(display_label(factor))
+    for factor in all_raw_factors:
+        headers.append(display_label(f"normalized_{factor}"))
+    headers.extend([
+        display_label("total_score"),
+        display_label("selected"),
+    ])
+
     with target_path.open("w", encoding=_HUMAN_READABLE_ENCODING, newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(
-            [
-                display_label("date"),
-                display_label("symbol"),
-                "代码展示 / symbol_display",
-                display_label("momentum"),
-                display_label("mean_reversion"),
-                display_label("low_volatility"),
-                display_label("normalized_momentum"),
-                display_label("normalized_mean_reversion"),
-                display_label("normalized_low_volatility"),
-                display_label("total_score"),
-                display_label("selected"),
-            ]
-        )
+        writer.writerow(headers)
         for record in records:
-            writer.writerow(
-                [
-                    record.date.isoformat(),
-                    record.symbol,
-                    format_symbol(record.symbol),
-                    f"{record.momentum:.8f}",
-                    f"{record.mean_reversion:.8f}",
-                    f"{record.low_volatility:.8f}",
-                    f"{record.normalized_momentum:.8f}",
-                    f"{record.normalized_mean_reversion:.8f}",
-                    f"{record.normalized_low_volatility:.8f}",
-                    f"{record.total_score:.8f}",
-                    "1" if record.selected else "0",
-                ]
-            )
+            row = [
+                record.date.isoformat(),
+                record.symbol,
+                format_symbol(record.symbol),
+            ]
+            for factor in all_raw_factors:
+                if factor == "momentum":
+                    val = record.momentum
+                elif factor == "mean_reversion":
+                    val = record.mean_reversion
+                elif factor == "low_volatility":
+                    val = record.low_volatility
+                else:
+                    val = record.raw_scores.get(factor, 0.0)
+                row.append(f"{val:.8f}")
+
+            for factor in all_raw_factors:
+                if factor == "momentum":
+                    val = record.normalized_momentum
+                elif factor == "mean_reversion":
+                    val = record.normalized_mean_reversion
+                elif factor == "low_volatility":
+                    val = record.normalized_low_volatility
+                else:
+                    val = record.normalized_scores.get(factor, 0.0)
+                row.append(f"{val:.8f}")
+
+            row.extend([
+                f"{record.total_score:.8f}",
+                "1" if record.selected else "0",
+            ])
+            writer.writerow(row)
 
     return target_path
 
