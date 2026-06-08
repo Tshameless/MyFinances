@@ -288,6 +288,36 @@ rebalance_every_n_days = [5, "10"]
         with self.assertRaisesRegex(ValueError, "score_source"):
             BacktestConfig(score_source="mixed")
 
+    def test_loads_custom_factor_script(self) -> None:
+        import tempfile
+        from python_quant.factor_registry import get_registered_factors
+        
+        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+            f.write("""
+from python_quant.factor_registry import register_factor
+from python_quant.config import BacktestConfig
+
+@register_factor("custom_unit_test_factor")
+def compute_custom_unit_test(closes: list[float], config: BacktestConfig) -> float:
+    return closes[-1] * 2.0
+""".strip())
+            f.flush()
+            temp_file_path = Path(f.name)
+            
+        try:
+            config = BacktestConfig(
+                custom_factors_py=temp_file_path,
+                factor_weights={"custom_unit_test_factor": 1.0}
+            )
+            self.assertIn("custom_unit_test_factor", get_registered_factors())
+            self.assertEqual(config.custom_factors_py, temp_file_path.resolve())
+        finally:
+            import os
+            try:
+                os.unlink(temp_file_path)
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

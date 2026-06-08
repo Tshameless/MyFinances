@@ -94,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选外部因子评分 CSV 路径。必填列为 date、symbol、score；调仓日优先使用外部分数选股。",
     )
     parser.add_argument(
+        "--custom-factors-py",
+        type=str,
+        help="可选自定义因子脚本 Python 文件路径。其中的因子函数使用 @register_factor 注册后可用于回测。",
+    )
+    parser.add_argument(
         "--validate-csv",
         action="store_true",
         help="只校验 --csv、--benchmark-csv、--stock-pool-csv 和 --symbol-group-csv 指定的数据文件，不执行回测。",

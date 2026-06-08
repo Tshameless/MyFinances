@@ -351,6 +351,8 @@ def persist_run_outputs(
         latest_holdings=result.equity_curve[-1].holdings if result.equity_curve else (),
         latest_rebalance=result.rebalance_records[-1] if result.rebalance_records else None,
         symbol_names=symbol_names,
+        equity_curve=result.equity_curve,
+        benchmark_curve=result.benchmark_curve,
     )
     artifact_paths["report_html"] = report_path
     return artifact_paths

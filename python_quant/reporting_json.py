@@ -84,7 +84,7 @@ def save_run_manifest(
 
 def save_effective_config(config: BacktestConfig, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    target_path = output_dir / "effective_config.json"
+    target_path = output_dir / "config_effective.json"
     target_path.write_text(
         json.dumps(_serialize_config(config), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -381,6 +381,7 @@ def _serialize_config(config: BacktestConfig) -> dict[str, object]:
         "stock_pool_csv": None if config.stock_pool_csv is None else str(config.stock_pool_csv),
         "symbol_group_csv": None if config.symbol_group_csv is None else str(config.symbol_group_csv),
         "factor_score_csv": None if config.factor_score_csv is None else str(config.factor_score_csv),
+        "custom_factors_py": None if config.custom_factors_py is None else str(config.custom_factors_py),
         "factor_weights": config.factor_weights,
     }
 

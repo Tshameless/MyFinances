@@ -85,7 +85,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
     }
 )
 _BACKTEST_PATH_FIELDS = frozenset(
-    {"output_dir", "symbol_name_csv", "stock_pool_csv", "symbol_group_csv", "factor_score_csv"}
+    {"output_dir", "symbol_name_csv", "stock_pool_csv", "symbol_group_csv", "factor_score_csv", "custom_factors_py"}
 )
 _BACKTEST_ALLOWED_FIELDS = _BACKTEST_SIMPLE_FIELDS | _BACKTEST_PATH_FIELDS | {"factor_weights"}
 _CONFIG_ALLOWED_TOP_LEVEL_TABLES = frozenset({"backtest", "sweep"})
@@ -202,11 +202,16 @@ class BacktestConfig:
     stock_pool_csv: Path | None = None
     symbol_group_csv: Path | None = None
     factor_score_csv: Path | None = None
+    custom_factors_py: Path | None = None
     factor_weights: dict[str, float] = field(
         default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
     )
 
     def __post_init__(self) -> None:
+        if self.custom_factors_py is not None:
+            resolved_path = self.custom_factors_py.resolve()
+            object.__setattr__(self, "custom_factors_py", resolved_path)
+            _load_custom_factors(resolved_path)
         object.__setattr__(self, "output_dir", self.output_dir.resolve())
         if self.symbol_name_csv is not None:
             object.__setattr__(self, "symbol_name_csv", self.symbol_name_csv.resolve())
@@ -432,6 +437,7 @@ class BacktestConfig:
             "stock_pool_csv": self.stock_pool_csv,
             "symbol_group_csv": self.symbol_group_csv,
             "factor_score_csv": self.factor_score_csv,
+            "custom_factors_py": self.custom_factors_py,
             "factor_weights": self.factor_weights.copy(),
         }
 
@@ -493,6 +499,7 @@ class BacktestConfig:
             stock_pool_csv=cast(Path | None, mapping["stock_pool_csv"]),
             symbol_group_csv=cast(Path | None, mapping["symbol_group_csv"]),
             factor_score_csv=cast(Path | None, mapping["factor_score_csv"]),
+            custom_factors_py=cast(Path | None, mapping["custom_factors_py"]),
             factor_weights=cast(dict[str, float], mapping["factor_weights"]).copy(),
         )
 
@@ -575,6 +582,12 @@ def load_config_overrides_from_toml(config_path: str | Path) -> dict[str, object
         if not factor_score_csv.is_absolute():
             factor_score_csv = (path.parent / factor_score_csv).resolve()
         normalized["factor_score_csv"] = factor_score_csv
+
+    if "custom_factors_py" in raw_config and raw_config["custom_factors_py"] not in ("", None):
+        custom_factors_py = Path(_require_str(raw_config["custom_factors_py"], "custom_factors_py"))
+        if not custom_factors_py.is_absolute():
+            custom_factors_py = (path.parent / custom_factors_py).resolve()
+        normalized["custom_factors_py"] = custom_factors_py
 
     if "factor_weights" in raw_config:
         factor_weights = raw_config["factor_weights"]
@@ -684,3 +697,22 @@ def _require_date(value: object, field_name: str) -> date:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise ValueError(f"{field_name} must use YYYY-MM-DD format.") from exc
+
+
+def _load_custom_factors(path: Path) -> None:
+    import importlib.util
+    import sys
+
+    if not path.exists():
+        raise ConfigValidationError(f"custom_factors_py file not found: {path}")
+    module_name = f"custom_factors_{path.stem}"
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ConfigValidationError(f"Cannot load spec for custom_factors_py file: {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ConfigValidationError(f"Failed to execute custom_factors_py file {path}: {exc}") from exc
+

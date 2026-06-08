@@ -23,9 +23,23 @@ def save_single_run_report_html(
     latest_holdings: tuple[str, ...] = (),
     latest_rebalance: RebalanceRecord | None = None,
     symbol_names: dict[str, str] | None = None,
+    equity_curve: list[EquityPoint] | None = None,
+    benchmark_curve: list[BenchmarkPoint] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_path = output_dir / "report.html"
+    
+    json_dates = "[]"
+    json_portfolio = "[]"
+    json_benchmark = "[]"
+    if equity_curve:
+        dates = [point.date.isoformat() for point in equity_curve]
+        portfolio = [point.equity for point in equity_curve]
+        json_dates = json.dumps(dates)
+        json_portfolio = json.dumps(portfolio)
+    if benchmark_curve:
+        benchmark = [point.equity for point in benchmark_curve]
+        json_benchmark = json.dumps(benchmark)
     conclusion = _build_report_conclusion(metrics)
     holdings_summary = _format_holdings(latest_holdings, symbol_names)
     turnover_summary = _format_pct(metrics.average_turnover)
@@ -110,7 +124,10 @@ def save_single_run_report_html(
     </div>
     <div class="card">
       <h2>{chart_title}</h2>
-      <img src="{escape(chart_name)}" alt="{escape(chart_title)}" />
+      <div id="echarts-container" style="width: 100%; height: 400px; display: none;"></div>
+      <div id="svg-fallback-container">
+        <img src="{escape(chart_name)}" alt="{escape(chart_title)}" />
+      </div>
     </div>
     <div class="card">
       <h2>当前持仓</h2>
@@ -199,7 +216,104 @@ def save_single_run_report_html(
       <h2>持仓代码说明</h2>
       <table>{holdings_rows}</table>
     </div>
+    </div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+  (function() {{
+    if (typeof echarts !== 'undefined') {{
+      var dates = {json_dates};
+      var portfolio = {json_portfolio};
+      var benchmark = {json_benchmark};
+      
+      var fallback = document.getElementById('svg-fallback-container');
+      if (fallback) fallback.style.display = 'none';
+      
+      var container = document.getElementById('echarts-container');
+      if (container) {{
+        container.style.display = 'block';
+        var chart = echarts.init(container);
+        
+        var series = [{{
+          name: '策略净值',
+          type: 'line',
+          data: portfolio,
+          showSymbol: false,
+          smooth: true,
+          lineStyle: {{ width: 2, color: '#1890ff' }},
+          itemStyle: {{ color: '#1890ff' }}
+        }}];
+        
+        var legendData = ['策略净值'];
+        if (benchmark && benchmark.length > 0) {{
+          series.push({{
+            name: '基准净值',
+            type: 'line',
+            data: benchmark,
+            showSymbol: false,
+            smooth: true,
+            lineStyle: {{ width: 1.5, color: '#ff4d4f', type: 'dashed' }},
+            itemStyle: {{ color: '#ff4d4f' }}
+          }});
+          legendData.push('基准净值');
+        }}
+        
+        var option = {{
+          tooltip: {{
+            trigger: 'axis',
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            borderColor: '#d9e2ec',
+            borderWidth: 1,
+            textStyle: {{ color: '#1f2933' }},
+            formatter: function(params) {{
+              var res = '<div style="font-weight:600;margin-bottom:4px;">' + params[0].name + '</div>';
+              params.forEach(function(item) {{
+                res += '<div style="display:flex;justify-content:space-between;align-items:center;min-width:120px;margin:2px 0;">' +
+                       '<span>' + item.marker + ' ' + item.seriesName + ':</span>' +
+                       '<span style="font-weight:600;margin-left:8px;">' + Number(item.value).toLocaleString(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}}) + '</span>' +
+                       '</div>';
+              }});
+              return res;
+            }}
+          }},
+          legend: {{
+            data: legendData,
+            bottom: 0,
+            textStyle: {{ color: '#52606d' }}
+          }},
+          grid: {{
+            left: '3%',
+            right: '4%',
+            top: '5%',
+            bottom: '12%',
+            containLabel: true
+          }},
+          xAxis: {{
+            type: 'category',
+            boundaryGap: false,
+            data: dates,
+            axisLine: {{ lineStyle: {{ color: '#d9e2ec' }} }},
+            axisLabel: {{ color: '#52606d' }}
+          }},
+          yAxis: {{
+            type: 'value',
+            scale: true,
+            axisLine: {{ show: false }},
+            axisTick: {{ show: false }},
+            splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }},
+            axisLabel: {{ color: '#52606d' }}
+          }},
+          series: series
+        }};
+        
+        chart.setOption(option);
+        window.addEventListener('resize', function() {{
+          chart.resize();
+        }});
+      }}
+    }}
+  }})();
+  </script>
 </body>
 </html>
 """

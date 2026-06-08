@@ -69,6 +69,7 @@ def build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
         "stock_pool_csv": default_config.stock_pool_csv,
         "symbol_group_csv": default_config.symbol_group_csv,
         "factor_score_csv": default_config.factor_score_csv,
+        "custom_factors_py": default_config.custom_factors_py,
         "factor_weights": default_config.factor_weights.copy(),
     }
 
@@ -96,6 +97,10 @@ def build_backtest_config(args: argparse.Namespace) -> BacktestConfig:
     factor_score_csv = getattr(args, "factor_score_csv", None)
     if factor_score_csv is not None:
         config_kwargs["factor_score_csv"] = Path(factor_score_csv)
+
+    custom_factors_py = getattr(args, "custom_factors_py", None)
+    if custom_factors_py is not None:
+        config_kwargs["custom_factors_py"] = Path(custom_factors_py)
 
     if args.factor_weight:
         factor_weights = cast(dict[str, float], config_kwargs["factor_weights"]).copy()
@@ -174,6 +179,7 @@ def cli_config_overrides(args: argparse.Namespace) -> dict[str, object | None]:
         "execution_price_field": args.execution_price_field,
         "start_date": parse_cli_date(args.start_date, "start_date"),
         "end_date": parse_cli_date(args.end_date, "end_date"),
+        "custom_factors_py": Path(args.custom_factors_py) if getattr(args, "custom_factors_py", None) else None,
     }
 
 
@@ -196,6 +202,8 @@ def build_config_sources(
         cli_overrides.add("symbol_group_csv")
     if getattr(args, "factor_score_csv", None) is not None:
         cli_overrides.add("factor_score_csv")
+    if getattr(args, "custom_factors_py", None) is not None:
+        cli_overrides.add("custom_factors_py")
     if args.factor_weight:
         cli_overrides.add("factor_weights")
 
@@ -284,6 +292,7 @@ def build_config_from_mapping(config_kwargs: Mapping[str, object]) -> BacktestCo
         stock_pool_csv=cast(Path | None, config_kwargs["stock_pool_csv"]),
         symbol_group_csv=cast(Path | None, config_kwargs["symbol_group_csv"]),
         factor_score_csv=cast(Path | None, config_kwargs["factor_score_csv"]),
+        custom_factors_py=cast(Path | None, config_kwargs["custom_factors_py"]),
         factor_weights=cast(dict[str, float], config_kwargs["factor_weights"]).copy(),
     )
 
@@ -374,5 +383,6 @@ def config_to_kwargs(config: BacktestConfig) -> dict[str, object]:
         "stock_pool_csv": config.stock_pool_csv,
         "symbol_group_csv": config.symbol_group_csv,
         "factor_score_csv": config.factor_score_csv,
+        "custom_factors_py": config.custom_factors_py,
         "factor_weights": config.factor_weights.copy(),
     }
