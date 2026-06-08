@@ -23,8 +23,6 @@ from python_quant.reporting import (
     load_symbol_group_mapping,
     load_symbol_name_mapping,
     print_summary,
-    save_batch_chart_svg,
-    save_batch_heatmap_svg,
     save_equity_chart_svg,
     save_equity_curve,
     save_factor_scores,
@@ -462,20 +460,9 @@ class ReportingTests(unittest.TestCase):
                     "param_rebalance_every_n_days": "5",
                 },
             )
-            chart_path = save_batch_chart_svg(rows, output_dir, metric="annualized_return")
-            heatmap_path = save_batch_heatmap_svg(
-                rows,
-                output_dir,
-                x_field="param_top_n",
-                y_field="param_rebalance_every_n_days",
-                metric="annualized_return",
-            )
-
             self.assertTrue(leaderboard_csv.exists())
             self.assertTrue(leaderboard_json.exists())
             self.assertTrue(best_run_json.exists())
-            self.assertTrue(chart_path.exists())
-            self.assertTrue(heatmap_path.exists())
             leaderboard_payload = json.loads(leaderboard_json.read_text(encoding="utf-8"))
             best_payload = json.loads(best_run_json.read_text(encoding="utf-8"))
             self.assertEqual("方案2", leaderboard_payload["reader_friendly"]["best_scheme"])
@@ -498,13 +485,6 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("匹配推荐参数 / matches_recommended_parameters", leaderboard_content)
             self.assertIn("方案1", leaderboard_content)
             self.assertIn("run_002", leaderboard_content)
-            chart_content = chart_path.read_text(encoding="utf-8-sig")
-            heatmap_content = heatmap_path.read_text(encoding="utf-8-sig")
-            self.assertIn("年化收益参数对比图", chart_content)
-            self.assertIn("方案1", chart_content)
-            self.assertIn("方案2", chart_content)
-            self.assertIn("年化收益参数热力图", heatmap_content)
-
     def test_saves_batch_stability_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -1170,16 +1150,6 @@ class ReportingTests(unittest.TestCase):
             self.assertTrue(paths["pnl_ledger_json"].exists())
             self.assertIn("reconciliation_difference", paths["pnl_ledger_csv"].read_text(encoding="utf-8-sig"))
 
-    def test_saves_empty_batch_chart_with_chinese_placeholder(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = Path(temp_dir)
-
-            chart_path = save_batch_chart_svg([], output_dir, metric="annualized_return")
-
-            content = chart_path.read_text(encoding="utf-8-sig")
-            self.assertIn("年化收益参数对比图", content)
-            self.assertIn("暂无可展示数据", content)
-
     def test_rejects_unknown_batch_rank_metric(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -1644,7 +1614,6 @@ class ReportingTests(unittest.TestCase):
                 rows=rows,
                 rank_by="annualized_return",
                 artifacts={
-                    "batch_chart_svg": output_dir / "batch_annualized_return.svg",
                     "batch_stability_json": stability_path,
                 },
             )
@@ -1659,6 +1628,8 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("内部编号", content)
             self.assertIn("run_001", content)
             self.assertIn("Gate status", content)
+            self.assertIn("batch-metric-chart", content)
+            self.assertIn("echarts", content)
             self.assertIn("Health score", content)
             self.assertIn("闸门通过运行数", content)
             self.assertIn("闸门失败运行数", content)

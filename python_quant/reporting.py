@@ -31,11 +31,7 @@ from .reporting_rank import (
     float_metric,
     validate_rank_metric,
 )
-from .reporting_svg import (
-    build_bar_chart_svg,
-    build_heatmap_svg,
-    build_line_chart_svg,
-)
+from .reporting_svg import build_line_chart_svg
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
 
@@ -311,57 +307,6 @@ def save_equity_chart_svg(
             ("基准净值", benchmark_points, "#e67700"),
         ],
         y_axis_label="净值",
-    )
-    target_path.write_text(svg, encoding=_HUMAN_READABLE_ENCODING)
-    return target_path
-
-
-def save_batch_chart_svg(
-    rows: list[dict[str, object]],
-    output_dir: Path,
-    *,
-    metric: str = "annualized_return",
-) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    validate_rank_metric(rows, metric)
-    target_path = output_dir / f"batch_{metric}.svg"
-    points = [
-        (_format_run_label(row, row_index), float_metric(row, metric))
-        for row_index, row in enumerate(rows, start=1)
-        if metric in row and row[metric] not in ("", None)
-    ]
-    svg = build_bar_chart_svg(
-        title=f"{chinese_label(metric)}参数对比图",
-        points=points,
-        bar_color="#5c7cfa",
-        y_axis_label=display_label(metric),
-    )
-    target_path.write_text(svg, encoding=_HUMAN_READABLE_ENCODING)
-    return target_path
-
-
-def save_batch_heatmap_svg(
-    rows: list[dict[str, object]],
-    output_dir: Path,
-    *,
-    x_field: str,
-    y_field: str,
-    metric: str,
-) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    validate_rank_metric(rows, metric)
-    target_path = output_dir / f"batch_{metric}_heatmap.svg"
-
-    points = [
-        (str(row[x_field]), str(row[y_field]), float_metric(row, metric))
-        for row in rows
-        if x_field in row and y_field in row and metric in row
-    ]
-    svg = build_heatmap_svg(
-        title=f"{chinese_label(metric)}参数热力图",
-        x_label=display_label(x_field),
-        y_label=display_label(y_field),
-        points=points,
     )
     target_path.write_text(svg, encoding=_HUMAN_READABLE_ENCODING)
     return target_path

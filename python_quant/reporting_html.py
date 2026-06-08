@@ -84,7 +84,6 @@ def save_single_run_report_html(
     )
     if not holdings_rows:
         holdings_rows = "<tr><th>-</th><td>当前结果没有持仓数据。</td></tr>"
-    chart_name = artifacts["equity_curve_svg"].name if "equity_curve_svg" in artifacts else ""
     chart_title = "策略与基准净值" if has_benchmark else "策略净值走势"
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -123,10 +122,7 @@ def save_single_run_report_html(
     </div>
     <div class="card">
       <h2>{chart_title}</h2>
-      <div id="echarts-container" style="width: 100%; height: 400px; display: none;"></div>
-      <div id="svg-fallback-container">
-        <img src="{escape(chart_name)}" alt="{escape(chart_title)}" />
-      </div>
+      <div id="echarts-container" style="width: 100%; height: 400px;"></div>
     </div>
     <div class="card">
       <h2>当前持仓</h2>
@@ -225,12 +221,8 @@ def save_single_run_report_html(
       var portfolio = {json_portfolio};
       var benchmark = {json_benchmark};
       
-      var fallback = document.getElementById('svg-fallback-container');
-      if (fallback) fallback.style.display = 'none';
-      
       var container = document.getElementById('echarts-container');
       if (container) {{
-        container.style.display = 'block';
         var chart = echarts.init(container);
         
         var series = [{{
@@ -617,62 +609,6 @@ def _build_walk_forward_optimization_observation_rows(summary: dict[str, object]
         ("退化窗口参数组合", _format_degraded_parameter_sets(summary)),
     ]
     return _build_html_table_rows(rows)
-
-
-def _build_walk_forward_chart_blocks(
-    rows: list[dict[str, object]],
-    summary: dict[str, object],
-    *,
-    optimization: bool,
-) -> list[str]:
-    if optimization:
-        chart_specs = [
-            (
-                "测试窗口年化收益",
-                _chart_points(rows, "window_id", "test_annualized_return"),
-                "#2f9e44",
-                "年化收益",
-            ),
-            (
-                "训练/测试年化差距",
-                _chart_points(rows, "window_id", "train_test_annualized_gap"),
-                "#f08c00",
-                "年化差距",
-            ),
-            (
-                "参数漂移次数",
-                _count_chart_points(summary, "parameter_drift_counts"),
-                "#5c7cfa",
-                "漂移次数",
-            ),
-        ]
-    else:
-        chart_specs = [
-            (
-                "Walk-forward窗口年化收益",
-                _chart_points(rows, "window_id", "annualized_return"),
-                "#2f9e44",
-                "年化收益",
-            ),
-            (
-                "Walk-forward窗口最大回撤",
-                _chart_points(rows, "window_id", "max_drawdown"),
-                "#e03131",
-                "最大回撤",
-            ),
-        ]
-    return [
-        f'<div class="card wide"><h2>{escape(title)}</h2>{svg}</div>'
-        for title, points, color, y_label in chart_specs
-        for svg in [
-            build_bar_chart_svg(
-                title=title,
-                points=points,
-                bar_color=color,
-                y_axis_label=y_label,
-            )
-        ]
-    ]
 
 
 def _chart_points(rows: list[dict[str, object]], label_key: str, value_key: str) -> list[tuple[str, float]]:
@@ -1246,16 +1182,6 @@ def _build_artifact_links(artifacts: dict[str, Path]) -> str:
         f'<li><a href="{escape(path.name)}">{escape(display_label(name))}</a></li>'
         for name, path in artifacts.items()
     )
-
-
-def _build_batch_chart_blocks(artifacts: dict[str, Path]) -> list[str]:
-    chart_blocks: list[str] = []
-    for key in ("batch_chart_svg", "batch_heatmap_svg"):
-        if key in artifacts:
-            chart_blocks.append(
-                f'<div class="card"><h2>{escape(display_label(key))}</h2><img src="{escape(artifacts[key].name)}" alt="{escape(display_label(key))}" /></div>'
-            )
-    return chart_blocks
 
 
 def _build_html_table_rows(rows: list[tuple[str, str]]) -> str:

@@ -52,7 +52,7 @@
 - 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
 - 支持 walk-forward 滚动窗口验证，按多个连续时间窗口输出稳定性汇总。
 - 支持 walk-forward 参数优化：每个训练窗口从 `[sweep]` 参数网格中选最优参数，再在后续测试窗口验证；训练候选可跨窗口进入全局并发队列，并输出训练/测试退化、测试效率和过拟合风险诊断。
-- 自动输出中文化 SVG 图表、交互式 ECharts 网页图表和批量排行榜，减少手工读表。
+- 自动输出交互式 ECharts 网页图表、单次净值 SVG 和批量排行榜，减少手工读表。
 - 支持 `--rank-by` 自定义批量排序指标；双参数 sweep 会自动输出热力图。
 - 批量扫描会输出参数稳定性、综合评分、参数敏感度、推荐参数档位、健康闸门失败原因分布和可行动调参建议，提示最佳方案是否可能是参数孤岛，以及常见参数组合为什么被风险闸门淘汰。
 - 单次、批量扫描和 walk-forward 都会生成网页报告（HTML），方便直接浏览结果。
@@ -482,8 +482,6 @@ python -m pip install -e .[dev]
 - `batch_runs/batch_summary.json`：批量扫描汇总 JSON。
 - `batch_runs/batch_leaderboard.csv`：按指标排序的批量排行榜，包含失败闸门摘要、主要失败闸门类别/名称，以及是否匹配推荐参数档位。
 - `batch_runs/best_run.json`：当前批量结果中的最佳运行。
-- `batch_runs/batch_annualized_return.svg`：批量结果对比图。
-- `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
 - `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、推荐依据、推荐总结、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
 - `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率、最差回撤、推荐档位标记，以及“排序指标最优 / 综合分最优”标记。
 - `batch_runs/batch_report.html`：批量扫描网页报告，包含参数热力图、指标对比和排行榜等交互式 ECharts 图表。

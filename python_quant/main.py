@@ -116,11 +116,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选 TOML 配置文件。命令行参数会覆盖文件中的同名配置。",
     )
     parser.add_argument(
-        "--import-price-csv-to-sqlite",
-        type=str,
-        help="Import the --csv price file into a SQLite database path, then exit.",
-    )
-    parser.add_argument(
         "--import-data-to-sqlite",
         type=str,
         help="Import provided CSV inputs into a SQLite database path, then exit.",
@@ -307,14 +302,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    if args.import_price_csv_to_sqlite:
-        if not args.csv:
-            parser.error("--import-price-csv-to-sqlite requires --csv.")
-            return
-        row_count = import_price_csv_to_sqlite(args.csv, args.import_price_csv_to_sqlite)
-        print(f"Imported {row_count} price rows into SQLite: {args.import_price_csv_to_sqlite}")
-        return
-
     if args.import_data_to_sqlite:
         imported = _import_data_to_sqlite(args, parser)
         for label, row_count in imported:

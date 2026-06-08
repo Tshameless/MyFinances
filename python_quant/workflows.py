@@ -21,11 +21,7 @@ from .config import BacktestConfig, load_sweep_overrides_from_toml
 from .console_output import print_walk_forward_optimization_artifacts
 from .data_loader import load_factor_scores_from_csv, load_stock_pool_from_csv
 from .models import BacktestResult, PriceBar
-from .reporting import (
-    load_symbol_group_mapping,
-    save_batch_chart_svg,
-    save_batch_heatmap_svg,
-)
+from .reporting import load_symbol_group_mapping
 from .reporting_html import (
     save_batch_report_html,
     save_walk_forward_report_html,
@@ -197,33 +193,16 @@ def run_sweep(
             recommended_parameters if isinstance(recommended_parameters, dict) else {}
         ),
     )
-    batch_chart_path = save_batch_chart_svg(
-        rows,
-        batch_output_dir,
-        metric=args.rank_by,
-    )
-    heatmap_path = None
-    if len(sweep_overrides) == 2:
-        heatmap_path = save_batch_heatmap_svg(
-            rows,
-            batch_output_dir,
-            x_field=f"param_{list(sweep_overrides.keys())[0]}",
-            y_field=f"param_{list(sweep_overrides.keys())[1]}",
-            metric=args.rank_by,
-        )
     batch_artifacts = {
         "batch_summary_csv": summary_csv_path,
         "batch_summary_json": summary_json_path,
         "batch_leaderboard_csv": leaderboard_csv_path,
         "batch_leaderboard_json": leaderboard_json_path,
         "best_run_json": best_run_path,
-        "batch_chart_svg": batch_chart_path,
         "batch_stability_csv": stability_paths["batch_stability_csv"],
         "batch_stability_json": stability_paths["batch_stability_json"],
         "parameter_sensitivity_csv": stability_paths["parameter_sensitivity_csv"],
     }
-    if heatmap_path is not None:
-        batch_artifacts["batch_heatmap_svg"] = heatmap_path
     batch_report_path = save_batch_report_html(
         output_dir=batch_output_dir,
         rows=rows,

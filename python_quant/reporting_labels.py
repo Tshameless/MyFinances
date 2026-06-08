@@ -173,8 +173,6 @@ _ZH_LABELS = {
     "batch_leaderboard_csv": "最优结果排行CSV",
     "batch_leaderboard_json": "最优结果排行JSON",
     "best_run_json": "最佳方案JSON",
-    "batch_chart_svg": "参数对比图",
-    "batch_heatmap_svg": "参数热力图",
     "batch_stability_csv": "参数稳定性CSV",
     "batch_stability_json": "参数稳定性JSON",
     "parameter_sensitivity_csv": "参数敏感度CSV",
