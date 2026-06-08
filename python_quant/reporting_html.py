@@ -8,8 +8,7 @@ from pathlib import Path
 from .config import BacktestConfig
 from .models import BacktestMetrics, BenchmarkPoint, EquityPoint, RebalanceRecord
 from .reporting_labels import chinese_label, display_label, format_symbol, metric_explanation
-from .reporting_rank import float_metric, sort_rows_by_metric, validate_rank_metric
-from .reporting_svg import build_bar_chart_svg, build_heatmap_svg
+from .reporting_rank import sort_rows_by_metric, validate_rank_metric
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
 
@@ -218,7 +217,7 @@ def save_single_run_report_html(
     </div>
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  {_echarts_script_tag(output_dir)}
   <script>
   (function() {{
     if (typeof echarts !== 'undefined') {{
@@ -359,7 +358,8 @@ def save_batch_report_html(
     parameter_rows = _build_batch_parameter_rows(best_row)
     observation_rows = _build_batch_observation_rows(sorted_rows, rank_by, artifacts)
     artifact_links = _build_artifact_links(artifacts)
-    chart_blocks = _build_batch_chart_blocks(artifacts)
+    chart_blocks = _build_batch_chart_blocks(rows, rank_by)
+    chart_script = _build_batch_chart_script(rows, rank_by)
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -397,6 +397,8 @@ def save_batch_report_html(
     </div>
     {"".join(chart_blocks)}
   </div>
+  {_echarts_script_tag(output_dir)}
+  {chart_script}
 </body>
 </html>
 """
@@ -459,6 +461,7 @@ def save_walk_forward_report_html(
     table_rows = _build_analysis_preview_rows(rows, headers)
     artifact_links = _build_artifact_links(artifacts or {})
     chart_blocks = _build_walk_forward_chart_blocks(rows, summary, optimization=optimization)
+    chart_script = _build_walk_forward_chart_script(rows, summary, optimization=optimization)
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -492,6 +495,8 @@ def save_walk_forward_report_html(
       </table>
     </div>
   </div>
+  {_echarts_script_tag(output_dir)}
+  {chart_script}
 </body>
 </html>
 """
@@ -537,6 +542,7 @@ def _report_base_css(*, include_images: bool) -> str:
     .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
     .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
     .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+    .echart {{ width: 100%; height: 380px; }}
     """
 
 
@@ -1614,4 +1620,184 @@ def _format_holdings(holdings: tuple[str, ...], symbol_names: dict[str, str] | N
     if not holdings:
         return "空仓"
     return " | ".join(format_symbol(symbol, symbol_names) for symbol in holdings)
+
+
+def _echarts_script_tag(output_dir: Path | None = None) -> str:
+    local_script = "echarts.min.js"
+    if output_dir is not None and (output_dir / local_script).exists():
+        return f'<script src="{local_script}"></script>'
+    return (
+        '<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>'
+        '<script>if(typeof echarts==="undefined"){document.write('
+        '\'<script src="echarts.min.js"><\\/script>\');}</script>'
+    )
+
+
+def _build_batch_chart_blocks(rows: list[dict[str, object]], rank_by: str) -> list[str]:
+    if not rows:
+        return []
+    blocks = [
+        '<div class="card wide"><h2>Batch metric comparison</h2><div id="batch-metric-chart" class="echart"></div></div>'
+    ]
+    if len(_batch_parameter_fields(rows)) >= 2:
+        blocks.append(
+            '<div class="card wide"><h2>Parameter sweep heatmap</h2><div id="batch-heatmap-chart" class="echart"></div></div>'
+        )
+    return blocks
+
+
+def _build_walk_forward_chart_blocks(
+    rows: list[dict[str, object]],
+    summary: dict[str, object],
+    *,
+    optimization: bool,
+) -> list[str]:
+    if not rows and not summary:
+        return []
+    chart_specs = (
+        [
+            ("wf-test-return-chart", "测试窗口年化收益"),
+            ("wf-gap-chart", "训练/测试年化差距"),
+            ("wf-drift-chart", "参数漂移次数"),
+        ]
+        if optimization
+        else [
+            ("wf-return-chart", "Walk-forward窗口年化收益"),
+            ("wf-drawdown-chart", "Walk-forward窗口最大回撤"),
+        ]
+    )
+    return [
+        f'<div class="card wide"><h2>{escape(title)}</h2><div id="{chart_id}" class="echart"></div></div>'
+        for chart_id, title in chart_specs
+    ]
+
+
+def _build_batch_chart_script(rows: list[dict[str, object]], rank_by: str) -> str:
+    metric_points = _chart_points(rows, "run_id", rank_by)
+    parameter_fields = _batch_parameter_fields(rows)
+    heatmap_points: list[list[object]] = []
+    x_values: list[str] = []
+    y_values: list[str] = []
+    if len(parameter_fields) >= 2:
+        x_field, y_field = parameter_fields[:2]
+        x_values = _unique_sorted_strings(row.get(x_field) for row in rows)
+        y_values = _unique_sorted_strings(row.get(y_field) for row in rows)
+        x_index = {value: index for index, value in enumerate(x_values)}
+        y_index = {value: index for index, value in enumerate(y_values)}
+        for row in rows:
+            x_value = str(row.get(x_field, ""))
+            y_value = str(row.get(y_field, ""))
+            if x_value in x_index and y_value in y_index:
+                heatmap_points.append([x_index[x_value], y_index[y_value], _coerce_float(row.get(rank_by, 0.0))])
+    payload = {
+        "metric": rank_by,
+        "metricPoints": metric_points,
+        "xValues": x_values,
+        "yValues": y_values,
+        "heatmapPoints": heatmap_points,
+    }
+    return _echarts_bootstrap_script(
+        f"""
+        var payload = {json.dumps(payload)};
+        renderBar('batch-metric-chart', payload.metric, payload.metricPoints, '#2f9e44');
+        renderHeatmap('batch-heatmap-chart', payload.metric, payload.xValues, payload.yValues, payload.heatmapPoints);
+        """
+    )
+
+
+def _build_walk_forward_chart_script(
+    rows: list[dict[str, object]],
+    summary: dict[str, object],
+    *,
+    optimization: bool,
+) -> str:
+    if optimization:
+        payload = {
+            "testReturns": _chart_points(rows, "window_id", "test_annualized_return"),
+            "gaps": _chart_points(rows, "window_id", "train_test_annualized_gap"),
+            "drift": _count_chart_points(summary, "parameter_drift_counts"),
+        }
+        body = f"""
+        var payload = {json.dumps(payload)};
+        renderBar('wf-test-return-chart', 'test_annualized_return', payload.testReturns, '#2f9e44');
+        renderBar('wf-gap-chart', 'train_test_annualized_gap', payload.gaps, '#f08c00');
+        renderBar('wf-drift-chart', 'parameter_drift_counts', payload.drift, '#5c7cfa');
+        """
+    else:
+        payload = {
+            "returns": _chart_points(rows, "window_id", "annualized_return"),
+            "drawdowns": _chart_points(rows, "window_id", "max_drawdown"),
+        }
+        body = f"""
+        var payload = {json.dumps(payload)};
+        renderBar('wf-return-chart', 'annualized_return', payload.returns, '#2f9e44');
+        renderBar('wf-drawdown-chart', 'max_drawdown', payload.drawdowns, '#e03131');
+        """
+    return _echarts_bootstrap_script(body)
+
+
+def _echarts_bootstrap_script(body: str) -> str:
+    return f"""
+  <script>
+  (function() {{
+    if (typeof echarts === 'undefined') return;
+    function splitPoints(points) {{
+      return {{
+        labels: points.map(function(item) {{ return item[0]; }}),
+        values: points.map(function(item) {{ return item[1]; }})
+      }};
+    }}
+    function renderBar(id, name, points, color) {{
+      var element = document.getElementById(id);
+      if (!element || !points || points.length === 0) return;
+      var chart = echarts.init(element);
+      var data = splitPoints(points);
+      chart.setOption({{
+        tooltip: {{ trigger: 'axis' }},
+        grid: {{ left: '3%', right: '4%', top: 28, bottom: 48, containLabel: true }},
+        xAxis: {{ type: 'category', data: data.labels, axisLabel: {{ rotate: data.labels.length > 8 ? 30 : 0 }} }},
+        yAxis: {{ type: 'value', scale: true }},
+        series: [{{ name: name, type: 'bar', data: data.values, itemStyle: {{ color: color }} }}]
+      }});
+      window.addEventListener('resize', function() {{ chart.resize(); }});
+    }}
+    function renderHeatmap(id, name, xValues, yValues, points) {{
+      var element = document.getElementById(id);
+      if (!element || !points || points.length === 0) return;
+      var chart = echarts.init(element);
+      var values = points.map(function(item) {{ return item[2]; }});
+      chart.setOption({{
+        tooltip: {{
+          position: 'top',
+          formatter: function(params) {{
+            return xValues[params.value[0]] + ' / ' + yValues[params.value[1]] + ': ' + params.value[2];
+          }}
+        }},
+        grid: {{ left: '8%', right: '8%', top: 28, bottom: 48, containLabel: true }},
+        xAxis: {{ type: 'category', data: xValues }},
+        yAxis: {{ type: 'category', data: yValues }},
+        visualMap: {{
+          min: Math.min.apply(null, values),
+          max: Math.max.apply(null, values),
+          calculable: true,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 0
+        }},
+        series: [{{ name: name, type: 'heatmap', data: points, label: {{ show: true }} }}]
+      }});
+      window.addEventListener('resize', function() {{ chart.resize(); }});
+    }}
+{body}
+  }})();
+  </script>
+"""
+
+
+def _batch_parameter_fields(rows: list[dict[str, object]]) -> list[str]:
+    return sorted({key for row in rows for key in row if key.startswith("param_")})
+
+
+def _unique_sorted_strings(values: object) -> list[str]:
+    return sorted({str(value) for value in values if value not in (None, "")})
 

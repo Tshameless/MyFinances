@@ -3,6 +3,7 @@ from __future__ import annotations
 from math import sqrt
 from typing import cast
 
+from .compute_backend import compound_return, sample_stddev, tail_risk
 from .models import BenchmarkPoint, EquityPoint
 
 
@@ -115,15 +116,15 @@ def _tail_risk_summary(returns: list[float], *, confidence: float) -> dict[str, 
             "daily_expected_shortfall": 0.0,
             "worst_daily_return": 0.0,
         }
-    sorted_returns = sorted(returns)
-    tail_count = max(1, int(round(len(sorted_returns) * (1.0 - confidence))))
-    tail_returns = sorted_returns[:tail_count]
-    var_return = tail_returns[-1]
+    daily_var, daily_expected_shortfall, worst_daily_return = tail_risk(
+        returns,
+        confidence=confidence,
+    )
     return {
         "tail_risk_confidence": confidence,
-        "daily_var": abs(min(var_return, 0.0)),
-        "daily_expected_shortfall": abs(min(sum(tail_returns) / len(tail_returns), 0.0)),
-        "worst_daily_return": sorted_returns[0],
+        "daily_var": daily_var,
+        "daily_expected_shortfall": daily_expected_shortfall,
+        "worst_daily_return": worst_daily_return,
     }
 
 
@@ -145,14 +146,9 @@ def build_rolling_risk_analysis(
     for end_index in range(window - 1, len(curve)):
         segment = curve[end_index - window + 1 : end_index + 1]
         returns = [point.daily_return for point in segment]
-        rolling_return = 1.0
-        for value in returns:
-            rolling_return *= 1.0 + value
-        rolling_return -= 1.0
+        rolling_return = compound_return(returns)
 
-        mean_return = sum(returns) / len(returns)
-        variance = sum((value - mean_return) ** 2 for value in returns) / max(len(returns) - 1, 1)
-        volatility = sqrt(max(variance, 0.0)) * sqrt(252)
+        volatility = sample_stddev(returns) * sqrt(252)
         annualized_return = (1.0 + rolling_return) ** (252 / len(segment)) - 1.0
         sharpe = 0.0 if volatility == 0.0 else annualized_return / volatility
         max_drawdown = _window_max_drawdown(segment)

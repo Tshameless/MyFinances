@@ -47,6 +47,7 @@ def rebalance_account(
     positions: dict[str, int],
     entry_dates: dict[str, object],
     target_holdings: tuple[str, ...],
+    target_scores: dict[str, float] | None = None,
     aligned_history: dict[str, list[PriceBar]],
     index: int,
     config: BacktestConfig,
@@ -128,9 +129,14 @@ def rebalance_account(
     new_targets = tuple(symbol for symbol in target_holdings if symbol not in positions)
     target_count = len(retained_targets) + len(new_targets)
     investable_equity = start_equity * (1.0 - config.target_cash_weight)
-    equal_weight_target_value = investable_equity / target_count if target_count else 0.0
     capped_target_value = investable_equity * config.max_position_weight
-    target_value = min(equal_weight_target_value, capped_target_value)
+    target_values = _target_values_by_symbol(
+        target_holdings=target_holdings,
+        target_scores=target_scores or {},
+        investable_equity=investable_equity,
+        capped_target_value=capped_target_value,
+        config=config,
+    )
 
     for symbol in new_targets:
         bar = aligned_history[symbol][index]
@@ -140,7 +146,7 @@ def rebalance_account(
                 _build_trade_attempt(bar, "BUY", 0, price, buy_rejection_reason(bar), cash)
             )
             continue
-        max_cash_for_position = min(target_value, cash)
+        max_cash_for_position = min(target_values.get(symbol, 0.0), cash)
         requested_shares = round_down_to_lot(max_cash_for_position / price, config.lot_size)
         volume_limited_shares = max_buy_shares_by_volume(bar, config)
         shares = affordable_buy_shares(
@@ -209,6 +215,43 @@ def is_buyable(bar: PriceBar) -> bool:
     return bar.tradable and bar.can_buy
 
 
+def _target_values_by_symbol(
+    *,
+    target_holdings: tuple[str, ...],
+    target_scores: dict[str, float],
+    investable_equity: float,
+    capped_target_value: float,
+    config: BacktestConfig,
+) -> dict[str, float]:
+    if not target_holdings:
+        return {}
+    if config.allocation_model == "score_weighted":
+        weights = _score_weights(target_holdings, target_scores)
+    else:
+        weights = {symbol: 1.0 / len(target_holdings) for symbol in target_holdings}
+    return {
+        symbol: min(investable_equity * weight, capped_target_value)
+        for symbol, weight in weights.items()
+    }
+
+
+def _score_weights(
+    target_holdings: tuple[str, ...],
+    target_scores: dict[str, float],
+) -> dict[str, float]:
+    raw_values = {
+        symbol: max(float(target_scores.get(symbol, 0.0)), 0.0)
+        for symbol in target_holdings
+    }
+    total = sum(raw_values.values())
+    if total <= 0:
+        return {symbol: 1.0 / len(target_holdings) for symbol in target_holdings}
+    return {
+        symbol: value / total
+        for symbol, value in raw_values.items()
+    }
+
+
 def is_sellable(bar: PriceBar) -> bool:
     return bar.tradable and bar.can_sell
 
@@ -244,13 +287,20 @@ def round_down_to_lot(shares: float, lot_size: int) -> int:
 def max_buy_shares_by_volume(bar: PriceBar, config: BacktestConfig) -> int:
     if bar.volume is None:
         return 10**18
-    return round_down_to_lot(bar.volume * config.max_volume_participation, config.lot_size)
+    participation = _effective_volume_participation(config)
+    return round_down_to_lot(bar.volume * participation, config.lot_size)
 
 
 def max_sell_shares_by_volume(bar: PriceBar, config: BacktestConfig) -> int:
     if bar.volume is None:
         return 10**18
-    return int(bar.volume * config.max_volume_participation)
+    return int(bar.volume * _effective_volume_participation(config))
+
+
+def _effective_volume_participation(config: BacktestConfig) -> float:
+    if config.execution_style != "twap":
+        return config.max_volume_participation
+    return config.max_volume_participation / config.twap_slices
 
 
 def affordable_buy_shares(

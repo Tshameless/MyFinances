@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from math import sqrt
-
 from .config import BacktestConfig
+from .compute_backend import daily_returns, minmax_normalize, sample_stddev
 from .market import price_for_bar
 from .models import FactorScoreRecord, PriceBar
 from .factor_registry import register_factor
@@ -104,23 +103,11 @@ def _suspended_fill_bar(previous_bar: PriceBar, trading_date: date) -> PriceBar:
 
 
 def compute_daily_returns(closes: list[float]) -> list[float]:
-    returns: list[float] = []
-    for index in range(1, len(closes)):
-        previous = closes[index - 1]
-        current = closes[index]
-        if previous == 0:
-            returns.append(0.0)
-        else:
-            returns.append(current / previous - 1.0)
-    return returns
+    return daily_returns(closes)
 
 
 def _stddev(values: list[float]) -> float:
-    if len(values) < 2:
-        return 0.0
-    mean = sum(values) / len(values)
-    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
-    return sqrt(max(variance, 0.0))
+    return sample_stddev(values)
 
 
 @register_factor("momentum")
@@ -185,22 +172,18 @@ def calculate_factor_score_records(
     normalized: dict[str, dict[str, float]] = {}
     factor_names = list(config.normalized_factor_weights.keys())
     for factor_name in factor_names:
-        factor_values = [metrics[factor_name] for metrics in raw_scores.values() if factor_name in metrics]
+        factor_values = {
+            symbol: metrics[factor_name]
+            for symbol, metrics in raw_scores.items()
+            if factor_name in metrics
+        }
         if not factor_values:
             continue
 
-        factor_min = min(factor_values)
-        factor_max = max(factor_values)
-        spread = factor_max - factor_min
-
-        for symbol, metrics in raw_scores.items():
+        normalized_values = minmax_normalize(factor_values)
+        for symbol, value in normalized_values.items():
             normalized.setdefault(symbol, {})
-            if factor_name in metrics:
-                value = metrics[factor_name]
-                if spread == 0:
-                    normalized[symbol][factor_name] = 0.5
-                else:
-                    normalized[symbol][factor_name] = (value - factor_min) / spread
+            normalized[symbol][factor_name] = value
 
     total_scores: dict[str, float] = {}
     for symbol, metrics in normalized.items():

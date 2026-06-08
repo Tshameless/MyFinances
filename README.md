@@ -11,12 +11,13 @@
 - 支持估值价格和成交价格分离，可用 `close`/`adjusted_close` 做估值，并用 `close`/`adjusted_close`/`open`/`vwap` 做交易执行价。
 - 支持信号日和成交日分离，可配置延迟若干个交易 bar 后执行，便于模拟收盘后出信号、次日开盘或 VWAP 成交。
 - 支持动态股票池 CSV，调仓时只在当前有效股票池内开新仓，便于模拟指数成分、行业池或自定义可投池。
-- 支持等权选股、固定周期调仓、现金/股数持仓账本、A 股整手买入和基于实际成交的交易成本扣减。
+- 支持等权和分数加权资金分配、固定周期调仓、现金/股数持仓账本、A 股整手买入和基于实际成交的交易成本扣减。
 - 支持内置因子评分或外部 `date,symbol,score` 评分 CSV，并可选择高分优先或低分优先。
 - 支持目标现金权重，便于模拟保留现金缓冲或降低整体仓位。
 - 支持单票目标权重上限，降低可买标的不足或高集中组合导致的风险暴露。
 - 支持每个行业/分组最多入选数量，降低同一板块过度集中。
 - 支持按成交量参与率限制单日最大成交股数，减少小成交量标的的容量高估。
+- 支持 TWAP 风格容量切片，用更保守的单片成交参与率模拟分批执行。
 - 支持对缺失行情用前值补不可交易停牌估值条，减少停牌缺行导致的全市场日历丢失。
 - 支持 CSV 显式 `is_suspended`/`suspended` 停牌标记，并输出停牌审计分析，便于核对停牌估值和受影响股票。
 - 支持 TOML 配置文件、因子权重覆盖、卖出印花税建模。
@@ -47,13 +48,14 @@
 - 输出相对基准表现分析，在提供基准时展示主动收益、主动净值、主动回撤、主动胜率、最佳/最差主动日、跟踪误差和信息比率。
 - `--validate-csv` 会生成数据质量报告，检查缺失交易日、复权价缺失、实际执行价字段覆盖率、基准日期对齐、异常收益、每日股票数量变化、股票池质量、分组映射质量和外部评分覆盖率。
 - 自动写出 `run_manifest.json`，记录本次配置、输入和产物路径。
+- 支持把行情、基准、股票池、外部评分和代码分组导入 SQLite，并从 SQLite 按需读取，减少大 CSV 重复解析开销。
 - 支持基于 TOML `sweep` 配置的批量参数扫描与结果汇总。
 - 支持 walk-forward 滚动窗口验证，按多个连续时间窗口输出稳定性汇总。
-- 支持 walk-forward 参数优化：每个训练窗口从 `[sweep]` 参数网格中选最优参数，再在后续测试窗口验证，并输出训练/测试退化、测试效率和过拟合风险诊断。
-- 自动输出中文化 SVG 图表和批量排行榜，减少手工读表。
+- 支持 walk-forward 参数优化：每个训练窗口从 `[sweep]` 参数网格中选最优参数，再在后续测试窗口验证；训练候选可跨窗口进入全局并发队列，并输出训练/测试退化、测试效率和过拟合风险诊断。
+- 自动输出中文化 SVG 图表、交互式 ECharts 网页图表和批量排行榜，减少手工读表。
 - 支持 `--rank-by` 自定义批量排序指标；双参数 sweep 会自动输出热力图。
 - 批量扫描会输出参数稳定性、综合评分、参数敏感度、推荐参数档位、健康闸门失败原因分布和可行动调参建议，提示最佳方案是否可能是参数孤岛，以及常见参数组合为什么被风险闸门淘汰。
-- 单次和批量运行都会生成网页报告（HTML），方便直接浏览结果。
+- 单次、批量扫描和 walk-forward 都会生成网页报告（HTML），方便直接浏览结果。
 - 回测内核、执行撮合模型、交易规则、风险分析、因子分析、执行分析、暴露分析、批量稳定性分析、CSV/HTML 报告和运行产物编排已经拆分为独立模块，便于继续扩展。
 - 内置 `unittest` 回归测试。
 
@@ -96,6 +98,7 @@ python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data
 python -m python_quant.main --csv data/sample_prices.csv --top-n 5 --rebalance-days 10
 python -m python_quant.main --csv data/sample_prices.csv --selection-mode bottom
 python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data/factor_scores.csv
+python -m python_quant.main --csv data/sample_prices.csv --factor-score-csv data/factor_scores.csv --allocation-model score_weighted
 python -m python_quant.main --csv data/sample_prices.csv --benchmark-csv data/benchmark.csv --price-field adjusted_close
 python -m python_quant.main --csv data/sample_prices.csv --lot-size 1 --initial-cash 10000
 python -m python_quant.main --csv data/sample_prices.csv --start-date 2020-01-01 --end-date 2024-12-31
@@ -105,6 +108,7 @@ python -m python_quant.main --csv data/sample_prices.csv --stock-pool-csv data/s
 python -m python_quant.main --config backtest.example.toml --csv data/sample_prices.csv
 python -m python_quant.main --config backtest.example.toml --demo --sweep
 python -m python_quant.main --config backtest.example.toml --demo --sweep --rank-by sharpe
+python -m python_quant.main --csv prices.csv --benchmark-csv benchmark.csv --stock-pool-csv pool.csv --factor-score-csv scores.csv --symbol-group-csv groups.csv --import-data-to-sqlite data.sqlite
 ```
 
 ## 配置文件
@@ -160,6 +164,18 @@ python -m python_quant.main --csv prices.csv --factor-score-csv data/factor_scor
 ```
 
 `score_source` 可选 `auto`、`builtin`、`external`。默认 `auto` 会在调仓日存在外部评分时优先使用外部分数，缺失时回退到内置三因子；`builtin` 会忽略外部评分，只使用内置三因子；`external` 要求每个调仓日都必须有外部评分，缺失会直接报错。`selection_mode = "top"` 会选择高分标的，`selection_mode = "bottom"` 会选择低分标的，便于做 alpha 方向验证。运行清单会记录 `factor_score_csv` 的路径、大小和 SHA256；单次运行还会输出外部评分质量报告并把评分覆盖率纳入策略健康诊断。
+
+默认资金分配模型为等权。如果希望让入选标的按正向评分占比分配更多目标资金，可以设置：
+
+```toml
+allocation_model = "score_weighted"
+```
+
+```bash
+python -m python_quant.main --csv prices.csv --factor-score-csv data/factor_scores.csv --allocation-model score_weighted
+```
+
+当入选标的评分全部不为正时，`score_weighted` 会自动退回等权，避免负权重或零权重组合。
 
 费用模型支持比例费率、最低佣金和过户费：
 
@@ -261,6 +277,19 @@ max_volume_participation = 0.10
 
 表示单日买入或卖出股数最多为该股票成交量的 10%，并继续按 `lot_size` 向下取整。买入容量不足会缩小成交股数；卖出容量不足会部分卖出并保留剩余持仓。
 
+如果希望用更保守的分批执行容量，可以启用 TWAP 风格切片：
+
+```toml
+execution_style = "twap"
+twap_slices = 4
+```
+
+```bash
+python -m python_quant.main --csv prices.csv --execution-style twap --twap-slices 4
+```
+
+这会把 `max_volume_participation` 按切片数摊薄，例如 10% 参与率和 4 个切片会按单片 2.5% 参与率限制本次可成交股数。
+
 如果希望保留现金缓冲，可以设置：
 
 ```toml
@@ -349,6 +378,14 @@ symbol,group
 300750,新能源
 ```
 
+大样本或长周期回测可以先把常用数据导入 SQLite：
+
+```bash
+python -m python_quant.main --csv prices.csv --benchmark-csv benchmark.csv --stock-pool-csv pool.csv --factor-score-csv scores.csv --symbol-group-csv groups.csv --import-data-to-sqlite data.sqlite
+```
+
+导入后可以把行情、基准、股票池、评分或分组路径直接指向 `.sqlite` / `.sqlite3` / `.db` 文件。数据库会为日期和代码建立索引，适合减少重复 CSV 校验和解析时间。
+
 如果配置文件包含 `[sweep]`，可以配合 `--sweep` 一次运行多组参数。批量结果默认输出到 `output_dir/batch_runs/`。参数网格较大时可加 `--jobs 4` 并行运行多个候选。
 
 也可以执行 walk-forward 滚动窗口验证：
@@ -365,7 +402,7 @@ python -m python_quant.main --demo --walk-forward --walk-window 30 --walk-step 1
 python -m python_quant.main --demo --config backtest.example.toml --walk-optimize --walk-train-window 40 --walk-test-window 20 --walk-step 20 --rank-by annualized_return
 ```
 
-该流程会在每个训练窗口内运行 `[sweep]` 参数网格，按 `--rank-by` 选择最佳参数，再把该参数应用到紧随其后的测试窗口。结果默认输出到 `output_dir/walk_forward_optimization/`。训练候选同样支持 `--jobs` 并行。
+该流程会在每个训练窗口内运行 `[sweep]` 参数网格，按 `--rank-by` 选择最佳参数，再把该参数应用到紧随其后的测试窗口。结果默认输出到 `output_dir/walk_forward_optimization/`。设置 `--jobs` 后，训练阶段会把所有窗口的候选参数摊平成全局任务队列并发执行，窗口较多或参数网格较大时更容易吃满多核。
 
 也可以安装后直接运行：
 
@@ -449,13 +486,15 @@ python -m pip install -e .[dev]
 - `batch_runs/batch_<metric>_heatmap.svg`：双参数 sweep 的热力图。
 - `batch_runs/batch_stability.csv/json`：参数稳定性、综合评分、参数敏感度、各参数取值平均表现/通过率、推荐参数档位、推荐依据、推荐总结、健康闸门通过/失败数量、失败闸门类别/名称分布、可行动建议和参数孤岛提示。
 - `batch_runs/parameter_sensitivity.csv`：参数敏感度长表，每行对应一个参数取值，包含样本数、平均排序指标、最佳排序指标、平均综合分、闸门通过率、最差回撤、推荐档位标记，以及“排序指标最优 / 综合分最优”标记。
-- `batch_runs/batch_report.html`：批量扫描网页报告。
-- `walk_forward/walk_forward.csv/json` 和 `walk_forward/walk_forward_report.html`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要；HTML 报告会展示验证结论、核心指标卡片、窗口预览、窗口年化收益图和最大回撤图。
-- `walk_forward_optimization/walk_forward_optimization.csv/json` 和 `walk_forward_optimization/walk_forward_optimization_report.html`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、漂移最频繁参数、退化窗口参数组合、主导参数集、样本外稳定等级和过拟合风险摘要；HTML 报告会集中展示过拟合风险、参数漂移、退化窗口参数组合、测试年化收益图、训练/测试差距图和参数漂移图。
+- `batch_runs/batch_report.html`：批量扫描网页报告，包含参数热力图、指标对比和排行榜等交互式 ECharts 图表。
+- `walk_forward/walk_forward.csv/json` 和 `walk_forward/walk_forward_report.html`：walk-forward 滚动窗口验证汇总，包含每个窗口的起止日期、收益、回撤、夏普、胜率和稳定性摘要；HTML 报告会展示验证结论、核心指标卡片、窗口预览、窗口年化收益和最大回撤交互式图表。
+- `walk_forward_optimization/walk_forward_optimization.csv/json` 和 `walk_forward_optimization/walk_forward_optimization_report.html`：walk-forward 训练/测试优化汇总，包含每个训练窗口选出的参数、训练表现、测试表现、训练/测试年化差距、测试效率、退化窗口占比、参数漂移、漂移最频繁参数、退化窗口参数组合、主导参数集、样本外稳定等级和过拟合风险摘要；HTML 报告会集中展示过拟合风险、参数漂移、退化窗口参数组合、测试年化收益、训练/测试差距和参数漂移交互式图表。
 - `price_data_quality_report.csv/json`：`--validate-csv` 生成的行情数据质量报告，JSON 摘要会按本次 `execution_price_field` 统计缺失执行价行数和覆盖率。
 - `benchmark_quality_report.csv/json`：`--validate-csv --benchmark-csv ...` 生成的基准数据质量报告，检查基准日期是否覆盖行情日期、复权价缺失、异常日收益和最大单日波动。
 - `stock_pool_quality_report.csv/json`：`--validate-csv --stock-pool-csv ...` 生成的股票池质量报告，检查空日期、空代码、非法代码、重复日期-代码组合，以及在同时提供行情 CSV 时的缺失/多余股票池标的。
 - `symbol_group_quality_report.csv/json`：`--validate-csv --symbol-group-csv ...` 生成的分组映射质量报告，检查缺列、空代码、空分组、重复代码，以及在同时提供行情 CSV 时的缺失/多余映射。
+
+HTML 报告默认从 CDN 加载 ECharts。如果需要离线查看，可以把 `echarts.min.js` 放在对应报告 HTML 同目录；报告会优先加载本地文件，或在 CDN 不可用时自动回退到本地文件名。
 - `factor_score_quality_report.csv/json` 和 `factor_score_quality_distribution_by_date.csv`：`--validate-csv --factor-score-csv ...` 生成的外部评分质量报告，检查空日期、非法日期、空代码、非法代码、空分数、非法分数、重复日期-代码组合、整体与按日期的评分均值/标准差/重复率/极端值数量、异常评分日期摘要，以及在同时提供行情 CSV 时的评分日期/标的覆盖率；每日分布 CSV 便于用表格筛查异常评分日期。
 
 当前版本的输出风格已经按 A 股中文阅读场景做过收缩：

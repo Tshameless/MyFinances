@@ -113,6 +113,7 @@ def run_backtest(
                 positions=positions,
                 entry_dates=entry_dates,
                 target_holdings=selected,
+                target_scores=scores,
                 aligned_history=aligned_history,
                 index=execution_index,
                 config=config,

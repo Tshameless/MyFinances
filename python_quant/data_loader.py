@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import os
 import pickle
 from datetime import date, datetime
 from math import isfinite
@@ -49,6 +48,10 @@ def _save_to_cache(cache_path: Path, data: Any) -> None:
 
 def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
     path = Path(csv_path)
+    if _is_sqlite_path(path):
+        from .data_store import load_price_bars_from_sqlite
+
+        return load_price_bars_from_sqlite(path)
     if not path.exists():
         raise FileNotFoundError(f"CSV file not found: {path}")
 
@@ -160,6 +163,10 @@ def load_benchmark_bars_from_csv(
     csv_path: str | Path,
 ) -> list[PriceBar]:
     path = Path(csv_path)
+    if _is_sqlite_path(path):
+        from .data_store import load_benchmark_bars_from_sqlite
+
+        return load_benchmark_bars_from_sqlite(path)
     if not path.exists():
         raise FileNotFoundError(f"Benchmark CSV file not found: {path}")
 
@@ -210,6 +217,10 @@ def load_benchmark_bars_from_csv(
 
 def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
     path = Path(csv_path)
+    if _is_sqlite_path(path):
+        from .data_store import load_stock_pool_from_sqlite
+
+        return load_stock_pool_from_sqlite(path)
     if not path.exists():
         raise FileNotFoundError(f"Stock pool CSV file not found: {path}")
 
@@ -256,6 +267,10 @@ def load_stock_pool_from_csv(csv_path: str | Path) -> dict[date, set[str]]:
 
 def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, float]]:
     path = Path(csv_path)
+    if _is_sqlite_path(path):
+        from .data_store import load_factor_scores_from_sqlite
+
+        return load_factor_scores_from_sqlite(path)
     if not path.exists():
         raise FileNotFoundError(f"Factor score CSV file not found: {path}")
 
@@ -392,3 +407,7 @@ def _parse_boolean(raw_value: str | None, line_number: int, *, default: bool) ->
     if value in {"0", "false", "no", "n"}:
         return False
     raise DataValidationError(f"Line {line_number}: unsupported tradable flag '{raw_value}'.")
+
+
+def _is_sqlite_path(path: Path) -> bool:
+    return path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}

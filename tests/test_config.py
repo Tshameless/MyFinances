@@ -21,6 +21,7 @@ class ConfigTests(unittest.TestCase):
 top_n = 5
 selection_mode = "bottom"
 score_source = "external"
+allocation_model = "score_weighted"
 max_group_positions = 1
 rolling_risk_window = 15
 execution_delay_days = 1
@@ -66,6 +67,7 @@ low_volatility = 0.3
             self.assertEqual(5, overrides["top_n"])
             self.assertEqual("bottom", overrides["selection_mode"])
             self.assertEqual("external", overrides["score_source"])
+            self.assertEqual("score_weighted", overrides["allocation_model"])
             self.assertEqual(1, overrides["max_group_positions"])
             self.assertEqual(15, overrides["rolling_risk_window"])
             self.assertEqual(1, overrides["execution_delay_days"])
@@ -287,6 +289,10 @@ rebalance_every_n_days = [5, "10"]
     def test_rejects_invalid_score_source(self) -> None:
         with self.assertRaisesRegex(ValueError, "score_source"):
             BacktestConfig(score_source="mixed")
+
+    def test_rejects_invalid_allocation_model(self) -> None:
+        with self.assertRaisesRegex(ValueError, "allocation_model"):
+            BacktestConfig(allocation_model="mvo")
 
     def test_loads_custom_factor_script(self) -> None:
         import tempfile

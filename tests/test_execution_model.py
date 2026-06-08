@@ -44,6 +44,18 @@ class ExecutionModelTests(unittest.TestCase):
         self.assertEqual(237, max_sell_shares_by_volume(bar, config))
         self.assertEqual(300, round_down_to_lot(399.9, 100))
 
+    def test_twap_style_splits_volume_participation(self) -> None:
+        config = BacktestConfig(
+            lot_size=100,
+            max_volume_participation=0.40,
+            execution_style="twap",
+            twap_slices=4,
+        )
+        bar = PriceBar(date=date(2024, 1, 2), symbol="000001", close=10, volume=1000)
+
+        self.assertEqual(100, max_buy_shares_by_volume(bar, config))
+        self.assertEqual(100, max_sell_shares_by_volume(bar, config))
+
     def test_commission_uses_side_specific_rate_and_minimum(self) -> None:
         config = BacktestConfig(
             commission_rate=0.0,
@@ -255,6 +267,37 @@ class ExecutionModelTests(unittest.TestCase):
         )
 
         self.assertEqual(9.5, result.trades[0].price)
+
+    def test_score_weighted_allocation_buys_more_high_score_symbol(self) -> None:
+        aligned_history = {
+            "000001": [
+                PriceBar(date=date(2024, 1, 3), symbol="000001", close=10, volume=10_000)
+            ],
+            "600519": [
+                PriceBar(date=date(2024, 1, 3), symbol="600519", close=10, volume=10_000)
+            ],
+        }
+
+        result = rebalance_account(
+            cash=10_000.0,
+            positions={},
+            entry_dates={},
+            target_holdings=("000001", "600519"),
+            target_scores={"000001": 3.0, "600519": 1.0},
+            aligned_history=aligned_history,
+            index=0,
+            config=BacktestConfig(
+                allocation_model="score_weighted",
+                lot_size=100,
+                commission_rate=0.0,
+                slippage_rate=0.0,
+                price_field="close",
+            ),
+            current_date=date(2024, 1, 3),
+        )
+
+        self.assertEqual(700, result.positions["000001"])
+        self.assertEqual(200, result.positions["600519"])
 
     def test_rebalance_records_market_impact_slippage(self) -> None:
         aligned_history = {

@@ -1693,5 +1693,46 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("稳健热区占比", content)
 
 
+    def test_html_reports_include_echarts_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            batch_path = save_batch_report_html(
+                output_dir=output_dir,
+                rows=[
+                    {
+                        "run_id": "run_001",
+                        "annualized_return": 0.2,
+                        "param_top_n": 3,
+                        "param_rebalance_every_n_days": 5,
+                    }
+                ],
+                rank_by="annualized_return",
+                artifacts={},
+            )
+            walk_path = save_walk_forward_report_html(
+                output_dir=output_dir,
+                analysis={
+                    "rows": [
+                        {
+                            "window_id": "window_001",
+                            "annualized_return": 0.2,
+                            "max_drawdown": -0.03,
+                        }
+                    ],
+                    "summary": {"windows": 1},
+                },
+            )
+
+            batch_content = batch_path.read_text(encoding="utf-8-sig")
+            walk_content = walk_path.read_text(encoding="utf-8-sig")
+            self.assertIn("echarts.min.js", batch_content)
+            self.assertIn("batch-metric-chart", batch_content)
+            self.assertIn("batch-heatmap-chart", batch_content)
+            self.assertIn("renderHeatmap", batch_content)
+            self.assertIn("echarts.min.js", walk_content)
+            self.assertIn("wf-return-chart", walk_content)
+            self.assertIn("wf-drawdown-chart", walk_content)
+
+
 if __name__ == "__main__":
     unittest.main()

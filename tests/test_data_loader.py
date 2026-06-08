@@ -11,6 +11,14 @@ from python_quant.data_loader import (
     load_price_bars_from_csv,
     load_stock_pool_from_csv,
 )
+from python_quant.data_store import import_price_csv_to_sqlite
+from python_quant.data_store import (
+    import_benchmark_csv_to_sqlite,
+    import_factor_scores_csv_to_sqlite,
+    import_stock_pool_csv_to_sqlite,
+    import_symbol_groups_csv_to_sqlite,
+)
+from python_quant.reporting import load_symbol_group_mapping
 
 
 class DataLoaderTests(unittest.TestCase):
@@ -36,6 +44,50 @@ class DataLoaderTests(unittest.TestCase):
         self.assertFalse(bars[0].is_limit_down)
         self.assertTrue(bars[0].is_st)
         self.assertEqual(0.05, bars[0].limit_rate)
+
+    def test_imports_and_loads_price_bars_from_sqlite(self) -> None:
+        csv_content = """date,symbol,close,adjusted_close,open,vwap,volume,can_buy,can_sell,is_suspended,is_limit_up,is_limit_down,is_st,limit_rate
+2024-01-02,000001,10.5,11.0,10.2,10.4,1000,0,1,true,true,false,true,0.05
+2024-01-03,000001,10.8,11.2,10.6,10.7,1100,true,true,false,false,false,false,
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "prices.csv"
+            db_path = Path(temp_dir) / "prices.sqlite"
+            csv_path.write_text(csv_content, encoding="utf-8")
+
+            row_count = import_price_csv_to_sqlite(csv_path, db_path)
+            bars = load_price_bars_from_csv(db_path)
+
+            self.assertEqual(2, row_count)
+            self.assertEqual(2, len(bars))
+            self.assertEqual("000001", bars[0].symbol)
+            self.assertEqual(11.0, bars[0].adjusted_close)
+            self.assertEqual(10.4, bars[0].vwap)
+            self.assertFalse(bars[0].can_buy)
+            self.assertTrue(bars[0].is_limit_up)
+
+    def test_imports_auxiliary_csvs_to_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            db_path = root / "data.sqlite"
+            benchmark_csv = root / "benchmark.csv"
+            pool_csv = root / "pool.csv"
+            scores_csv = root / "scores.csv"
+            groups_csv = root / "groups.csv"
+            benchmark_csv.write_text("date,close,adjusted_close\n2024-01-02,10,10.1\n", encoding="utf-8")
+            pool_csv.write_text("date,symbol\n2024-01-02,000001\n", encoding="utf-8")
+            scores_csv.write_text("date,symbol,score\n2024-01-02,000001,1.5\n", encoding="utf-8")
+            groups_csv.write_text("symbol,group\n000001,bank\n", encoding="utf-8")
+
+            self.assertEqual(1, import_benchmark_csv_to_sqlite(benchmark_csv, db_path))
+            self.assertEqual(1, import_stock_pool_csv_to_sqlite(pool_csv, db_path))
+            self.assertEqual(1, import_factor_scores_csv_to_sqlite(scores_csv, db_path))
+            self.assertEqual(1, import_symbol_groups_csv_to_sqlite(groups_csv, db_path))
+
+            self.assertEqual(10.1, load_benchmark_bars_from_csv(db_path)[0].adjusted_close)
+            self.assertEqual({"000001"}, load_stock_pool_from_csv(db_path)[date(2024, 1, 2)])
+            self.assertEqual(1.5, load_factor_scores_from_csv(db_path)[date(2024, 1, 2)]["000001"])
+            self.assertEqual({"000001": "bank"}, load_symbol_group_mapping(db_path))
 
     def test_loads_benchmark_without_symbol_column(self) -> None:
         csv_content = """date,close,adjusted_close

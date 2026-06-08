@@ -27,6 +27,13 @@ from .data_quality import (
     save_mapping_quality_report,
     save_stock_pool_quality_report,
 )
+from .data_store import (
+    import_benchmark_csv_to_sqlite,
+    import_factor_scores_csv_to_sqlite,
+    import_price_csv_to_sqlite,
+    import_stock_pool_csv_to_sqlite,
+    import_symbol_groups_csv_to_sqlite,
+)
 from .models import PriceBar
 from .run_outputs import persist_run_outputs
 from .sample_data import generate_demo_bars
@@ -109,6 +116,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="可选 TOML 配置文件。命令行参数会覆盖文件中的同名配置。",
     )
     parser.add_argument(
+        "--import-price-csv-to-sqlite",
+        type=str,
+        help="Import the --csv price file into a SQLite database path, then exit.",
+    )
+    parser.add_argument(
+        "--import-data-to-sqlite",
+        type=str,
+        help="Import provided CSV inputs into a SQLite database path, then exit.",
+    )
+    parser.add_argument(
         "--sweep",
         action="store_true",
         help="读取 TOML 中的 [sweep] 配置并执行批量参数扫描。",
@@ -180,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "builtin", "external"],
         help="评分来源：auto 有外部评分时优先使用，builtin 只用内置因子，external 要求调仓日必须有外部评分。",
     )
+    parser.add_argument(
+        "--allocation-model",
+        choices=["equal_weight", "score_weighted"],
+        help="Position allocation model: equal_weight or score_weighted.",
+    )
     parser.add_argument("--max-group-positions", type=int, help="每个代码分组最多入选股票数量；需配合 symbol_group_csv。")
     parser.add_argument("--lot-size", type=int, help="每手股数，A 股默认使用 100。")
     parser.add_argument("--rebalance-days", type=int, help="调仓间隔天数。")
@@ -248,6 +270,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delay trade execution by N aligned trading bars after the signal date.",
     )
     parser.add_argument(
+        "--execution-style",
+        choices=["market", "twap"],
+        help="Execution style. market is the default; twap splits volume participation across slices.",
+    )
+    parser.add_argument(
+        "--twap-slices",
+        type=int,
+        help="Number of TWAP slices used when --execution-style twap is enabled.",
+    )
+    parser.add_argument(
         "--max-allowed-rebalance-changes",
         type=float,
         help="Maximum average entries plus exits per rebalance allowed by the strategy health gate.",
@@ -275,6 +307,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if args.import_price_csv_to_sqlite:
+        if not args.csv:
+            parser.error("--import-price-csv-to-sqlite requires --csv.")
+            return
+        row_count = import_price_csv_to_sqlite(args.csv, args.import_price_csv_to_sqlite)
+        print(f"Imported {row_count} price rows into SQLite: {args.import_price_csv_to_sqlite}")
+        return
+
+    if args.import_data_to_sqlite:
+        imported = _import_data_to_sqlite(args, parser)
+        for label, row_count in imported:
+            print(f"Imported {row_count} {label} rows into SQLite: {args.import_data_to_sqlite}")
+        return
+
     if args.validate_csv:
         _validate_csv_inputs(args, parser)
         return
@@ -365,6 +411,33 @@ def _load_benchmark_bars(args: argparse.Namespace) -> list[PriceBar] | None:
     if args.benchmark_csv:
         return load_benchmark_bars_from_csv(args.benchmark_csv)
     return None
+
+
+def _import_data_to_sqlite(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[tuple[str, int]]:
+    if not any(
+        [
+            args.csv,
+            args.benchmark_csv,
+            args.stock_pool_csv,
+            args.factor_score_csv,
+            args.symbol_group_csv,
+        ]
+    ):
+        parser.error("--import-data-to-sqlite requires at least one CSV input.")
+        raise AssertionError("parser.error should have exited")
+    db_path = args.import_data_to_sqlite
+    imported: list[tuple[str, int]] = []
+    if args.csv:
+        imported.append(("price", import_price_csv_to_sqlite(args.csv, db_path)))
+    if args.benchmark_csv:
+        imported.append(("benchmark", import_benchmark_csv_to_sqlite(args.benchmark_csv, db_path)))
+    if args.stock_pool_csv:
+        imported.append(("stock_pool", import_stock_pool_csv_to_sqlite(args.stock_pool_csv, db_path)))
+    if args.factor_score_csv:
+        imported.append(("factor_score", import_factor_scores_csv_to_sqlite(args.factor_score_csv, db_path)))
+    if args.symbol_group_csv:
+        imported.append(("symbol_group", import_symbol_groups_csv_to_sqlite(args.symbol_group_csv, db_path)))
+    return imported
 
 
 def _validate_csv_inputs(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:

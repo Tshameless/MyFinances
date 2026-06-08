@@ -394,6 +394,10 @@ def load_symbol_name_mapping(symbol_name_csv: Path | None) -> dict[str, str]:
 def load_symbol_group_mapping(symbol_group_csv: Path | None) -> dict[str, str]:
     if symbol_group_csv is None:
         return {}
+    if symbol_group_csv.suffix.lower() in {".sqlite", ".sqlite3", ".db"}:
+        from .data_store import load_symbol_groups_from_sqlite
+
+        return load_symbol_groups_from_sqlite(symbol_group_csv)
     if not symbol_group_csv.exists():
         raise FileNotFoundError(f"Symbol group CSV not found: {symbol_group_csv}")
 

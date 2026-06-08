@@ -28,7 +28,8 @@ class DynamicSupportedFactors:
 
     def __rsub__(self, other: object) -> set[str]:
         from .factor_registry import get_registered_factors
-        return set(other) - set(get_registered_factors())  # type: ignore
+
+        return set(other) - (set(get_registered_factors()) | set(DEFAULT_FACTOR_WEIGHTS))  # type: ignore
 
 SUPPORTED_FACTORS = DynamicSupportedFactors()
 _BACKTEST_SIMPLE_FIELDS = frozenset(
@@ -37,6 +38,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "top_n",
         "selection_mode",
         "score_source",
+        "allocation_model",
         "lot_size",
         "max_group_positions",
         "lookback_momentum",
@@ -44,6 +46,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "lookback_volatility",
         "rolling_risk_window",
         "execution_delay_days",
+        "twap_slices",
         "max_allowed_drawdown",
         "max_allowed_daily_var",
         "min_allowed_rolling_return",
@@ -80,6 +83,7 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "forward_fill_suspended_bars",
         "price_field",
         "execution_price_field",
+        "execution_style",
         "start_date",
         "end_date",
     }
@@ -100,6 +104,7 @@ _INT_FIELDS = frozenset(
         "lookback_volatility",
         "rolling_risk_window",
         "execution_delay_days",
+        "twap_slices",
         "rebalance_every_n_days",
     }
 )
@@ -140,7 +145,7 @@ _FLOAT_FIELDS = frozenset(
     }
 )
 _OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate"})
-_STRING_FIELDS = frozenset({"selection_mode", "score_source", "price_field", "execution_price_field"})
+_STRING_FIELDS = frozenset({"selection_mode", "score_source", "allocation_model", "price_field", "execution_price_field", "execution_style"})
 _OPTIONAL_STRING_FIELDS = frozenset({"execution_price_field"})
 _DATE_FIELDS = frozenset({"start_date", "end_date"})
 _BOOL_FIELDS = frozenset({"infer_limit_flags", "infer_limit_rate_by_symbol", "forward_fill_suspended_bars"})
@@ -152,6 +157,7 @@ class BacktestConfig:
     top_n: int = 3
     selection_mode: str = "top"
     score_source: str = "auto"
+    allocation_model: str = "equal_weight"
     lot_size: int = 100
     max_group_positions: int | None = None
     lookback_momentum: int = 20
@@ -159,6 +165,7 @@ class BacktestConfig:
     lookback_volatility: int = 20
     rolling_risk_window: int = 20
     execution_delay_days: int = 0
+    twap_slices: int = 1
     max_allowed_drawdown: float = 0.20
     max_allowed_daily_var: float = 0.05
     min_allowed_rolling_return: float = -0.10
@@ -195,6 +202,7 @@ class BacktestConfig:
     forward_fill_suspended_bars: bool = False
     price_field: str = "adjusted_close"
     execution_price_field: str | None = None
+    execution_style: str = "market"
     start_date: date | None = None
     end_date: date | None = None
     output_dir: Path = OUTPUT_DIR
@@ -229,6 +237,8 @@ class BacktestConfig:
             raise ConfigValidationError("selection_mode must be one of: top, bottom.")
         if self.score_source not in {"auto", "builtin", "external"}:
             raise ConfigValidationError("score_source must be one of: auto, builtin, external.")
+        if self.allocation_model not in {"equal_weight", "score_weighted"}:
+            raise ConfigValidationError("allocation_model must be one of: equal_weight, score_weighted.")
         if self.lot_size <= 0:
             raise ConfigValidationError("lot_size must be greater than 0.")
         if self.max_group_positions is not None and self.max_group_positions <= 0:
@@ -244,6 +254,10 @@ class BacktestConfig:
             raise ConfigValidationError("All lookback and rolling windows must be greater than 0.")
         if self.execution_delay_days < 0:
             raise ConfigValidationError("execution_delay_days must be greater than or equal to 0.")
+        if self.twap_slices <= 0:
+            raise ConfigValidationError("twap_slices must be greater than 0.")
+        if self.execution_style not in {"market", "twap"}:
+            raise ConfigValidationError("execution_style must be one of: market, twap.")
         if min(
             self.commission_rate,
             0.0 if self.buy_commission_rate is None else self.buy_commission_rate,
@@ -387,6 +401,7 @@ class BacktestConfig:
             "top_n": self.top_n,
             "selection_mode": self.selection_mode,
             "score_source": self.score_source,
+            "allocation_model": self.allocation_model,
             "lot_size": self.lot_size,
             "max_group_positions": self.max_group_positions,
             "lookback_momentum": self.lookback_momentum,
@@ -394,6 +409,7 @@ class BacktestConfig:
             "lookback_volatility": self.lookback_volatility,
             "rolling_risk_window": self.rolling_risk_window,
             "execution_delay_days": self.execution_delay_days,
+            "twap_slices": self.twap_slices,
             "max_allowed_drawdown": self.max_allowed_drawdown,
             "max_allowed_daily_var": self.max_allowed_daily_var,
             "min_allowed_rolling_return": self.min_allowed_rolling_return,
@@ -430,6 +446,7 @@ class BacktestConfig:
             "forward_fill_suspended_bars": self.forward_fill_suspended_bars,
             "price_field": self.price_field,
             "execution_price_field": self.execution_price_field,
+            "execution_style": self.execution_style,
             "start_date": self.start_date,
             "end_date": self.end_date,
             "output_dir": self.output_dir,
@@ -449,6 +466,7 @@ class BacktestConfig:
             top_n=cast(int, mapping["top_n"]),
             selection_mode=cast(str, mapping["selection_mode"]),
             score_source=cast(str, mapping["score_source"]),
+            allocation_model=cast(str, mapping.get("allocation_model", "equal_weight")),
             lot_size=cast(int, mapping["lot_size"]),
             max_group_positions=cast(int | None, mapping["max_group_positions"]),
             lookback_momentum=cast(int, mapping["lookback_momentum"]),
@@ -456,6 +474,7 @@ class BacktestConfig:
             lookback_volatility=cast(int, mapping["lookback_volatility"]),
             rolling_risk_window=cast(int, mapping["rolling_risk_window"]),
             execution_delay_days=cast(int, mapping["execution_delay_days"]),
+            twap_slices=cast(int, mapping.get("twap_slices", 1)),
             max_allowed_drawdown=cast(float, mapping["max_allowed_drawdown"]),
             max_allowed_daily_var=cast(float, mapping["max_allowed_daily_var"]),
             min_allowed_rolling_return=cast(float, mapping["min_allowed_rolling_return"]),
@@ -492,6 +511,7 @@ class BacktestConfig:
             forward_fill_suspended_bars=cast(bool, mapping["forward_fill_suspended_bars"]),
             price_field=cast(str, mapping["price_field"]),
             execution_price_field=cast(str | None, mapping["execution_price_field"]),
+            execution_style=cast(str, mapping.get("execution_style", "market")),
             start_date=cast(date | None, mapping["start_date"]),
             end_date=cast(date | None, mapping["end_date"]),
             output_dir=cast(Path, mapping["output_dir"]),

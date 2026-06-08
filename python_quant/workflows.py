@@ -58,6 +58,11 @@ class _TrainCandidateResult(TypedDict):
     overrides: dict[str, object]
 
 
+class _GlobalTrainCandidateResult(_TrainCandidateResult):
+    window_id: str
+    combo_number: int
+
+
 _WORKER_CTX: dict[str, object] = {}
 
 def _init_worker(ctx: dict[str, object]) -> None:
@@ -92,6 +97,40 @@ def _wf_train_worker_wrapper(item: tuple[int, dict[str, object]]) -> _TrainCandi
         override_values=item[1],
         build_config_sources=cast(ConfigSourcesBuilder, _WORKER_CTX["build_config_sources"]),
     )
+
+
+def _wf_window_worker_wrapper(item: tuple[int, tuple[date, date]]) -> dict[str, object]:
+    global _WORKER_CTX
+    return _run_walk_forward_window(
+        args=cast("argparse.Namespace", _WORKER_CTX["args"]),
+        bars=cast(list[PriceBar], _WORKER_CTX["bars"]),
+        benchmark_bars=cast(list[PriceBar] | None, _WORKER_CTX["benchmark_bars"]),
+        base_config=cast(BacktestConfig, _WORKER_CTX["base_config"]),
+        walk_output_dir=cast(Path, _WORKER_CTX["walk_output_dir"]),
+        window_number=item[0],
+        window=item[1],
+        build_config_sources=cast(ConfigSourcesBuilder, _WORKER_CTX["build_config_sources"]),
+    )
+
+
+def _wf_global_train_worker_wrapper(item: dict[str, object]) -> _GlobalTrainCandidateResult:
+    global _WORKER_CTX
+    train_result = _run_walk_forward_train_candidate(
+        args=cast("argparse.Namespace", _WORKER_CTX["args"]),
+        train_bars=cast(list[PriceBar], item["train_bars"]),
+        train_benchmark_bars=cast(list[PriceBar] | None, item["train_benchmark_bars"]),
+        base_config=cast(BacktestConfig, _WORKER_CTX["base_config"]),
+        train_output_dir=cast(Path, item["train_output_dir"]),
+        train_start=cast(date, item["train_start"]),
+        train_end=cast(date, item["train_end"]),
+        override_values=cast(dict[str, object], item["overrides"]),
+        build_config_sources=cast(ConfigSourcesBuilder, _WORKER_CTX["build_config_sources"]),
+    )
+    return {
+        **train_result,
+        "window_id": cast(str, item["window_id"]),
+        "combo_number": cast(int, item["combo_number"]),
+    }
 
 
 def run_sweep(
@@ -224,60 +263,37 @@ def run_walk_forward(
         raise ValueError("walk-forward window settings produced no windows.")
 
     walk_output_dir = base_config.output_dir / "walk_forward"
-    rows: list[dict[str, object]] = []
-    for window_number, (start_date, end_date) in enumerate(windows, start=1):
-        window_id = f"window_{window_number:03d}"
-        run_output_dir = walk_output_dir / window_id
-        config_kwargs = base_config.to_dict()
-        config_kwargs["start_date"] = start_date
-        config_kwargs["end_date"] = end_date
-        config_kwargs["output_dir"] = run_output_dir
-        run_config = BacktestConfig.from_dict(config_kwargs)
-        window_bars = filter_bars_by_date_range(
-            bars,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        window_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=start_date,
-                end_date=end_date,
+    items = [
+        (window_number, window)
+        for window_number, window in enumerate(windows, start=1)
+    ]
+    if args.jobs <= 1 or len(items) <= 1:
+        rows = [
+            _run_walk_forward_window(
+                args=args,
+                bars=bars,
+                benchmark_bars=benchmark_bars,
+                base_config=base_config,
+                walk_output_dir=walk_output_dir,
+                window_number=item[0],
+                window=item[1],
+                build_config_sources=build_config_sources,
             )
-        )
-        result = run_backtest(
-            window_bars,
-            run_config,
-            benchmark_bars=window_benchmark_bars,
-            stock_pool_by_date=load_stock_pool(run_config),
-            symbol_groups=load_symbol_groups(run_config),
-            factor_scores_by_date=load_factor_scores(run_config),
-        )
-        artifact_paths = persist_run_outputs(
-            output_dir=run_output_dir,
-            result=result,
-            config=run_config,
-            inputs=build_input_metadata(args, run_config),
-            print_console=False,
-            config_sources=build_config_sources(args),
-        )
-        rows.append(
-            {
-                "window_id": window_id,
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "periods": result.metrics.periods,
-                "total_return": result.metrics.total_return,
-                "annualized_return": result.metrics.annualized_return,
-                "max_drawdown": result.metrics.max_drawdown,
-                "sharpe": result.metrics.sharpe,
-                "win_rate": result.metrics.win_rate,
-                "total_cost": result.metrics.total_cost,
-                "run_manifest_json": str(artifact_paths["run_manifest_json"]),
-            }
-        )
+            for item in items
+        ]
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+
+        ctx = {
+            "args": args,
+            "bars": bars,
+            "benchmark_bars": benchmark_bars,
+            "base_config": base_config,
+            "walk_output_dir": walk_output_dir,
+            "build_config_sources": build_config_sources,
+        }
+        with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
+            rows = list(executor.map(_wf_window_worker_wrapper, items))
 
     analysis = build_walk_forward_summary(rows)
     paths = save_walk_forward_files(analysis, walk_output_dir)
@@ -295,30 +311,80 @@ def run_walk_forward(
     print(f"Walk-forward HTML 报告已保存：{report_path}")
 
 
-def run_walk_forward_optimization(
+def _run_walk_forward_window(
+    *,
     args: argparse.Namespace,
     bars: list[PriceBar],
     benchmark_bars: list[PriceBar] | None,
-    *,
     base_config: BacktestConfig,
+    walk_output_dir: Path,
+    window_number: int,
+    window: tuple[date, date],
     build_config_sources: ConfigSourcesBuilder,
-) -> None:
-    sweep_overrides = load_sweep_overrides_from_toml(args.config)
-    if not sweep_overrides:
-        raise ValueError("配置文件中未找到 [sweep] 配置段。")
-    combinations = expand_sweep_combinations(sweep_overrides)
-    dates = sorted({bar.date for bar in bars})
-    windows = build_walk_forward_train_test_windows(
-        dates,
-        train_size=args.walk_train_window,
-        test_size=args.walk_test_window,
-        step_size=args.walk_step,
+) -> dict[str, object]:
+    start_date, end_date = window
+    window_id = f"window_{window_number:03d}"
+    run_output_dir = walk_output_dir / window_id
+    config_kwargs = base_config.to_dict()
+    config_kwargs["start_date"] = start_date
+    config_kwargs["end_date"] = end_date
+    config_kwargs["output_dir"] = run_output_dir
+    run_config = BacktestConfig.from_dict(config_kwargs)
+    window_bars = filter_bars_by_date_range(
+        bars,
+        start_date=start_date,
+        end_date=end_date,
     )
-    if not windows:
-        raise ValueError("walk-forward optimization window settings produced no windows.")
+    window_benchmark_bars = (
+        None
+        if benchmark_bars is None
+        else filter_bars_by_date_range(
+            benchmark_bars,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    )
+    result = run_backtest(
+        window_bars,
+        run_config,
+        benchmark_bars=window_benchmark_bars,
+        stock_pool_by_date=load_stock_pool(run_config),
+        symbol_groups=load_symbol_groups(run_config),
+        factor_scores_by_date=load_factor_scores(run_config),
+    )
+    artifact_paths = persist_run_outputs(
+        output_dir=run_output_dir,
+        result=result,
+        config=run_config,
+        inputs=build_input_metadata(args, run_config),
+        print_console=False,
+        config_sources=build_config_sources(args),
+    )
+    return {
+        "window_id": window_id,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "periods": result.metrics.periods,
+        "total_return": result.metrics.total_return,
+        "annualized_return": result.metrics.annualized_return,
+        "max_drawdown": result.metrics.max_drawdown,
+        "sharpe": result.metrics.sharpe,
+        "win_rate": result.metrics.win_rate,
+        "total_cost": result.metrics.total_cost,
+        "run_manifest_json": str(artifact_paths["run_manifest_json"]),
+    }
 
-    optimize_output_dir = base_config.output_dir / "walk_forward_optimization"
-    rows: list[dict[str, object]] = []
+
+def _prepare_walk_optimization_windows(
+    *,
+    windows: list[dict[str, object]],
+    combinations: list[dict[str, object]],
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+    optimize_output_dir: Path,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    prepared_windows: list[dict[str, object]] = []
+    train_tasks: list[dict[str, object]] = []
     for window in windows:
         window_id = str(window["window_id"])
         train_start = cast(date, window["train_start_date"])
@@ -353,65 +419,177 @@ def run_walk_forward_optimization(
                 end_date=test_end,
             )
         )
-        best_train_result: BacktestResult | None = None
-        best_train_artifacts: dict[str, Path] | None = None
-        best_train_health_summary: dict[str, object] = {}
-        best_overrides: dict[str, object] | None = None
-        best_metric = float("-inf")
-        best_candidate_key: tuple[float, float, float, float, float, float] | None = None
-
-        items = [
-            (combo_number, override_values)
-            for combo_number, override_values in enumerate(combinations, start=1)
-        ]
-        
-        if args.jobs <= 1 or len(items) <= 1:
-            candidate_results = [
-                _run_walk_forward_train_candidate(
-                    args=args,
-                    train_bars=train_bars,
-                    train_benchmark_bars=train_benchmark_bars,
-                    base_config=base_config,
-                    train_output_dir=(optimize_output_dir / window_id / "train_candidates" / f"candidate_{item[0]:03d}"),
-                    train_start=train_start,
-                    train_end=train_end,
-                    override_values=item[1],
-                    build_config_sources=build_config_sources,
-                )
-                for item in items
-            ]
-        else:
-            from concurrent.futures import ProcessPoolExecutor
-            ctx = {
-                "args": args,
-                "train_bars": train_bars,
-                "train_benchmark_bars": train_benchmark_bars,
-                "base_config": base_config,
-                "optimize_output_dir": optimize_output_dir,
+        prepared_windows.append(
+            {
                 "window_id": window_id,
                 "train_start": train_start,
                 "train_end": train_end,
-                "build_config_sources": build_config_sources,
+                "test_start": test_start,
+                "test_end": test_end,
+                "test_bars": test_bars,
+                "test_benchmark_bars": test_benchmark_bars,
             }
-            with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
-                candidate_results = list(executor.map(_wf_train_worker_wrapper, items))
-        for candidate in candidate_results:
-            train_result = candidate["result"]
-            train_artifacts = candidate["artifacts"]
-            health_summary = candidate["health_summary"]
-            override_values = candidate["overrides"]
-            metric_value = _metric_value_for_rank(train_result, args.rank_by)
-            candidate_key = health_aware_rank_key(metric_value, health_summary)
-            if best_candidate_key is None or candidate_key > best_candidate_key:
-                best_metric = metric_value
-                best_candidate_key = candidate_key
-                best_train_result = train_result
-                best_train_artifacts = train_artifacts
-                best_train_health_summary = health_summary
-                best_overrides = dict(override_values)
+        )
+        for combo_number, override_values in enumerate(combinations, start=1):
+            train_tasks.append(
+                {
+                    "window_id": window_id,
+                    "combo_number": combo_number,
+                    "train_bars": train_bars,
+                    "train_benchmark_bars": train_benchmark_bars,
+                    "train_output_dir": (
+                        optimize_output_dir
+                        / window_id
+                        / "train_candidates"
+                        / f"candidate_{combo_number:03d}"
+                    ),
+                    "train_start": train_start,
+                    "train_end": train_end,
+                    "overrides": override_values,
+                }
+            )
+    return prepared_windows, train_tasks
 
-        if best_train_result is None or best_train_artifacts is None or best_overrides is None:
-            raise ValueError(f"No train candidate completed for {window_id}.")
+
+def _run_global_train_tasks(
+    *,
+    args: argparse.Namespace,
+    base_config: BacktestConfig,
+    train_tasks: list[dict[str, object]],
+    build_config_sources: ConfigSourcesBuilder,
+) -> list[_GlobalTrainCandidateResult]:
+    if args.jobs <= 1 or len(train_tasks) <= 1:
+        return [
+            _wf_global_train_worker_wrapper_with_ctx(
+                task,
+                args=args,
+                base_config=base_config,
+                build_config_sources=build_config_sources,
+            )
+            for task in train_tasks
+        ]
+    from concurrent.futures import ProcessPoolExecutor
+
+    ctx = {
+        "args": args,
+        "base_config": base_config,
+        "build_config_sources": build_config_sources,
+    }
+    with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
+        return list(executor.map(_wf_global_train_worker_wrapper, train_tasks))
+
+
+def _wf_global_train_worker_wrapper_with_ctx(
+    item: dict[str, object],
+    *,
+    args: argparse.Namespace,
+    base_config: BacktestConfig,
+    build_config_sources: ConfigSourcesBuilder,
+) -> _GlobalTrainCandidateResult:
+    train_result = _run_walk_forward_train_candidate(
+        args=args,
+        train_bars=cast(list[PriceBar], item["train_bars"]),
+        train_benchmark_bars=cast(list[PriceBar] | None, item["train_benchmark_bars"]),
+        base_config=base_config,
+        train_output_dir=cast(Path, item["train_output_dir"]),
+        train_start=cast(date, item["train_start"]),
+        train_end=cast(date, item["train_end"]),
+        override_values=cast(dict[str, object], item["overrides"]),
+        build_config_sources=build_config_sources,
+    )
+    return {
+        **train_result,
+        "window_id": cast(str, item["window_id"]),
+        "combo_number": cast(int, item["combo_number"]),
+    }
+
+
+def _best_train_candidate(
+    candidates: list[_GlobalTrainCandidateResult],
+    *,
+    rank_by: str,
+) -> tuple[BacktestResult, dict[str, Path], dict[str, object], dict[str, object], float]:
+    best_candidate_key: tuple[float, float, float, float, float, float] | None = None
+    best_candidate: _GlobalTrainCandidateResult | None = None
+    best_metric = float("-inf")
+    for candidate in candidates:
+        train_result = candidate["result"]
+        metric_value = _metric_value_for_rank(train_result, rank_by)
+        candidate_key = health_aware_rank_key(metric_value, candidate["health_summary"])
+        if best_candidate_key is None or candidate_key > best_candidate_key:
+            best_candidate_key = candidate_key
+            best_candidate = candidate
+            best_metric = metric_value
+    if best_candidate is None:
+        raise ValueError("No train candidate completed for walk-forward window.")
+    return (
+        best_candidate["result"],
+        best_candidate["artifacts"],
+        best_candidate["health_summary"],
+        dict(best_candidate["overrides"]),
+        best_metric,
+    )
+
+
+def run_walk_forward_optimization(
+    args: argparse.Namespace,
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+    *,
+    base_config: BacktestConfig,
+    build_config_sources: ConfigSourcesBuilder,
+) -> None:
+    sweep_overrides = load_sweep_overrides_from_toml(args.config)
+    if not sweep_overrides:
+        raise ValueError("配置文件中未找到 [sweep] 配置段。")
+    combinations = expand_sweep_combinations(sweep_overrides)
+    dates = sorted({bar.date for bar in bars})
+    windows = build_walk_forward_train_test_windows(
+        dates,
+        train_size=args.walk_train_window,
+        test_size=args.walk_test_window,
+        step_size=args.walk_step,
+    )
+    if not windows:
+        raise ValueError("walk-forward optimization window settings produced no windows.")
+
+    optimize_output_dir = base_config.output_dir / "walk_forward_optimization"
+    prepared_windows, train_tasks = _prepare_walk_optimization_windows(
+        windows=windows,
+        combinations=combinations,
+        bars=bars,
+        benchmark_bars=benchmark_bars,
+        optimize_output_dir=optimize_output_dir,
+    )
+    train_results = _run_global_train_tasks(
+        args=args,
+        base_config=base_config,
+        train_tasks=train_tasks,
+        build_config_sources=build_config_sources,
+    )
+    candidates_by_window: dict[str, list[_GlobalTrainCandidateResult]] = {}
+    for candidate in train_results:
+        candidates_by_window.setdefault(candidate["window_id"], []).append(candidate)
+
+    rows: list[dict[str, object]] = []
+    for window in prepared_windows:
+        window_id = cast(str, window["window_id"])
+        train_start = cast(date, window["train_start"])
+        train_end = cast(date, window["train_end"])
+        test_start = cast(date, window["test_start"])
+        test_end = cast(date, window["test_end"])
+        test_bars = cast(list[PriceBar], window["test_bars"])
+        test_benchmark_bars = cast(list[PriceBar] | None, window["test_benchmark_bars"])
+        (
+            best_train_result,
+            best_train_artifacts,
+            best_train_health_summary,
+            best_overrides,
+            best_metric,
+        ) = _best_train_candidate(
+            candidates_by_window.get(window_id, []),
+            rank_by=args.rank_by,
+        )
 
         test_output_dir = optimize_output_dir / window_id / "test"
         test_config_kwargs = base_config.to_dict()
