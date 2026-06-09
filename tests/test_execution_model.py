@@ -128,7 +128,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=0.0,
             positions={"000001": 100},
             entry_dates={"000001": date(2024, 1, 2)},
-            target_holdings=(),
+            target_weights={},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -152,7 +152,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=0.0,
             positions={"000001": 100},
             entry_dates={"000001": date(2024, 1, 3)},
-            target_holdings=(),
+            target_weights={},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -183,7 +183,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=0.0,
             positions={"000001": 50},
             entry_dates={"000001": date(2024, 1, 2)},
-            target_holdings=(),
+            target_weights={},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -216,7 +216,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=1000.0,
             positions={},
             entry_dates={},
-            target_holdings=("000001",),
+            target_weights={"000001": 1.0},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -253,7 +253,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=10_000.0,
             positions={},
             entry_dates={},
-            target_holdings=("000001",),
+            target_weights={"000001": 1.0},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -282,8 +282,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=10_000.0,
             positions={},
             entry_dates={},
-            target_holdings=("000001", "600519"),
-            target_scores={"000001": 3.0, "600519": 1.0},
+            target_weights={"000001": 0.75, "600519": 0.25},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(
@@ -315,7 +314,7 @@ class ExecutionModelTests(unittest.TestCase):
             cash=10_000.0,
             positions={},
             entry_dates={},
-            target_holdings=("000001",),
+            target_weights={"000001": 1.0},
             aligned_history=aligned_history,
             index=0,
             config=BacktestConfig(

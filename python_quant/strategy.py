@@ -30,6 +30,8 @@ class TopNFactorStrategy(BaseStrategy):
             raise ValueError("top_n must be greater than 0.")
         if mode not in {"top", "bottom"}:
             raise ValueError("mode must be one of: top, bottom.")
+        if allocation_model == "equal_weight":
+            allocation_model = "equal"
         if allocation_model not in {"equal", "score_weighted"}:
             raise ValueError("allocation_model must be one of: equal, score_weighted.")
         self.top_n = top_n

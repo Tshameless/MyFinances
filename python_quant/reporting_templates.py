@@ -5,24 +5,24 @@ def get_single_run_html_template() -> str:
   <meta charset="utf-8" />
   <title>回测报告</title>
   <style>
-    body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }
-    h1, h2 { margin: 0 0 16px; }
-    .grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: start; }
-    .card { background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid #eef2f7; }
-    th { width: 55%; color: #52606d; font-weight: 600; }
-    ul { margin: 0; padding-left: 20px; }
-    img { width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }
-    .muted { color: #52606d; margin-bottom: 16px; }
-    .wide { grid-column: 1 / -1; }
-    .hero { background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }
-    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 20px; }
-    .summary-tile { border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }
-    .summary-label { color: #52606d; font-size: 12px; margin-bottom: 6px; }
-    .summary-value { font-size: 24px; font-weight: 700; color: #102a43; }
-    .lead { font-size: 16px; line-height: 1.7; color: #243b53; }
-    .compact td, .compact th { font-size: 14px; }
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
+    h1, h2 {{ margin: 0 0 16px; }}
+    .grid {{ display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: start; }}
+    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
+    table {{ width: 100%; border-collapse: collapse; }}
+    th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid #eef2f7; }}
+    th {{ width: 55%; color: #52606d; font-weight: 600; }}
+    ul {{ margin: 0; padding-left: 20px; }}
+    img {{ width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }}
+    .muted {{ color: #52606d; margin-bottom: 16px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
+    .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 20px; }}
+    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
+    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
+    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
+    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
+    .compact td, .compact th {{ font-size: 14px; }}
   </style>
 </head>
 <body>

@@ -3,10 +3,94 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from python_quant.backtest import _build_target_holdings, run_backtest
+from python_quant.backtest import (
+    run_backtest,
+    _can_exit_position,
+    _is_in_allowed_stock_pool,
+    _can_be_selected,
+)
 from python_quant.config import BacktestConfig
 from python_quant.execution_model import rebalance_account
-from python_quant.models import PriceBar
+from python_quant.models import PriceBar, FactorScoreRecord
+
+
+def _build_target_holdings(
+    *,
+    scores: dict[str, float],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    current_holdings: tuple[str, ...],
+    config: BacktestConfig,
+    entry_dates: dict[str, object] | None = None,
+    current_date: date | None = None,
+    allowed_symbols: set[str] | None = None,
+    symbol_groups: dict[str, str] | None = None,
+) -> tuple[str, ...]:
+    if not scores and not current_holdings:
+        return ()
+
+    locked_holdings = [
+        symbol
+        for symbol in current_holdings
+        if not _can_exit_position(
+            symbol,
+            aligned_history,
+            index,
+            entry_dates or {},
+            current_date,
+        )
+    ]
+    target_size = max(config.top_n, len(locked_holdings))
+    candidate_scores = {
+        symbol: score
+        for symbol, score in scores.items()
+        if _is_in_allowed_stock_pool(symbol, allowed_symbols)
+        and _can_be_selected(symbol, aligned_history, index, current_holdings)
+    }
+    ranked_symbols: list[str] = []
+    if candidate_scores:
+        ranked = sorted(
+            candidate_scores.items(),
+            key=lambda item: item[1],
+            reverse=(config.selection_mode == "top"),
+        )
+        ranked_symbols = [symbol for symbol, _ in ranked[:target_size]]
+
+    target_holdings: list[str] = list(locked_holdings)
+    group_counts = _build_group_counts(target_holdings, symbol_groups)
+    for symbol in ranked_symbols:
+        if len(target_holdings) >= target_size:
+            break
+        if symbol in target_holdings:
+            continue
+        group_key = _group_key(symbol, symbol_groups)
+        if (
+            config.max_group_positions is not None
+            and group_counts.get(group_key, 0) >= config.max_group_positions
+        ):
+            continue
+        target_holdings.append(symbol)
+        group_counts[group_key] = group_counts.get(group_key, 0) + 1
+
+    return tuple(target_holdings)
+
+
+def _build_group_counts(
+    symbols: list[str],
+    symbol_groups: dict[str, str] | None,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for symbol in symbols:
+        group_key = _group_key(symbol, symbol_groups)
+        counts[group_key] = counts.get(group_key, 0) + 1
+    return counts
+
+
+def _group_key(symbol: str, symbol_groups: dict[str, str] | None) -> str:
+    if not symbol_groups:
+        return f"__symbol__:{symbol}"
+    return symbol_groups.get(symbol, f"__symbol__:{symbol}")
+
 
 
 class BacktestTests(unittest.TestCase):
@@ -215,7 +299,7 @@ class BacktestTests(unittest.TestCase):
             cash=0.0,
             positions={"AAA": 10},
             entry_dates={"AAA": date(2024, 1, 3)},
-            target_holdings=("BBB",),
+            target_weights={"BBB": 1.0},
             aligned_history=aligned_history,
             index=1,
             config=config,
@@ -713,7 +797,7 @@ class BacktestTests(unittest.TestCase):
             cash=1000.0,
             positions={"AAA": 200},
             entry_dates={"AAA": date(2024, 1, 2)},
-            target_holdings=(),
+            target_weights={},
             aligned_history=aligned_history,
             index=1,
             config=config,
