@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
-from .models import PriceBar
+from .models import CorporateAction, PriceBar
 
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d")
 
@@ -25,6 +25,7 @@ def initialize_sqlite_store(db_path: str | Path) -> Path:
                 symbol TEXT NOT NULL,
                 close REAL NOT NULL,
                 adjusted_close REAL,
+                adjustment_factor REAL,
                 open REAL,
                 vwap REAL,
                 volume REAL,
@@ -40,6 +41,17 @@ def initialize_sqlite_store(db_path: str | Path) -> Path:
             );
             CREATE INDEX IF NOT EXISTS idx_price_bars_symbol_date
                 ON price_bars(symbol, date);
+
+            CREATE TABLE IF NOT EXISTS corporate_actions (
+                date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                value REAL,
+                description TEXT,
+                PRIMARY KEY (date, symbol, action_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_corporate_actions_symbol_date
+                ON corporate_actions(symbol, date);
 
             CREATE TABLE IF NOT EXISTS benchmark_bars (
                 date TEXT PRIMARY KEY,
@@ -97,6 +109,7 @@ def import_price_csv_to_sqlite(csv_path: str | Path, db_path: str | Path) -> int
                     symbol,
                     _required_float(row.get("close"), "close", line_number),
                     _optional_float(row.get("adjusted_close")),
+                    _optional_float(row.get("adjustment_factor")),
                     _optional_float(row.get("open")),
                     _optional_float(row.get("vwap")),
                     _optional_float(row.get("volume")),
@@ -115,7 +128,7 @@ def import_price_csv_to_sqlite(csv_path: str | Path, db_path: str | Path) -> int
         conn.executemany(
             """
             INSERT OR REPLACE INTO price_bars
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -207,6 +220,35 @@ def import_symbol_groups_csv_to_sqlite(csv_path: str | Path, db_path: str | Path
     _execute_many(
         path,
         "INSERT OR REPLACE INTO symbol_groups VALUES (?, ?)",
+        rows,
+    )
+    return len(rows)
+
+
+def import_corporate_actions_csv_to_sqlite(csv_path: str | Path, db_path: str | Path) -> int:
+    path = initialize_sqlite_store(db_path)
+    rows = []
+    with Path(csv_path).open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        _require_columns(reader, {"date", "symbol", "action_type"}, "Corporate actions CSV")
+        for line_number, row in enumerate(reader, start=2):
+            symbol = _require_a_share_symbol(row.get("symbol"), line_number)
+            parsed_date = _parse_date(row.get("date"), line_number)
+            action_type = (row.get("action_type") or "").strip()
+            if not action_type:
+                raise DataValidationError(f"Line {line_number}: action_type is empty.")
+            rows.append(
+                (
+                    parsed_date.isoformat(),
+                    symbol,
+                    action_type,
+                    _optional_float(row.get("value")),
+                    (row.get("description") or "").strip() or None,
+                )
+            )
+    _execute_many(
+        path,
+        "INSERT OR REPLACE INTO corporate_actions VALUES (?, ?, ?, ?, ?)",
         rows,
     )
     return len(rows)
@@ -314,12 +356,33 @@ def load_symbol_groups_from_sqlite(db_path: str | Path) -> dict[str, str]:
     return {str(symbol): str(group_name) for symbol, group_name in rows}
 
 
+def load_corporate_actions_from_sqlite(db_path: str | Path) -> list[CorporateAction]:
+    query = "SELECT * FROM corporate_actions ORDER BY date, symbol"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query).fetchall()
+    finally:
+        conn.close()
+    return [
+        CorporateAction(
+            date=_parse_iso_date(row["date"]),
+            symbol=str(row["symbol"]),
+            action_type=str(row["action_type"]),
+            value=_row_float(row, "value"),
+            description=row["description"],
+        )
+        for row in rows
+    ]
+
+
 def _price_bar_from_row(row: sqlite3.Row) -> PriceBar:
     return PriceBar(
         date=_parse_iso_date(row["date"]),
         symbol=str(row["symbol"]),
         close=float(row["close"]),
         adjusted_close=_row_float(row, "adjusted_close"),
+        adjustment_factor=_row_float(row, "adjustment_factor"),
         open=_row_float(row, "open"),
         vwap=_row_float(row, "vwap"),
         volume=_row_float(row, "volume"),

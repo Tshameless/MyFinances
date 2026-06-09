@@ -10,6 +10,7 @@ class PriceBar:
     symbol: str
     close: float
     adjusted_close: float | None = None
+    adjustment_factor: float | None = None
     open: float | None = None
     vwap: float | None = None
     volume: float | None = None
@@ -21,6 +22,15 @@ class PriceBar:
     is_limit_down: bool = False
     is_st: bool = False
     limit_rate: float | None = None
+
+
+@dataclass(frozen=True)
+class CorporateAction:
+    date: date
+    symbol: str
+    action_type: str
+    value: float | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +61,27 @@ class PositionPoint:
     weight: float
     cash: float
     total_equity: float
+
+
+class OrderStatus:
+    PENDING = "PENDING"
+    PARTIAL = "PARTIAL"
+    FILLED = "FILLED"
+    CANCELED = "CANCELED"
+    REJECTED = "REJECTED"
+
+
+@dataclass
+class Order:
+    order_id: str
+    date: date
+    symbol: str
+    side: str
+    target_shares: int
+    limit_price: float | None = None
+    filled_shares: int = 0
+    status: str = OrderStatus.PENDING
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,3 +171,4 @@ class BacktestResult:
     trade_attempts: list[TradeAttemptRecord] | None = None
     factor_scores: list[FactorScoreRecord] | None = None
     price_bars: list[PriceBar] | None = None
+    orders: list[Order] = field(default_factory=list)

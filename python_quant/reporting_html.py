@@ -9,6 +9,7 @@ from .config import BacktestConfig
 from .models import BacktestMetrics, BenchmarkPoint, EquityPoint, RebalanceRecord
 from .reporting_labels import chinese_label, display_label, format_symbol, metric_explanation
 from .reporting_rank import sort_rows_by_metric, validate_rank_metric
+from .reporting_templates import get_single_run_html_template, get_echarts_init_script
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
 
@@ -85,229 +86,40 @@ def save_single_run_report_html(
     if not holdings_rows:
         holdings_rows = "<tr><th>-</th><td>当前结果没有持仓数据。</td></tr>"
     chart_title = "策略与基准净值" if has_benchmark else "策略净值走势"
-    html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <title>回测报告</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #1f2933; background: #f8fafc; }}
-    h1, h2 {{ margin: 0 0 16px; }}
-    .grid {{ display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: start; }}
-    .card {{ background: white; border: 1px solid #d9e2ec; border-radius: 12px; padding: 20px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; padding: 8px 0; border-bottom: 1px solid #eef2f7; }}
-    th {{ width: 55%; color: #52606d; font-weight: 600; }}
-    ul {{ margin: 0; padding-left: 20px; }}
-    img {{ width: 100%; border: 1px solid #d9e2ec; border-radius: 10px; background: white; }}
-    .muted {{ color: #52606d; margin-bottom: 16px; }}
-    .wide {{ grid-column: 1 / -1; }}
-    .hero {{ background: linear-gradient(135deg, #ffffff 0%, #eef6ff 100%); }}
-    .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 20px; }}
-    .summary-tile {{ border: 1px solid #d9e2ec; border-radius: 12px; padding: 14px; background: #fff; }}
-    .summary-label {{ color: #52606d; font-size: 12px; margin-bottom: 6px; }}
-    .summary-value {{ font-size: 24px; font-weight: 700; color: #102a43; }}
-    .lead {{ font-size: 16px; line-height: 1.7; color: #243b53; }}
-    .compact td, .compact th {{ font-size: 14px; }}
-  </style>
-</head>
-<body>
-  <h1>回测报告</h1>
-  <p class="muted">生成时间：{escape(datetime.now().isoformat(timespec="seconds"))}</p>
-  <div class="grid">
-    <div class="card wide hero">
-      <h2>核心结论</h2>
-      <p class="lead">{escape(conclusion)}</p>
-      <div class="summary-grid">{summary_cards}</div>
-    </div>
-    <div class="card">
-      <h2>{chart_title}</h2>
-      <div id="echarts-container" style="width: 100%; height: 400px;"></div>
-    </div>
-    <div class="card">
-      <h2>当前持仓</h2>
-      <table>
-        <tr><th>持仓概览</th><td>{escape(holdings_summary)}</td></tr>
-        <tr><th>持仓数量</th><td>{len(latest_holdings)}</td></tr>
-        <tr><th>平均换手</th><td>{escape(turnover_summary)}</td></tr>
-      </table>
-    </div>
-    <div class="card">
-      <h2>调仓摘要</h2>
-      <table>{rebalance_rows}</table>
-    </div>
-    {benchmark_section}
-    <div class="card">
-      <h2>指标明细</h2>
-      <table>{metrics_rows}</table>
-    </div>
-    <div class="card">
-      <h2>复盘摘要</h2>
-      <table class="compact">{review_table_rows}</table>
-    </div>
-    <div class="card">
-      <h2>Trading Behavior Diagnostics</h2>
-      <table class="compact">{trading_behavior_table_rows}</table>
-    </div>
-    <div class="card">
-      <h2>Data Quality Diagnostics</h2>
-      <table class="compact">{data_quality_table_rows}</table>
-    </div>
-    <div class="card">
-      <h2>配置摘要</h2>
-      <table>
-        <tr><th>{display_label("initial_cash")}</th><td>{config.initial_cash:,.2f}</td></tr>
-        <tr><th>{display_label("top_n")}</th><td>{config.top_n}</td></tr>
-        <tr><th>{display_label("selection_mode")}</th><td>{escape(config.selection_mode)}</td></tr>
-        <tr><th>{display_label("score_source")}</th><td>{escape(config.score_source)}</td></tr>
-        <tr><th>{display_label("lot_size")}</th><td>{config.lot_size}</td></tr>
-        <tr><th>{display_label("max_group_positions")}</th><td>{_format_optional_int(config.max_group_positions)}</td></tr>
-        <tr><th>{display_label("rolling_risk_window")}</th><td>{config.rolling_risk_window}</td></tr>
-        <tr><th>{display_label("max_allowed_drawdown")}</th><td>{config.max_allowed_drawdown:.2%}</td></tr>
-        <tr><th>{display_label("max_allowed_daily_var")}</th><td>{config.max_allowed_daily_var:.2%}</td></tr>
-        <tr><th>{display_label("min_allowed_rolling_return")}</th><td>{config.min_allowed_rolling_return:.2%}</td></tr>
-        <tr><th>{display_label("min_allowed_information_ratio")}</th><td>{config.min_allowed_information_ratio:.3f}</td></tr>
-        <tr><th>{display_label("min_allowed_fill_rate")}</th><td>{config.min_allowed_fill_rate:.2%}</td></tr>
-        <tr><th>{display_label("min_allowed_execution_price_coverage")}</th><td>{config.min_allowed_execution_price_coverage:.2%}</td></tr>
-        <tr><th>{display_label("max_allowed_position_weight")}</th><td>{config.max_allowed_position_weight:.2%}</td></tr>
-        <tr><th>{display_label("max_allowed_group_weight")}</th><td>{config.max_allowed_group_weight:.2%}</td></tr>
-        <tr><th>{display_label("max_allowed_attribution_residual")}</th><td>{config.max_allowed_attribution_residual:.2%}</td></tr>
-        <tr><th>{display_label("rebalance_every_n_days")}</th><td>{config.rebalance_every_n_days}</td></tr>
-        <tr><th>{display_label("price_field")}</th><td>{escape(config.price_field)}</td></tr>
-        <tr><th>{display_label("start_date")}</th><td>{_format_optional_date(config.start_date)}</td></tr>
-        <tr><th>{display_label("end_date")}</th><td>{_format_optional_date(config.end_date)}</td></tr>
-        <tr><th>{display_label("commission_rate")}</th><td>{config.commission_rate:.6f}</td></tr>
-        <tr><th>{display_label("buy_commission_rate")}</th><td>{_format_optional_rate(config.buy_commission_rate)}</td></tr>
-        <tr><th>{display_label("sell_commission_rate")}</th><td>{_format_optional_rate(config.sell_commission_rate)}</td></tr>
-        <tr><th>{display_label("slippage_rate")}</th><td>{config.slippage_rate:.6f}</td></tr>
-        <tr><th>{display_label("market_impact_coefficient")}</th><td>{config.market_impact_coefficient:.6f}</td></tr>
-        <tr><th>{display_label("market_impact_exponent")}</th><td>{config.market_impact_exponent:.6f}</td></tr>
-        <tr><th>{display_label("stamp_duty_rate")}</th><td>{config.stamp_duty_rate:.6f}</td></tr>
-        <tr><th>{display_label("min_commission")}</th><td>{config.min_commission:.2f}</td></tr>
-        <tr><th>{display_label("transfer_fee_rate")}</th><td>{config.transfer_fee_rate:.6f}</td></tr>
-        <tr><th>{display_label("target_cash_weight")}</th><td>{config.target_cash_weight:.2%}</td></tr>
-        <tr><th>{display_label("max_position_weight")}</th><td>{config.max_position_weight:.2%}</td></tr>
-        <tr><th>{display_label("infer_limit_flags")}</th><td>{config.infer_limit_flags}</td></tr>
-        <tr><th>{display_label("forward_fill_suspended_bars")}</th><td>{config.forward_fill_suspended_bars}</td></tr>
-        <tr><th>{display_label("limit_up_down_rate")}</th><td>{config.limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{display_label("st_limit_up_down_rate")}</th><td>{config.st_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{display_label("growth_limit_up_down_rate")}</th><td>{config.growth_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{display_label("bse_limit_up_down_rate")}</th><td>{config.bse_limit_up_down_rate:.4f}</td></tr>
-        <tr><th>{display_label("infer_limit_rate_by_symbol")}</th><td>{config.infer_limit_rate_by_symbol}</td></tr>
-        <tr><th>{display_label("max_volume_participation")}</th><td>{config.max_volume_participation:.4f}</td></tr>
-      </table>
-      <h2 style="margin-top:20px;">因子权重</h2>
-      <table>{factor_rows}</table>
-    </div>
-    <div class="card">
-      <h2>产物清单</h2>
-      <ul>{artifact_links}</ul>
-    </div>
-    <div class="card wide">
-      <h2>指标怎么看</h2>
-      <table>{explanation_rows}</table>
-    </div>
-    <div class="card wide">
-      <h2>持仓代码说明</h2>
-      <table>{holdings_rows}</table>
-    </div>
-    </div>
-  </div>
-  {_echarts_script_tag(output_dir)}
-  <script>
-  (function() {{
-    if (typeof echarts !== 'undefined') {{
-      var dates = {json_dates};
-      var portfolio = {json_portfolio};
-      var benchmark = {json_benchmark};
-      
-      var container = document.getElementById('echarts-container');
-      if (container) {{
-        var chart = echarts.init(container);
-        
-        var series = [{{
-          name: '策略净值',
-          type: 'line',
-          data: portfolio,
-          showSymbol: false,
-          smooth: true,
-          lineStyle: {{ width: 2, color: '#1890ff' }},
-          itemStyle: {{ color: '#1890ff' }}
-        }}];
-        
-        var legendData = ['策略净值'];
-        if (benchmark && benchmark.length > 0) {{
-          series.push({{
-            name: '基准净值',
-            type: 'line',
-            data: benchmark,
-            showSymbol: false,
-            smooth: true,
-            lineStyle: {{ width: 1.5, color: '#ff4d4f', type: 'dashed' }},
-            itemStyle: {{ color: '#ff4d4f' }}
-          }});
-          legendData.push('基准净值');
-        }}
-        
-        var option = {{
-          tooltip: {{
-            trigger: 'axis',
-            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-            borderColor: '#d9e2ec',
-            borderWidth: 1,
-            textStyle: {{ color: '#1f2933' }},
-            formatter: function(params) {{
-              var res = '<div style="font-weight:600;margin-bottom:4px;">' + params[0].name + '</div>';
-              params.forEach(function(item) {{
-                res += '<div style="display:flex;justify-content:space-between;align-items:center;min-width:120px;margin:2px 0;">' +
-                       '<span>' + item.marker + ' ' + item.seriesName + ':</span>' +
-                       '<span style="font-weight:600;margin-left:8px;">' + Number(item.value).toLocaleString(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}}) + '</span>' +
-                       '</div>';
-              }});
-              return res;
-            }}
-          }},
-          legend: {{
-            data: legendData,
-            bottom: 0,
-            textStyle: {{ color: '#52606d' }}
-          }},
-          grid: {{
-            left: '3%',
-            right: '4%',
-            top: '5%',
-            bottom: '12%',
-            containLabel: true
-          }},
-          xAxis: {{
-            type: 'category',
-            boundaryGap: false,
-            data: dates,
-            axisLine: {{ lineStyle: {{ color: '#d9e2ec' }} }},
-            axisLabel: {{ color: '#52606d' }}
-          }},
-          yAxis: {{
-            type: 'value',
-            scale: true,
-            axisLine: {{ show: false }},
-            axisTick: {{ show: false }},
-            splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }},
-            axisLabel: {{ color: '#52606d' }}
-          }},
-          series: series
-        }};
-        
-        chart.setOption(option);
-        window.addEventListener('resize', function() {{
-          chart.resize();
-        }});
-      }}
-    }}
-  }})();
-  </script>
-</body>
-</html>
-"""
+    config_rows_list = []
+    for key in ("initial_cash", "top_n", "selection_mode", "score_source", "lot_size", "max_group_positions", "target_cash_weight", "max_position_weight"):
+        val = getattr(config, key)
+        if isinstance(val, float): val = f"{val:.4f}"
+        config_rows_list.append(f"<tr><th>{escape(display_label(key))}</th><td>{escape(str(val))}</td></tr>")
+    
+    config_rows = "\n".join(config_rows_list)
+    
+    html = get_single_run_html_template().format(
+        generation_time=escape(datetime.now().isoformat(timespec="seconds")),
+        conclusion=escape(conclusion),
+        summary_cards=summary_cards,
+        chart_title=chart_title,
+        holdings_summary=escape(holdings_summary),
+        holdings_count=len(latest_holdings),
+        turnover_summary=escape(turnover_summary),
+        rebalance_rows=rebalance_rows,
+        benchmark_section=benchmark_section,
+        metrics_rows=metrics_rows,
+        review_table_rows=review_table_rows,
+        trading_behavior_table_rows=trading_behavior_table_rows,
+        data_quality_table_rows=data_quality_table_rows,
+        config_rows=config_rows,
+        factor_rows=factor_rows,
+        artifact_links=artifact_links,
+        explanation_rows=explanation_rows,
+        holdings_rows=holdings_rows,
+        echarts_script_tag=_echarts_script_tag(output_dir),
+        echarts_init_script=get_echarts_init_script().format(
+            json_dates=json_dates,
+            json_portfolio=json_portfolio,
+            json_benchmark=json_benchmark,
+        )
+    )
     target_path.write_text(html, encoding=_HUMAN_READABLE_ENCODING)
     return target_path
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
-from .models import PriceBar
+from .models import CorporateAction, PriceBar
 
 _DATE_FORMATS = (
     "%Y-%m-%d",
@@ -95,6 +95,15 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
                 "adjusted_close",
                 line_number,
             )
+            adjustment_factor = _parse_optional_float(
+                row.get("adjustment_factor"),
+                "adjustment_factor",
+                line_number,
+            )
+            
+            if adjusted_close is None and adjustment_factor is not None:
+                adjusted_close = close_value * adjustment_factor
+
             open_price = _parse_optional_float(
                 row.get("open"),
                 "open",
@@ -140,6 +149,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
                     symbol=symbol,
                     close=close_value,
                     adjusted_close=adjusted_close,
+                    adjustment_factor=adjustment_factor,
                     open=open_price,
                     vwap=vwap,
                     volume=volume,
@@ -317,6 +327,59 @@ def load_factor_scores_from_csv(csv_path: str | Path) -> dict[date, dict[str, fl
     result = dict(sorted(scores.items()))
     _save_to_cache(cache_path, result)
     return result
+
+
+def load_corporate_actions_from_csv(csv_path: str | Path) -> list[CorporateAction]:
+    path = Path(csv_path)
+    if _is_sqlite_path(path):
+        from .data_store import load_corporate_actions_from_sqlite
+        return load_corporate_actions_from_sqlite(path)
+    
+    if not path.exists():
+        raise FileNotFoundError(f"Corporate actions CSV file not found: {path}")
+
+    cache_path = _get_cache_path(path)
+    cached_data = _load_from_cache(cache_path)
+    if cached_data is not None:
+        return cached_data
+
+    actions: list[CorporateAction] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        required = {"date", "symbol", "action_type"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            missing_str = ", ".join(sorted(missing))
+            raise DataValidationError(f"Corporate actions CSV missing required columns: {missing_str}")
+
+        for line_number, row in enumerate(reader, start=2):
+            parsed_date = _parse_date(row.get("date"), line_number)
+            symbol = (row.get("symbol") or "").strip()
+            if not symbol:
+                raise DataValidationError(f"Line {line_number}: symbol is empty.")
+            if not is_a_share_symbol(symbol):
+                raise DataValidationError(
+                    f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
+                )
+            
+            action_type = (row.get("action_type") or "").strip()
+            if not action_type:
+                raise DataValidationError(f"Line {line_number}: action_type is empty.")
+                
+            value = _parse_optional_float(row.get("value"), "value", line_number)
+            description = (row.get("description") or "").strip() or None
+            
+            actions.append(CorporateAction(
+                date=parsed_date,
+                symbol=symbol,
+                action_type=action_type,
+                value=value,
+                description=description
+            ))
+
+    actions.sort(key=lambda item: (item.date, item.symbol))
+    _save_to_cache(cache_path, actions)
+    return actions
 
 
 def _parse_date(raw_value: str | None, line_number: int) -> date:

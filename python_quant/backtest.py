@@ -30,7 +30,8 @@ from .models import (
     PriceBar,
     RebalanceRecord,
 )
-from .strategy import select_symbols
+from .strategy import TopNFactorStrategy
+from .portfolio_optimizer import PortfolioOptimizer
 
 
 def run_backtest(
@@ -63,6 +64,7 @@ def run_backtest(
     position_points: list[PositionPoint] = []
     trade_records = []
     trade_attempt_records = []
+    order_records = []
     factor_score_records: list[FactorScoreRecord] = []
     rebalance_records: list[RebalanceRecord] = []
     holdings: tuple[str, ...] = ()
@@ -70,6 +72,18 @@ def run_backtest(
     total_turnover = 0.0
     warmup = config.max_lookback
     previous_equity = config.initial_cash
+
+    strategy = TopNFactorStrategy(
+        top_n=config.top_n,
+        mode=config.selection_mode,
+        allocation_model=config.allocation_model,
+    )
+    optimizer = PortfolioOptimizer(
+        max_position_weight=config.max_position_weight,
+        max_group_positions=config.max_group_positions,
+        target_cash_weight=config.target_cash_weight,
+        symbol_groups=symbol_groups,
+    )
 
     last_signal_index = common_length - config.execution_delay_days - 2
     for index in range(warmup, last_signal_index + 1):
@@ -88,17 +102,28 @@ def run_backtest(
             )
             scores = {symbol: record.total_score for symbol, record in factor_records.items()}
             allowed_symbols = _resolve_stock_pool_for_date(stock_pool_by_date, current_date)
-            selected = _build_target_holdings(
-                scores=scores,
-                aligned_history=aligned_history,
-                index=index,
-                current_holdings=holdings,
-                config=config,
-                entry_dates=entry_dates,
-                current_date=current_date,
-                allowed_symbols=allowed_symbols,
-                symbol_groups=symbol_groups,
-            )
+            
+            available_records = {
+                sym: rec for sym, rec in factor_records.items()
+                if _is_in_allowed_stock_pool(sym, allowed_symbols) and _can_be_selected(sym, aligned_history, index, holdings)
+            }
+            unconstrained_weights = strategy.generate_target_weights(current_date, available_records)
+
+            locked_symbols = [
+                symbol
+                for symbol in holdings
+                if not _can_exit_position(
+                    symbol,
+                    aligned_history,
+                    index,
+                    entry_dates or {},
+                    current_date,
+                )
+            ]
+            
+            target_weights = optimizer.optimize(unconstrained_weights, locked_symbols)
+            selected = tuple(target_weights.keys())
+            
             factor_score_records.extend(
                 _factor_records_for_date(
                     aligned_history,
@@ -112,8 +137,7 @@ def run_backtest(
                 cash=cash,
                 positions=positions,
                 entry_dates=entry_dates,
-                target_holdings=selected,
-                target_scores=scores,
+                target_weights=target_weights,
                 aligned_history=aligned_history,
                 index=execution_index,
                 config=config,
@@ -128,6 +152,7 @@ def run_backtest(
             total_turnover += turnover
             trade_records.extend(trade_plan.trades)
             trade_attempt_records.extend(trade_plan.trade_attempts)
+            order_records.extend(trade_plan.orders)
             rebalance_records.append(
                 RebalanceRecord(
                     date=current_date,
@@ -200,6 +225,7 @@ def run_backtest(
             for symbol in sorted(aligned_history)
             for bar in aligned_history[symbol]
         ],
+        orders=order_records,
     )
 
 
@@ -288,83 +314,6 @@ def _build_position_points(
             )
         )
     return rows
-
-
-def _build_target_holdings(
-    *,
-    scores: dict[str, float],
-    aligned_history: dict[str, list[PriceBar]],
-    index: int,
-    current_holdings: tuple[str, ...],
-    config: BacktestConfig,
-    entry_dates: dict[str, object] | None = None,
-    current_date: date | None = None,
-    allowed_symbols: set[str] | None = None,
-    symbol_groups: dict[str, str] | None = None,
-) -> tuple[str, ...]:
-    if not scores and not current_holdings:
-        return ()
-
-    locked_holdings = [
-        symbol
-        for symbol in current_holdings
-        if not _can_exit_position(
-            symbol,
-            aligned_history,
-            index,
-            entry_dates or {},
-            current_date,
-        )
-    ]
-    target_size = max(config.top_n, len(locked_holdings))
-    candidate_scores = {
-        symbol: score
-        for symbol, score in scores.items()
-        if _is_in_allowed_stock_pool(symbol, allowed_symbols)
-        and _can_be_selected(symbol, aligned_history, index, current_holdings)
-    }
-    ranked_symbols: list[str] = []
-    if candidate_scores:
-        ranked_symbols = select_symbols(
-            candidate_scores,
-            min(len(candidate_scores), target_size),
-            mode=config.selection_mode,
-        )
-
-    target_holdings: list[str] = list(locked_holdings)
-    group_counts = _build_group_counts(target_holdings, symbol_groups)
-    for symbol in ranked_symbols:
-        if len(target_holdings) >= target_size:
-            break
-        if symbol in target_holdings:
-            continue
-        group_key = _group_key(symbol, symbol_groups)
-        if (
-            config.max_group_positions is not None
-            and group_counts.get(group_key, 0) >= config.max_group_positions
-        ):
-            continue
-        target_holdings.append(symbol)
-        group_counts[group_key] = group_counts.get(group_key, 0) + 1
-
-    return tuple(target_holdings)
-
-
-def _build_group_counts(
-    symbols: list[str],
-    symbol_groups: dict[str, str] | None,
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for symbol in symbols:
-        group_key = _group_key(symbol, symbol_groups)
-        counts[group_key] = counts.get(group_key, 0) + 1
-    return counts
-
-
-def _group_key(symbol: str, symbol_groups: dict[str, str] | None) -> str:
-    if not symbol_groups:
-        return f"__symbol__:{symbol}"
-    return symbol_groups.get(symbol, f"__symbol__:{symbol}")
 
 
 def _resolve_stock_pool_for_date(
