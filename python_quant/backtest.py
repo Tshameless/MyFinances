@@ -107,8 +107,7 @@ def run_backtest(
                 sym: rec for sym, rec in factor_records.items()
                 if _is_in_allowed_stock_pool(sym, allowed_symbols) and _can_be_selected(sym, aligned_history, index, holdings)
             }
-            unconstrained_weights = strategy.generate_target_weights(current_date, available_records)
-
+            
             locked_symbols = [
                 symbol
                 for symbol in holdings
@@ -120,8 +119,57 @@ def run_backtest(
                     current_date,
                 )
             ]
-            
-            target_weights = optimizer.optimize(unconstrained_weights, locked_symbols)
+
+            if config.allocation_model in {"max_sharpe", "min_variance"}:
+                from .portfolio_optimizer import ScipyPortfolioOptimizer
+                historical_returns = {}
+                lookback = 60
+                for sym in available_records:
+                    bars = aligned_history[sym][max(0, index-lookback):index+1]
+                    if len(bars) > 1:
+                        rets = []
+                        for i in range(1, len(bars)):
+                            prev_p = price_for_bar(bars[i-1], config)
+                            curr_p = price_for_bar(bars[i], config)
+                            rets.append(curr_p / prev_p - 1.0 if prev_p > 0 else 0.0)
+                        historical_returns[sym] = rets
+                
+                # We need to filter the top N before giving it to the optimizer to avoid OOM or slow solving on 5000 stocks
+                strategy = TopNFactorStrategy(top_n=config.top_n, mode=config.selection_mode, allocation_model="equal")
+                unconstrained = strategy.generate_target_weights(current_date, available_records)
+                filtered_records = {s: available_records[s] for s in unconstrained}
+                for s in locked_symbols:
+                    if s in available_records:
+                        filtered_records[s] = available_records[s]
+
+                scipy_optimizer = ScipyPortfolioOptimizer(
+                    objective=config.allocation_model,
+                    target_cash_weight=config.target_cash_weight,
+                    max_position_weight=config.max_position_weight,
+                    max_group_positions=config.max_group_positions,
+                    symbol_groups=symbol_groups,
+                )
+                target_weights = scipy_optimizer.generate_target_weights(
+                    current_date=current_date,
+                    signals=filtered_records,
+                    historical_returns=historical_returns,
+                    locked_symbols=locked_symbols
+                )
+            else:
+                strategy = TopNFactorStrategy(
+                    top_n=config.top_n,
+                    mode=config.selection_mode,
+                    allocation_model=config.allocation_model,
+                )
+                unconstrained_weights = strategy.generate_target_weights(current_date, available_records)
+                legacy_optimizer = PortfolioOptimizer(
+                    max_position_weight=config.max_position_weight,
+                    max_group_positions=config.max_group_positions,
+                    target_cash_weight=config.target_cash_weight,
+                    symbol_groups=symbol_groups,
+                )
+                target_weights = legacy_optimizer.optimize(unconstrained_weights, locked_symbols)
+
             selected = tuple(target_weights.keys())
             
             factor_score_records.extend(

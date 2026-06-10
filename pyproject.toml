@@ -3,7 +3,7 @@ name = "myfinances-python-quant"
 version = "0.1.0"
 description = "Practical local quant backtesting toolkit for MyFinances."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["scipy>=1.10.0"]
 readme = "README.md"
 license = {text = "MIT"}
 keywords = ["quant", "backtesting", "A-share", "factor"]
