@@ -198,12 +198,6 @@ def calculate_factor_score_records(
         records[symbol] = FactorScoreRecord(
             date=history_by_symbol[symbol][up_to_index].date,
             symbol=symbol,
-            momentum=raw.get("momentum", 0.0),
-            mean_reversion=raw.get("mean_reversion", 0.0),
-            low_volatility=raw.get("low_volatility", 0.0),
-            normalized_momentum=norm.get("momentum", 0.0),
-            normalized_mean_reversion=norm.get("mean_reversion", 0.0),
-            normalized_low_volatility=norm.get("low_volatility", 0.0),
             total_score=score,
             selected=symbol in selected_symbols,
             raw_scores=raw,

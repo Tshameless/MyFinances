@@ -1134,14 +1134,10 @@ def _factor_score(score_date: date, symbol: str, momentum: float) -> FactorScore
     return FactorScoreRecord(
         date=score_date,
         symbol=symbol,
-        momentum=momentum,
-        mean_reversion=0.0,
-        low_volatility=0.0,
-        normalized_momentum=momentum,
-        normalized_mean_reversion=0.5,
-        normalized_low_volatility=0.5,
         total_score=momentum,
         selected=False,
+        raw_scores={"momentum": momentum, "mean_reversion": 0.0, "low_volatility": 0.0},
+        normalized_scores={"momentum": momentum, "mean_reversion": 0.5, "low_volatility": 0.5},
     )
 
 
@@ -1156,14 +1152,10 @@ def _factor_score_with_components(
     return FactorScoreRecord(
         date=score_date,
         symbol=symbol,
-        momentum=momentum,
-        mean_reversion=mean_reversion,
-        low_volatility=low_volatility,
-        normalized_momentum=momentum,
-        normalized_mean_reversion=mean_reversion,
-        normalized_low_volatility=low_volatility,
         total_score=total_score,
         selected=total_score > 0.5,
+        raw_scores={"momentum": momentum, "mean_reversion": mean_reversion, "low_volatility": low_volatility},
+        normalized_scores={"momentum": momentum, "mean_reversion": mean_reversion, "low_volatility": low_volatility},
     )
 
 

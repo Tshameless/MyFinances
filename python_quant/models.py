@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from .enums import OrderStatusEnum
+
 
 @dataclass(frozen=True)
 class PriceBar:
@@ -64,11 +66,13 @@ class PositionPoint:
 
 
 class OrderStatus:
-    PENDING = "PENDING"
-    PARTIAL = "PARTIAL"
-    FILLED = "FILLED"
-    CANCELED = "CANCELED"
-    REJECTED = "REJECTED"
+    """Backward-compatible OrderStatus constants backed by StrEnum values."""
+
+    PENDING = OrderStatusEnum.PENDING
+    PARTIAL = OrderStatusEnum.PARTIAL
+    FILLED = OrderStatusEnum.FILLED
+    CANCELED = OrderStatusEnum.CANCELED
+    REJECTED = OrderStatusEnum.REJECTED
 
 
 @dataclass
@@ -116,18 +120,45 @@ class TradeAttemptRecord:
 
 @dataclass(frozen=True)
 class FactorScoreRecord:
+    """因子评分记录。
+
+    所有因子分数统一存储在 ``raw_scores`` / ``normalized_scores`` 字典中，
+    不再为内置三因子保留硬编码字段。旧的 ``momentum`` 等属性通过
+    ``@property`` 提供向后兼容只读访问。
+    """
+
     date: date
     symbol: str
-    momentum: float
-    mean_reversion: float
-    low_volatility: float
-    normalized_momentum: float
-    normalized_mean_reversion: float
-    normalized_low_volatility: float
     total_score: float
     selected: bool
     raw_scores: dict[str, float] = field(default_factory=dict)
     normalized_scores: dict[str, float] = field(default_factory=dict)
+
+    # ------ 向后兼容只读属性 ------
+
+    @property
+    def momentum(self) -> float:
+        return self.raw_scores.get("momentum", 0.0)
+
+    @property
+    def mean_reversion(self) -> float:
+        return self.raw_scores.get("mean_reversion", 0.0)
+
+    @property
+    def low_volatility(self) -> float:
+        return self.raw_scores.get("low_volatility", 0.0)
+
+    @property
+    def normalized_momentum(self) -> float:
+        return self.normalized_scores.get("momentum", 0.0)
+
+    @property
+    def normalized_mean_reversion(self) -> float:
+        return self.normalized_scores.get("mean_reversion", 0.0)
+
+    @property
+    def normalized_low_volatility(self) -> float:
+        return self.normalized_scores.get("low_volatility", 0.0)
 
 
 @dataclass(frozen=True)

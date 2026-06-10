@@ -147,59 +147,35 @@ class CustomFactorTests(unittest.TestCase):
         rec1_aaa = FactorScoreRecord(
             date=date(2024, 1, 2),
             symbol="AAA",
-            momentum=1.0,
-            mean_reversion=2.0,
-            low_volatility=3.0,
-            normalized_momentum=0.5,
-            normalized_mean_reversion=0.5,
-            normalized_low_volatility=0.5,
             total_score=0.5,
             selected=True,
-            raw_scores={"custom_dummy": 10.0},
-            normalized_scores={"custom_dummy": 0.8},
+            raw_scores={"momentum": 1.0, "mean_reversion": 2.0, "low_volatility": 3.0, "custom_dummy": 10.0},
+            normalized_scores={"momentum": 0.5, "mean_reversion": 0.5, "low_volatility": 0.5, "custom_dummy": 0.8},
         )
         rec1_bbb = FactorScoreRecord(
             date=date(2024, 1, 2),
             symbol="BBB",
-            momentum=2.0,
-            mean_reversion=1.0,
-            low_volatility=2.0,
-            normalized_momentum=0.8,
-            normalized_mean_reversion=0.2,
-            normalized_low_volatility=0.2,
             total_score=0.4,
             selected=False,
-            raw_scores={"custom_dummy": 5.0},
-            normalized_scores={"custom_dummy": 0.2},
+            raw_scores={"momentum": 2.0, "mean_reversion": 1.0, "low_volatility": 2.0, "custom_dummy": 5.0},
+            normalized_scores={"momentum": 0.8, "mean_reversion": 0.2, "low_volatility": 0.2, "custom_dummy": 0.2},
         )
         # Date 2
         rec2_aaa = FactorScoreRecord(
             date=date(2024, 1, 3),
             symbol="AAA",
-            momentum=1.2,
-            mean_reversion=2.1,
-            low_volatility=3.1,
-            normalized_momentum=0.6,
-            normalized_mean_reversion=0.6,
-            normalized_low_volatility=0.6,
             total_score=0.6,
             selected=True,
-            raw_scores={"custom_dummy": 11.0},
-            normalized_scores={"custom_dummy": 0.9},
+            raw_scores={"momentum": 1.2, "mean_reversion": 2.1, "low_volatility": 3.1, "custom_dummy": 11.0},
+            normalized_scores={"momentum": 0.6, "mean_reversion": 0.6, "low_volatility": 0.6, "custom_dummy": 0.9},
         )
         rec2_bbb = FactorScoreRecord(
             date=date(2024, 1, 3),
             symbol="BBB",
-            momentum=2.1,
-            mean_reversion=1.1,
-            low_volatility=2.1,
-            normalized_momentum=0.9,
-            normalized_mean_reversion=0.3,
-            normalized_low_volatility=0.3,
             total_score=0.5,
             selected=False,
-            raw_scores={"custom_dummy": 6.0},
-            normalized_scores={"custom_dummy": 0.3},
+            raw_scores={"momentum": 2.1, "mean_reversion": 1.1, "low_volatility": 2.1, "custom_dummy": 6.0},
+            normalized_scores={"momentum": 0.9, "mean_reversion": 0.3, "low_volatility": 0.3, "custom_dummy": 0.3},
         )
         
         factor_scores = [rec1_aaa, rec1_bbb, rec2_aaa, rec2_bbb]
@@ -246,16 +222,10 @@ class CustomFactorTests(unittest.TestCase):
         rec = FactorScoreRecord(
             date=date(2024, 1, 2),
             symbol="000001",
-            momentum=1.0,
-            mean_reversion=2.0,
-            low_volatility=3.0,
-            normalized_momentum=0.5,
-            normalized_mean_reversion=0.5,
-            normalized_low_volatility=0.5,
             total_score=0.5,
             selected=True,
-            raw_scores={"custom_dummy": 10.0},
-            normalized_scores={"custom_dummy": 0.8},
+            raw_scores={"momentum": 1.0, "mean_reversion": 2.0, "low_volatility": 3.0, "custom_dummy": 10.0},
+            normalized_scores={"momentum": 0.5, "mean_reversion": 0.5, "low_volatility": 0.5, "custom_dummy": 0.8},
         )
         
         with tempfile.TemporaryDirectory() as temp_dir:

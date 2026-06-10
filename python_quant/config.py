@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import KeysView, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dataclass_fields
 from datetime import date, datetime
 from pathlib import Path
 from typing import cast
 
+from .enums import (
+    AllocationModel,
+    ExecutionPriceField,
+    ExecutionStyle,
+    PriceField,
+    ScoreSource,
+    SelectionMode,
+)
 from .exceptions import ConfigValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +40,81 @@ class DynamicSupportedFactors:
         return set(other) - (set(get_registered_factors()) | set(DEFAULT_FACTOR_WEIGHTS))  # type: ignore
 
 SUPPORTED_FACTORS = DynamicSupportedFactors()
+
+
+# ---------------------------------------------------------------------------
+# 子配置 dataclass — 将 BacktestConfig 的 60+ 字段按职责分组
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CostModel:
+    """佣金 / 滑点 / 印花税 / 过户费参数。"""
+
+    commission_rate: float = 0.0003
+    buy_commission_rate: float | None = None
+    sell_commission_rate: float | None = None
+    slippage_rate: float = 0.0005
+    market_impact_coefficient: float = 0.0
+    market_impact_exponent: float = 1.0
+    stamp_duty_rate: float = 0.0
+    min_commission: float = 0.0
+    transfer_fee_rate: float = 0.0
+
+
+@dataclass(frozen=True)
+class RiskGates:
+    """14 个风险闸门阈值。"""
+
+    max_allowed_drawdown: float = 0.20
+    max_allowed_daily_var: float = 0.05
+    min_allowed_rolling_return: float = -0.10
+    min_allowed_information_ratio: float = 0.0
+    min_allowed_fill_rate: float = 0.70
+    min_allowed_execution_price_coverage: float = 1.0
+    min_allowed_factor_score_coverage: float = 0.95
+    max_allowed_market_constraint_rate: float = 0.50
+    max_allowed_position_weight: float = 0.50
+    max_allowed_group_weight: float = 0.60
+    max_allowed_attribution_residual: float = 0.05
+    max_allowed_factor_correlation: float = 0.90
+    max_allowed_rebalance_changes: float = 3.0
+    min_allowed_holding_days: float = 3.0
+
+
+@dataclass(frozen=True)
+class LimitRuleConfig:
+    """涨跌停推断参数。"""
+
+    limit_up_down_rate: float = 0.10
+    st_limit_up_down_rate: float = 0.05
+    growth_limit_up_down_rate: float = 0.20
+    bse_limit_up_down_rate: float = 0.30
+    infer_limit_rate_by_symbol: bool = False
+    infer_limit_flags: bool = False
+
+
+@dataclass(frozen=True)
+class FactorConfig:
+    """因子回看期 / 权重配置。"""
+
+    lookback_momentum: int = 20
+    lookback_mean_reversion: int = 5
+    lookback_volatility: int = 20
+    factor_weights: dict[str, float] = field(
+        default_factory=lambda: DEFAULT_FACTOR_WEIGHTS.copy()
+    )
+
+
+@dataclass(frozen=True)
+class IOConfig:
+    """IO 路径配置。"""
+
+    output_dir: Path = OUTPUT_DIR
+    symbol_name_csv: Path | None = None
+    stock_pool_csv: Path | None = None
+    symbol_group_csv: Path | None = None
+    factor_score_csv: Path | None = None
+    custom_factors_py: Path | None = None
 _BACKTEST_SIMPLE_FIELDS = frozenset(
     {
         "initial_cash",
@@ -237,8 +320,11 @@ class BacktestConfig:
             raise ConfigValidationError("selection_mode must be one of: top, bottom.")
         if self.score_source not in {"auto", "builtin", "external"}:
             raise ConfigValidationError("score_source must be one of: auto, builtin, external.")
-        if self.allocation_model not in {"equal_weight", "score_weighted"}:
-            raise ConfigValidationError("allocation_model must be one of: equal_weight, score_weighted.")
+        _valid_allocation_models = {m.value for m in AllocationModel}
+        if self.allocation_model not in _valid_allocation_models:
+            raise ConfigValidationError(
+                f"allocation_model must be one of: {', '.join(sorted(_valid_allocation_models))}."
+            )
         if self.lot_size <= 0:
             raise ConfigValidationError("lot_size must be greater than 0.")
         if self.max_group_positions is not None and self.max_group_positions <= 0:
@@ -395,68 +481,17 @@ class BacktestConfig:
         }
 
     def to_dict(self) -> dict[str, object]:
-        """将当前配置序列化为字典，适合 JSON 或重建配置。"""
-        return {
-            "initial_cash": self.initial_cash,
-            "top_n": self.top_n,
-            "selection_mode": self.selection_mode,
-            "score_source": self.score_source,
-            "allocation_model": self.allocation_model,
-            "lot_size": self.lot_size,
-            "max_group_positions": self.max_group_positions,
-            "lookback_momentum": self.lookback_momentum,
-            "lookback_mean_reversion": self.lookback_mean_reversion,
-            "lookback_volatility": self.lookback_volatility,
-            "rolling_risk_window": self.rolling_risk_window,
-            "execution_delay_days": self.execution_delay_days,
-            "twap_slices": self.twap_slices,
-            "max_allowed_drawdown": self.max_allowed_drawdown,
-            "max_allowed_daily_var": self.max_allowed_daily_var,
-            "min_allowed_rolling_return": self.min_allowed_rolling_return,
-            "min_allowed_information_ratio": self.min_allowed_information_ratio,
-            "min_allowed_fill_rate": self.min_allowed_fill_rate,
-            "min_allowed_execution_price_coverage": self.min_allowed_execution_price_coverage,
-            "min_allowed_factor_score_coverage": self.min_allowed_factor_score_coverage,
-            "max_allowed_market_constraint_rate": self.max_allowed_market_constraint_rate,
-            "max_allowed_position_weight": self.max_allowed_position_weight,
-            "max_allowed_group_weight": self.max_allowed_group_weight,
-            "max_allowed_attribution_residual": self.max_allowed_attribution_residual,
-            "max_allowed_factor_correlation": self.max_allowed_factor_correlation,
-            "max_allowed_rebalance_changes": self.max_allowed_rebalance_changes,
-            "min_allowed_holding_days": self.min_allowed_holding_days,
-            "rebalance_every_n_days": self.rebalance_every_n_days,
-            "commission_rate": self.commission_rate,
-            "buy_commission_rate": self.buy_commission_rate,
-            "sell_commission_rate": self.sell_commission_rate,
-            "slippage_rate": self.slippage_rate,
-            "market_impact_coefficient": self.market_impact_coefficient,
-            "market_impact_exponent": self.market_impact_exponent,
-            "stamp_duty_rate": self.stamp_duty_rate,
-            "min_commission": self.min_commission,
-            "transfer_fee_rate": self.transfer_fee_rate,
-            "target_cash_weight": self.target_cash_weight,
-            "max_position_weight": self.max_position_weight,
-            "limit_up_down_rate": self.limit_up_down_rate,
-            "st_limit_up_down_rate": self.st_limit_up_down_rate,
-            "growth_limit_up_down_rate": self.growth_limit_up_down_rate,
-            "bse_limit_up_down_rate": self.bse_limit_up_down_rate,
-            "infer_limit_rate_by_symbol": self.infer_limit_rate_by_symbol,
-            "max_volume_participation": self.max_volume_participation,
-            "infer_limit_flags": self.infer_limit_flags,
-            "forward_fill_suspended_bars": self.forward_fill_suspended_bars,
-            "price_field": self.price_field,
-            "execution_price_field": self.execution_price_field,
-            "execution_style": self.execution_style,
-            "start_date": self.start_date,
-            "end_date": self.end_date,
-            "output_dir": self.output_dir,
-            "symbol_name_csv": self.symbol_name_csv,
-            "stock_pool_csv": self.stock_pool_csv,
-            "symbol_group_csv": self.symbol_group_csv,
-            "factor_score_csv": self.factor_score_csv,
-            "custom_factors_py": self.custom_factors_py,
-            "factor_weights": self.factor_weights.copy(),
-        }
+        """将当前配置序列化为字典，适合 JSON 或重建配置。
+
+        使用 ``dataclasses.fields()`` 自动遍历，不再手动列举字段。
+        """
+        result: dict[str, object] = {}
+        for f in dataclass_fields(self):
+            value = getattr(self, f.name)
+            if isinstance(value, dict):
+                value = value.copy()
+            result[f.name] = value
+        return result
 
     @classmethod
     def from_dict(cls, mapping: Mapping[str, object]) -> BacktestConfig:

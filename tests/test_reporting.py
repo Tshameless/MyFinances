@@ -376,14 +376,18 @@ class ReportingTests(unittest.TestCase):
                 FactorScoreRecord(
                     date=__import__("datetime").date(2024, 1, 2),
                     symbol="000001",
-                    momentum=0.1,
-                    mean_reversion=-0.02,
-                    low_volatility=-0.01,
-                    normalized_momentum=1.0,
-                    normalized_mean_reversion=0.5,
-                    normalized_low_volatility=0.25,
                     total_score=0.675,
                     selected=True,
+                    raw_scores={
+                        "momentum": 0.1,
+                        "mean_reversion": -0.02,
+                        "low_volatility": -0.01,
+                    },
+                    normalized_scores={
+                        "momentum": 1.0,
+                        "mean_reversion": 0.5,
+                        "low_volatility": 0.25,
+                    },
                 )
             ]
 

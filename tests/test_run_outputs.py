@@ -252,6 +252,67 @@ class RunOutputsTests(unittest.TestCase):
             self.assertIn("factor_count", factor_correlation["summary"])
             data_quality = json.loads(paths["price_data_quality_report_json"].read_text(encoding="utf-8"))
             self.assertEqual(4, data_quality["summary"]["row_count"])
+            self.assertEqual(2, rolling_risk["summary"]["window"])
+            strategy_health = json.loads(paths["strategy_health_json"].read_text(encoding="utf-8"))
+            self.assertIn("score", strategy_health["summary"])
+            self.assertIn("gate_status", strategy_health["summary"])
+            self.assertIn("daily_var", strategy_health["summary"])
+            self.assertIn("daily_expected_shortfall", strategy_health["summary"])
+            self.assertIn("average_entries_per_rebalance", strategy_health["summary"])
+            self.assertIn("market_constraint_rate", strategy_health["summary"])
+            self.assertIn("dominant_constraint_category", strategy_health["summary"])
+            self.assertIn("execution_price_coverage_rate", strategy_health["summary"])
+            self.assertIn("strongest_factor_correlation", strategy_health["summary"])
+            self.assertIn("strongest_factor_correlation_pair", strategy_health["summary"])
+            self.assertIn("max_largest_group_weight", strategy_health["summary"])
+            self.assertTrue(
+                any(row["category"] == "turnover" for row in strategy_health["rows"])
+            )
+            self.assertTrue(
+                any(row["category"] == "factor" for row in strategy_health["rows"])
+            )
+            self.assertTrue(
+                any(
+                    gate["category"] == "exposure"
+                    and str(gate["name"]).startswith("Maximum group weight")
+                    for gate in strategy_health["gates"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    gate["category"] == "data"
+                    and str(gate["name"]).startswith("Execution price coverage")
+                    for gate in strategy_health["gates"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    gate["category"] == "risk"
+                    and str(gate["name"]).startswith("Daily VaR")
+                    for gate in strategy_health["gates"]
+                )
+            )
+            execution_quality = json.loads(paths["execution_quality_json"].read_text(encoding="utf-8"))
+            self.assertIn("constraint_category_counts", execution_quality["summary"])
+            self.assertIn("cash", execution_quality["summary"]["constraint_category_counts"])
+            self.assertIn("worst_constraint_date", execution_quality["summary"])
+            self.assertTrue(
+                any(row["category"] == "daily_constraint" for row in execution_quality["rows"])
+            )
+            data_quality = json.loads(paths["price_data_quality_report_json"].read_text(encoding="utf-8"))
+            self.assertIn("execution_price_field", data_quality["summary"])
+            self.assertIn("execution_price_coverage_rate", data_quality["summary"])
+            suspension = json.loads(paths["suspension_analysis_json"].read_text(encoding="utf-8"))
+            self.assertEqual(1, suspension["summary"]["suspended_bar_count"])
+            self.assertEqual(1, suspension["summary"]["suspended_symbol_count"])
+            turnover = json.loads(paths["turnover_analysis_json"].read_text(encoding="utf-8"))
+            self.assertIn("average_entries_per_rebalance", turnover["summary"])
+            factor_decay = json.loads(paths["factor_decay_json"].read_text(encoding="utf-8"))
+            self.assertIn("total_score", factor_decay["summary"])
+            factor_correlation = json.loads(paths["factor_correlation_json"].read_text(encoding="utf-8"))
+            self.assertIn("factor_count", factor_correlation["summary"])
+            data_quality = json.loads(paths["price_data_quality_report_json"].read_text(encoding="utf-8"))
+            self.assertEqual(4, data_quality["summary"]["row_count"])
             self.assertEqual(3, data_quality["summary"]["missing_open_rows"])
             self.assertEqual(1, data_quality["summary"]["limit_down_days"])
             self.assertEqual(1, data_quality["summary"]["st_days"])
@@ -261,14 +322,10 @@ def _factor_score(score_date: date, symbol: str, score: float) -> FactorScoreRec
     return FactorScoreRecord(
         date=score_date,
         symbol=symbol,
-        momentum=score,
-        mean_reversion=0.0,
-        low_volatility=0.0,
-        normalized_momentum=score,
-        normalized_mean_reversion=0.0,
-        normalized_low_volatility=0.0,
         total_score=score,
         selected=score > 0,
+        raw_scores={"momentum": score},
+        normalized_scores={"momentum": score},
     )
 
 

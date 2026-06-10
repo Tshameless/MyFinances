@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
+from datetime import date
 
 from .config import BacktestConfig
 from .market import execution_price_for_bar, price_for_bar
 from .models import Order, OrderStatus, PriceBar, TradeAttemptRecord, TradeRecord
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class AccountTradeResult:
     cash: float
     positions: dict[str, int]
-    entry_dates: dict[str, object]
+    entry_dates: dict[str, date]
     holdings: tuple[str, ...]
     buy_turnover: float
     sell_turnover: float
@@ -159,6 +163,20 @@ def affordable_buy_shares(
     config: BacktestConfig,
 ) -> int:
     shares = round_down_to_lot(requested_shares, config.lot_size)
+    if shares <= 0 or price <= 0:
+        return 0
+    # 直接计算上界，避免 lot_size=1 时的 O(n) 线性退格
+    total_rate = (
+        config.buy_commission_rate_effective
+        + config.slippage_rate
+        + config.transfer_fee_rate
+    )
+    max_affordable = round_down_to_lot(
+        int(cash / (price * (1.0 + total_rate))),
+        config.lot_size,
+    )
+    shares = min(shares, max_affordable)
+    # 精确校验：考虑 market_impact 和 min_commission
     while shares > 0:
         gross_value = shares * price
         commission = calculate_commission(gross_value, config, side="BUY")
@@ -207,7 +225,7 @@ def calculate_slippage(
     )
 
 
-def _build_trade_attempt(
+def build_trade_attempt(
     bar: PriceBar,
     side: str,
     target_shares: int,
@@ -224,3 +242,7 @@ def _build_trade_attempt(
         reason=reason,
         cash=round(cash, 2),
     )
+
+
+# Backward-compatible alias
+_build_trade_attempt = build_trade_attempt

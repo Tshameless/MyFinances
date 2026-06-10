@@ -3,12 +3,11 @@ from __future__ import annotations
 from math import sqrt
 from typing import Any
 
+import numpy as np  # numpy is a required dependency (via scipy)
 
-def _optional_numpy() -> Any | None:
-    try:
-        import numpy as np  # type: ignore[import-not-found]
-    except Exception:
-        return None
+
+def _optional_numpy() -> Any:
+    """Return numpy module. Always available since numpy is a required dependency."""
     return np
 
 

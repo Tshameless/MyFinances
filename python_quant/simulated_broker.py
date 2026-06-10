@@ -7,7 +7,7 @@ from typing import Sequence
 from .broker_gateway import BaseBrokerGateway
 from .config import BacktestConfig
 from .execution_model import (
-    _build_trade_attempt,
+    build_trade_attempt,
     affordable_buy_shares,
     buy_rejection_reason,
     calculate_commission,
@@ -30,7 +30,7 @@ class SimulatedBroker(BaseBrokerGateway):
     def __init__(self, initial_cash: float, config: BacktestConfig):
         self.cash = initial_cash
         self.positions: dict[str, int] = {}
-        self.entry_dates: dict[str, object] = {}
+        self.entry_dates: dict[str, date] = {}
         self.config = config
         
         self.active_orders: dict[str, Order] = {}
@@ -268,7 +268,7 @@ class SimulatedBroker(BaseBrokerGateway):
         self.all_trades.append(trade)
 
     def _record_attempt(self, bar: PriceBar, order: Order, cash: float) -> None:
-        attempt = _build_trade_attempt(
+        attempt = build_trade_attempt(
             bar, 
             order.side, 
             order.target_shares - order.filled_shares, 

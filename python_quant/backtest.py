@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from bisect import bisect_right
 from dataclasses import replace
 from datetime import date
 from math import sqrt
@@ -32,7 +34,9 @@ from .models import (
     RebalanceRecord,
 )
 from .strategy import TopNFactorStrategy
-from .portfolio_optimizer import PortfolioOptimizer
+from .portfolio_optimizer import PortfolioOptimizer, ScipyPortfolioOptimizer
+
+logger = logging.getLogger(__name__)
 
 
 def run_backtest(
@@ -60,7 +64,7 @@ def run_backtest(
 
     cash = config.initial_cash
     positions: dict[str, int] = {}
-    entry_dates: dict[str, object] = {}
+    entry_dates: dict[str, date] = {}
     equity_curve: list[EquityPoint] = []
     position_points: list[PositionPoint] = []
     factor_score_records: list[FactorScoreRecord] = []
@@ -109,7 +113,6 @@ def run_backtest(
             ]
 
             if config.allocation_model in {"max_sharpe", "min_variance"}:
-                from .portfolio_optimizer import ScipyPortfolioOptimizer
                 historical_returns = {}
                 lookback = 60
                 for sym in available_records:
@@ -305,14 +308,10 @@ def _factor_records_for_date(
         symbol: FactorScoreRecord(
             date=current_date,
             symbol=symbol,
-            momentum=score,
-            mean_reversion=0.0,
-            low_volatility=0.0,
-            normalized_momentum=score,
-            normalized_mean_reversion=0.0,
-            normalized_low_volatility=0.0,
             total_score=score,
             selected=symbol in selected_symbols,
+            raw_scores={"external": score},
+            normalized_scores={"external": score},
         )
         for symbol, score in external_scores.items()
         if symbol in aligned_history and index < len(aligned_history[symbol])
@@ -365,17 +364,22 @@ def _build_position_points(
 def _resolve_stock_pool_for_date(
     stock_pool_by_date: dict[date, set[str]] | None,
     current_date: date,
+    *,
+    _sorted_dates_cache: dict[int, list[date]] | None = None,
 ) -> set[str] | None:
     if stock_pool_by_date is None:
         return None
-    effective_dates = [
-        pool_date
-        for pool_date in stock_pool_by_date
-        if pool_date <= current_date
-    ]
-    if not effective_dates:
+    # 使用 bisect 二分查找替代线性扫描
+    if _sorted_dates_cache is None:
+        _sorted_dates_cache = {}
+    cache_key = id(stock_pool_by_date)
+    if cache_key not in _sorted_dates_cache:
+        _sorted_dates_cache[cache_key] = sorted(stock_pool_by_date)
+    sorted_dates = _sorted_dates_cache[cache_key]
+    idx = bisect_right(sorted_dates, current_date) - 1
+    if idx < 0:
         return set()
-    return stock_pool_by_date[max(effective_dates)]
+    return stock_pool_by_date[sorted_dates[idx]]
 
 
 def _is_in_allowed_stock_pool(symbol: str, allowed_symbols: set[str] | None) -> bool:
@@ -544,8 +548,8 @@ def _can_exit_position(
     symbol: str,
     aligned_history: dict[str, list[PriceBar]],
     index: int,
-    entry_dates: dict[str, object],
-    current_date: object | None,
+    entry_dates: dict[str, date],
+    current_date: date | None,
 ) -> bool:
     if entry_dates.get(symbol) == current_date:
         return False
