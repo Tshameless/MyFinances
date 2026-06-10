@@ -43,28 +43,17 @@ def calculate_account_equity(
     return cash + market_value
 
 
-def rebalance_account(
-    *,
+def generate_orders_from_weights(
     cash: float,
     positions: dict[str, int],
-    entry_dates: dict[str, object],
     target_weights: dict[str, float],
     aligned_history: dict[str, list[PriceBar]],
     index: int,
     config: BacktestConfig,
-    current_date: object,
-) -> AccountTradeResult:
-    positions = positions.copy()
-    entry_dates = entry_dates.copy()
+) -> list[Order]:
     start_equity = calculate_account_equity(cash, positions, aligned_history, index, config)
-    sold_value = 0.0
-    bought_value = 0.0
-    cost = 0.0
-    trades: list[TradeRecord] = []
-    trade_attempts: list[TradeAttemptRecord] = []
     orders: list[Order] = []
 
-    # 1. Generate Orders
     for symbol in sorted(set(positions) - set(target_weights.keys())):
         bar = aligned_history[symbol][index]
         price = execution_price_for_bar(bar, config)
@@ -79,186 +68,32 @@ def rebalance_account(
             )
         )
 
-    retained_targets = tuple(symbol for symbol in target_weights if symbol in positions)
-    new_targets = tuple(symbol for symbol in target_weights if symbol not in positions)
-    target_count = len(retained_targets) + len(new_targets)
-    
     target_values = {
         symbol: start_equity * weight
         for symbol, weight in target_weights.items()
     }
 
+    new_targets = tuple(symbol for symbol in target_weights if symbol not in positions)
     for symbol in new_targets:
         bar = aligned_history[symbol][index]
         price = execution_price_for_bar(bar, config)
+        if price <= 0:
+            continue
         max_cash_for_position = min(target_values.get(symbol, 0.0), cash)
         requested_shares = round_down_to_lot(max_cash_for_position / price, config.lot_size)
-        orders.append(
-            Order(
-                order_id=str(uuid.uuid4()),
-                date=bar.date,
-                symbol=symbol,
-                side="BUY",
-                target_shares=requested_shares,
-                limit_price=price,
-            )
-        )
-
-    # 2. Match Orders
-    for order in orders:
-        bar = aligned_history[order.symbol][index]
-        if order.side == "SELL":
-            if entry_dates.get(order.symbol) == current_date:
-                order.status = OrderStatus.REJECTED
-                order.reason = "t_plus_one_locked"
-                trade_attempts.append(
-                    _build_trade_attempt(bar, order.side, order.target_shares, order.limit_price, order.reason, cash)
-                )
-                continue
-            if not is_sellable(bar):
-                order.status = OrderStatus.REJECTED
-                order.reason = sell_rejection_reason(bar)
-                trade_attempts.append(
-                    _build_trade_attempt(
-                        bar,
-                        order.side,
-                        order.target_shares,
-                        order.limit_price,
-                        order.reason,
-                        cash,
-                    )
-                )
-                continue
-            
-            shares = min(order.target_shares, max_sell_shares_by_volume(bar, config))
-            if shares <= 0:
-                order.status = OrderStatus.REJECTED
-                order.reason = "volume_limit_blocked"
-                trade_attempts.append(
-                    _build_trade_attempt(bar, order.side, order.target_shares, order.limit_price, order.reason, cash)
-                )
-                continue
-            
-            order.filled_shares = shares
-            if shares < order.target_shares:
-                order.status = OrderStatus.PARTIAL
-                positions[order.symbol] = order.target_shares - shares
-                reason = "rebalance_exit_partial_volume_limit"
-            else:
-                order.status = OrderStatus.FILLED
-                positions.pop(order.symbol)
-                entry_dates.pop(order.symbol, None)
-                reason = "rebalance_exit"
-            
-            gross_value = shares * order.limit_price
-            commission = calculate_commission(gross_value, config, side="SELL")
-            slippage = calculate_slippage(gross_value, shares, bar, config)
-            transfer_fee = gross_value * config.transfer_fee_rate
-            stamp_duty = gross_value * config.stamp_duty_rate
-            trade_cost = commission + slippage.total + transfer_fee + stamp_duty
-            cash += gross_value - trade_cost
-            sold_value += gross_value
-            cost += trade_cost
-            trades.append(
-                TradeRecord(
+        if requested_shares > 0:
+            orders.append(
+                Order(
+                    order_id=str(uuid.uuid4()),
                     date=bar.date,
-                    symbol=order.symbol,
-                    side="SELL",
-                    shares=shares,
-                    price=round(order.limit_price, 4),
-                    gross_value=round(gross_value, 2),
-                    commission=round(commission, 2),
-                    slippage=round(slippage.total, 2),
-                    transfer_fee=round(transfer_fee, 2),
-                    stamp_duty=round(stamp_duty, 2),
-                    total_cost=round(trade_cost, 2),
-                    cash_change=round(gross_value - trade_cost, 2),
-                    reason=reason,
-                    fixed_slippage=round(slippage.fixed, 2),
-                    market_impact=round(slippage.market_impact, 2),
-                )
-            )
-
-        elif order.side == "BUY":
-            if not is_buyable(bar):
-                order.status = OrderStatus.REJECTED
-                order.reason = buy_rejection_reason(bar)
-                trade_attempts.append(
-                    _build_trade_attempt(bar, order.side, order.target_shares, order.limit_price, order.reason, cash)
-                )
-                continue
-            
-            volume_limited_shares = max_buy_shares_by_volume(bar, config)
-            shares = affordable_buy_shares(
-                min(order.target_shares, volume_limited_shares),
-                order.limit_price,
-                cash,
-                bar,
-                config,
-            )
-            if shares <= 0:
-                reason = (
-                    "volume_limit_blocked"
-                    if order.target_shares > 0 and volume_limited_shares <= 0
-                    else "insufficient_cash_for_lot"
-                )
-                order.status = OrderStatus.REJECTED
-                order.reason = reason
-                trade_attempts.append(
-                    _build_trade_attempt(bar, order.side, order.target_shares, order.limit_price, order.reason, cash)
-                )
-                continue
-            
-            order.filled_shares = shares
-            if shares < order.target_shares:
-                order.status = OrderStatus.PARTIAL
-            else:
-                order.status = OrderStatus.FILLED
-                
-            gross_value = shares * order.limit_price
-            commission = calculate_commission(gross_value, config, side="BUY")
-            slippage = calculate_slippage(gross_value, shares, bar, config)
-            transfer_fee = gross_value * config.transfer_fee_rate
-            stamp_duty = 0.0
-            trade_cost = commission + slippage.total + transfer_fee
-            cash -= gross_value + trade_cost
-            positions[order.symbol] = shares
-            entry_dates[order.symbol] = current_date
-            bought_value += gross_value
-            cost += trade_cost
-            trades.append(
-                TradeRecord(
-                    date=bar.date,
-                    symbol=order.symbol,
+                    symbol=symbol,
                     side="BUY",
-                    shares=shares,
-                    price=round(order.limit_price, 4),
-                    gross_value=round(gross_value, 2),
-                    commission=round(commission, 2),
-                    slippage=round(slippage.total, 2),
-                    transfer_fee=round(transfer_fee, 2),
-                    stamp_duty=round(stamp_duty, 2),
-                    total_cost=round(trade_cost, 2),
-                    cash_change=round(-(gross_value + trade_cost), 2),
-                    reason="rebalance_entry",
-                    fixed_slippage=round(slippage.fixed, 2),
-                    market_impact=round(slippage.market_impact, 2),
+                    target_shares=requested_shares,
+                    limit_price=price,
                 )
             )
 
-    holdings = tuple(sorted(positions))
-    return AccountTradeResult(
-        cash=cash,
-        positions=positions,
-        entry_dates=entry_dates,
-        holdings=holdings,
-        buy_turnover=0.0 if start_equity == 0 else bought_value / start_equity,
-        sell_turnover=0.0 if start_equity == 0 else sold_value / start_equity,
-        cost=cost,
-        trades=trades,
-        trade_attempts=trade_attempts,
-        orders=orders,
-    )
+    return orders
 
 
 def is_buyable(bar: PriceBar) -> bool:

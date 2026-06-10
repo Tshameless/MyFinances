@@ -10,8 +10,9 @@ from .execution_model import (
     calculate_account_equity,
     is_buyable,
     is_sellable,
-    rebalance_account,
+    generate_orders_from_weights,
 )
+from .simulated_broker import SimulatedBroker
 from .factors import (
     align_history_to_calendar,
     align_history_with_suspended_fills,
@@ -62,9 +63,6 @@ def run_backtest(
     entry_dates: dict[str, object] = {}
     equity_curve: list[EquityPoint] = []
     position_points: list[PositionPoint] = []
-    trade_records = []
-    trade_attempt_records = []
-    order_records = []
     factor_score_records: list[FactorScoreRecord] = []
     rebalance_records: list[RebalanceRecord] = []
     holdings: tuple[str, ...] = ()
@@ -73,17 +71,7 @@ def run_backtest(
     warmup = config.max_lookback
     previous_equity = config.initial_cash
 
-    strategy = TopNFactorStrategy(
-        top_n=config.top_n,
-        mode=config.selection_mode,
-        allocation_model=config.allocation_model,
-    )
-    optimizer = PortfolioOptimizer(
-        max_position_weight=config.max_position_weight,
-        max_group_positions=config.max_group_positions,
-        target_cash_weight=config.target_cash_weight,
-        symbol_groups=symbol_groups,
-    )
+    broker = SimulatedBroker(initial_cash=config.initial_cash, config=config)
 
     last_signal_index = common_length - config.execution_delay_days - 2
     for index in range(warmup, last_signal_index + 1):
@@ -181,34 +169,44 @@ def run_backtest(
                     selected_symbols=set(selected),
                 ).values()
             )
-            trade_plan = rebalance_account(
+            
+            for oid in list(broker.active_orders.keys()):
+                broker.cancel_order(oid)
+                
+            orders = generate_orders_from_weights(
                 cash=cash,
                 positions=positions,
-                entry_dates=entry_dates,
                 target_weights=target_weights,
                 aligned_history=aligned_history,
                 index=execution_index,
                 config=config,
-                current_date=execution_date,
             )
-            cash = trade_plan.cash
-            positions = trade_plan.positions
-            entry_dates = trade_plan.entry_dates
-            holdings = trade_plan.holdings
-            turnover = trade_plan.buy_turnover + trade_plan.sell_turnover
-            total_cost += trade_plan.cost
+            broker.submit_orders(orders)
+            
+            start_equity = calculate_account_equity(cash, positions, aligned_history, execution_index, config)
+            
+            broker.process_market_data(execution_date, aligned_history, execution_index)
+            
+            cash = broker.cash
+            positions = broker.positions
+            entry_dates = broker.entry_dates
+            holdings = tuple(sorted(positions))
+            
+            buy_turnover = broker.bought_value_today / start_equity if start_equity > 0 else 0.0
+            sell_turnover = broker.sold_value_today / start_equity if start_equity > 0 else 0.0
+            turnover = buy_turnover + sell_turnover
+            
+            total_cost += broker.cost_today
             total_turnover += turnover
-            trade_records.extend(trade_plan.trades)
-            trade_attempt_records.extend(trade_plan.trade_attempts)
-            order_records.extend(trade_plan.orders)
+            
             rebalance_records.append(
                 RebalanceRecord(
                     date=current_date,
                     holdings=holdings,
-                    buy_turnover=trade_plan.buy_turnover,
-                    sell_turnover=trade_plan.sell_turnover,
+                    buy_turnover=buy_turnover,
+                    sell_turnover=sell_turnover,
                     turnover=turnover,
-                    cost=round(trade_plan.cost, 2),
+                    cost=round(broker.cost_today, 2),
                 )
             )
 
@@ -265,15 +263,15 @@ def run_backtest(
         metrics=metrics,
         benchmark_curve=benchmark_curve,
         positions=position_points,
-        trades=trade_records,
-        trade_attempts=trade_attempt_records,
+        trades=broker.all_trades,
+        trade_attempts=broker.all_attempts,
         factor_scores=factor_score_records,
         price_bars=[
             bar
             for symbol in sorted(aligned_history)
             for bar in aligned_history[symbol]
         ],
-        orders=order_records,
+        orders=broker.all_orders,
     )
 
 

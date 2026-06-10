@@ -9,6 +9,7 @@ from pathlib import Path
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
 from .models import CorporateAction, PriceBar
+from .cache import memoize_to_disk
 
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d")
 
@@ -254,6 +255,7 @@ def import_corporate_actions_csv_to_sqlite(csv_path: str | Path, db_path: str | 
     return len(rows)
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_price_bars_from_sqlite(
     db_path: str | Path,
     *,
@@ -276,7 +278,7 @@ def load_price_bars_from_sqlite(
         params.extend(symbol_list)
     if predicates:
         query += " WHERE " + " AND ".join(predicates)
-    query += " ORDER BY date, symbol"
+    query += " ORDER BY symbol, date"
     conn = sqlite3.connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
@@ -286,6 +288,7 @@ def load_price_bars_from_sqlite(
     return [_price_bar_from_row(row) for row in rows]
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_benchmark_bars_from_sqlite(
     db_path: str | Path,
     *,
@@ -323,6 +326,7 @@ def load_benchmark_bars_from_sqlite(
     ]
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_stock_pool_from_sqlite(db_path: str | Path) -> dict[date, set[str]]:
     conn = sqlite3.connect(db_path)
     try:
@@ -335,6 +339,7 @@ def load_stock_pool_from_sqlite(db_path: str | Path) -> dict[date, set[str]]:
     return result
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_factor_scores_from_sqlite(db_path: str | Path) -> dict[date, dict[str, float]]:
     conn = sqlite3.connect(db_path)
     try:
@@ -347,6 +352,7 @@ def load_factor_scores_from_sqlite(db_path: str | Path) -> dict[date, dict[str, 
     return result
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_symbol_groups_from_sqlite(db_path: str | Path) -> dict[str, str]:
     conn = sqlite3.connect(db_path)
     try:
@@ -356,6 +362,7 @@ def load_symbol_groups_from_sqlite(db_path: str | Path) -> dict[str, str]:
     return {str(symbol): str(group_name) for symbol, group_name in rows}
 
 
+@memoize_to_disk(".cache/db_queries", depends_on_file_arg="db_path")
 def load_corporate_actions_from_sqlite(db_path: str | Path) -> list[CorporateAction]:
     query = "SELECT * FROM corporate_actions ORDER BY date, symbol"
     conn = sqlite3.connect(db_path)
@@ -408,7 +415,7 @@ def _parse_date(raw_value: str | None, line_number: int) -> date:
 
 
 def _parse_iso_date(raw_value: str) -> date:
-    return datetime.strptime(raw_value, "%Y-%m-%d").date()
+    return date(int(raw_value[:4]), int(raw_value[5:7]), int(raw_value[8:10]))
 
 
 def _required_float(raw_value: str | None, field_name: str, line_number: int) -> float:

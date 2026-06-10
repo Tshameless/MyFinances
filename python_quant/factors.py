@@ -13,8 +13,6 @@ def group_prices_by_symbol(bars: list[PriceBar]) -> dict[str, list[PriceBar]]:
     grouped: dict[str, list[PriceBar]] = defaultdict(list)
     for bar in bars:
         grouped[bar.symbol].append(bar)
-    for items in grouped.values():
-        items.sort(key=lambda item: item.date)
     return dict(grouped)
 
 
