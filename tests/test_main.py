@@ -292,6 +292,56 @@ factor_score_csv = "{factor_score_csv.as_posix()}"
             self.assertIn("Walk-forward 验证完成", buffer.getvalue())
             self.assertIn("Walk-forward HTML 报告已保存", buffer.getvalue())
 
+    def test_demo_sweep_writes_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "reports"
+            config_path = Path(temp_dir) / "backtest.toml"
+            config_path.write_text(
+                f"""
+[backtest]
+initial_cash = 1000000
+top_n = 2
+lookback_momentum = 3
+lookback_mean_reversion = 2
+lookback_volatility = 3
+rebalance_every_n_days = 2
+commission_rate = 0
+slippage_rate = 0
+stamp_duty_rate = 0
+price_field = "adjusted_close"
+output_dir = "{output_dir.as_posix()}"
+
+[sweep]
+top_n = [2, 3]
+rebalance_every_n_days = [2, 3]
+""".strip(),
+                encoding="utf-8",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()) as buffer:
+                exit_code = main(
+                    [
+                        "--demo",
+                        "--config",
+                        str(config_path),
+                        "--sweep",
+                        "--rank-by",
+                        "annualized_return",
+                    ]
+                )
+
+            batch_dir = output_dir / "batch_runs"
+            self.assertEqual(0, exit_code)
+            self.assertTrue((batch_dir / "batch_summary.csv").exists())
+            self.assertTrue((batch_dir / "batch_summary.json").exists())
+            self.assertTrue((batch_dir / "batch_leaderboard.csv").exists())
+            self.assertTrue((batch_dir / "batch_leaderboard.json").exists())
+            self.assertTrue((batch_dir / "batch_report.html").exists())
+            payload = json.loads((batch_dir / "batch_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(4, len(payload["rows"]))
+            self.assertIn("批量参数扫描完成", buffer.getvalue())
+            self.assertIn("批量 HTML 报告已保存", buffer.getvalue())
+
     def test_demo_walk_forward_optimization_writes_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "reports"

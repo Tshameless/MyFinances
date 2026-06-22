@@ -218,9 +218,6 @@ def run_sweep(
     print(f"参数稳定性 CSV 已保存：{stability_paths['batch_stability_csv']}")
     print(f"参数稳定性 JSON 已保存：{stability_paths['batch_stability_json']}")
     print(f"参数敏感度 CSV 已保存：{stability_paths['parameter_sensitivity_csv']}")
-    print(f"批量对比图已保存：{batch_chart_path}")
-    if heatmap_path is not None:
-        print(f"热力图已保存：{heatmap_path}")
     print(f"批量 HTML 报告已保存：{batch_report_path}")
 
 

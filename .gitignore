@@ -1,7 +1,6 @@
 output/
-__pycache__/
-*.pyc
-*.pyo
+**/__pycache__/
+*.py[cod]
 *.log
 *.egg-info/
 .pytest_cache/
