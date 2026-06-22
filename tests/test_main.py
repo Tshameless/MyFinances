@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import io
 import json
+import sys
 import os
 import tempfile
 import unittest
@@ -180,6 +181,68 @@ top_n = "2"
             self.assertEqual(2, raised.exception.code)
             self.assertIn("top_n must be an integer", stderr.getvalue())
             self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_help_still_works_when_scipy_is_unavailable(self) -> None:
+        from python_quant.main import build_parser
+
+        with patch.dict(sys.modules, {"scipy": None, "scipy.optimize": None}):
+            help_text = build_parser().format_help()
+
+        self.assertIn("运行 MyFinances A 股量化回测工具", help_text)
+        self.assertIn("--help", help_text)
+
+    def test_demo_cli_run_without_scipy_for_default_allocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "reports"
+
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                patch.dict(sys.modules, {"scipy": None, "scipy.optimize": None}),
+            ):
+                exit_code = main(
+                    [
+                        "--demo",
+                        "--output-dir",
+                        str(output_dir),
+                        "--lookback-momentum",
+                        "3",
+                        "--lookback-mean-reversion",
+                        "2",
+                        "--lookback-volatility",
+                        "3",
+                    ]
+                )
+
+            self.assertEqual(0, exit_code)
+            self.assertTrue((output_dir / "run_manifest.json").exists())
+
+    def test_reports_clear_error_when_scipy_optimizer_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stderr = io.StringIO()
+            with (
+                contextlib.redirect_stderr(stderr),
+                self.assertRaises(SystemExit) as raised,
+                patch.dict(sys.modules, {"scipy": None, "scipy.optimize": None}),
+            ):
+                main(
+                    [
+                        "--demo",
+                        "--allocation-model",
+                        "max_sharpe",
+                        "--lookback-momentum",
+                        "3",
+                        "--lookback-mean-reversion",
+                        "2",
+                        "--lookback-volatility",
+                        "3",
+                    ]
+                )
+
+            self.assertEqual(2, raised.exception.code)
+            message = stderr.getvalue()
+            self.assertIn("需要可选依赖 scipy", message)
+            self.assertIn("equal_weight / score_weighted", message)
+            self.assertNotIn("No module named", message)
 
     def test_csv_cli_run_with_benchmark_writes_reproducible_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

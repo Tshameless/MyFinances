@@ -1438,11 +1438,12 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("核心结论", content)
             self.assertIn("当前持仓", content)
             self.assertIn("调仓摘要", content)
-            self.assertIn("基准复盘", content)
+            self.assertIn("基准表现", content)
             self.assertIn("复盘摘要", content)
             self.assertIn("配置摘要", content)
             self.assertIn("指标怎么看", content)
             self.assertIn("持仓代码说明", content)
+            self.assertIn("年化收益", content)
             self.assertIn("2024-01-08", content)
             self.assertIn("12.00%", content)
             self.assertIn("8.00%", content)
@@ -1454,6 +1455,18 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("策略健康评分", content)
             self.assertIn("有效持仓数", content)
             self.assertIn("最大单票权重", content)
+            empty_report = save_single_run_report_html(
+                output_dir=output_dir,
+                config=config,
+                metrics=metrics,
+                artifacts={
+                    "equity_curve_svg": output_dir / "equity_curve.svg",
+                },
+                latest_holdings=(),
+                latest_rebalance=None,
+                symbol_names={"000001": "平安银行", "600519": "贵州茅台"},
+            ).read_text(encoding="utf-8-sig")
+            self.assertIn("当前组合暂无持仓数据", empty_report)
             self.assertIn("最大风险贡献标的", content)
             self.assertIn("最大风险贡献占比", content)
             self.assertIn("62.00%", content)

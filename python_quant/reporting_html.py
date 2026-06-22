@@ -62,7 +62,7 @@ def save_single_run_report_html(
         summary_card_items.append(_summary_card("超额收益", f"{metrics.excess_return:.2%}"))
         benchmark_section = f"""
     <div class="card">
-      <h2>基准复盘</h2>
+      <h2>基准表现</h2>
       <p class="lead">{escape(_build_benchmark_conclusion(metrics))}</p>
       <table>{_build_benchmark_summary_rows(metrics)}</table>
     </div>"""
@@ -84,7 +84,7 @@ def save_single_run_report_html(
         for symbol in latest_holdings
     )
     if not holdings_rows:
-        holdings_rows = "<tr><th>-</th><td>当前结果没有持仓数据。</td></tr>"
+        holdings_rows = "<tr><th>-</th><td>当前组合暂无持仓数据。</td></tr>"
     chart_title = "策略与基准净值" if has_benchmark else "策略净值走势"
     config_rows_list = []
     for key in ("initial_cash", "top_n", "selection_mode", "score_source", "lot_size", "max_group_positions", "target_cash_weight", "max_position_weight"):

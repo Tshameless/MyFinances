@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-import numpy as np
-from scipy.optimize import minimize
-from typing import Iterable
 from datetime import date
+from typing import Any
+from typing import Iterable
+
+import numpy as np
 
 from .strategy_api import PortfolioConstructionModel
 from .models import FactorScoreRecord
+
+
+def _load_scipy_minimize() -> Any:
+    try:
+        from scipy.optimize import minimize
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "allocation_model='max_sharpe' 或 'min_variance' 需要可选依赖 scipy。"
+            "请先执行 `python -m pip install scipy>=1.10.0`，"
+            "或改用 equal_weight / score_weighted。"
+        ) from exc
+    return minimize
 
 class PortfolioOptimizer:
     """Applies constraints to unconstrained target weights. (Legacy greedy optimizer)"""
@@ -94,6 +107,8 @@ class ScipyPortfolioOptimizer(PortfolioConstructionModel):
     ) -> dict[str, float]:
         if not signals:
             return {}
+
+        minimize = _load_scipy_minimize()
             
         symbols = list(signals.keys())
         n = len(symbols)

@@ -194,8 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--allocation-model",
-        choices=["equal_weight", "score_weighted"],
-        help="Position allocation model: equal_weight or score_weighted.",
+        choices=["equal_weight", "score_weighted", "max_sharpe", "min_variance"],
+        help="持仓分配模型：equal_weight、score_weighted、max_sharpe 或 min_variance。",
     )
     parser.add_argument("--max-group-positions", type=int, help="每个代码分组最多入选股票数量；需配合 symbol_group_csv。")
     parser.add_argument("--lot-size", type=int, help="每手股数，A 股默认使用 100。")
@@ -296,7 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         _run_with_args(args, parser)
-    except (FileNotFoundError, TypeError, ValueError) as exc:
+    except (FileNotFoundError, ModuleNotFoundError, TypeError, ValueError) as exc:
         parser.exit(2, f"{parser.prog}: error: {exc}\n")
     return 0
 
