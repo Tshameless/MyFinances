@@ -177,6 +177,31 @@ python -m python_quant.main --csv prices.csv --factor-score-csv data/factor_scor
 
 当入选标的评分全部不为正时，`score_weighted` 会自动退回等权，避免负权重或零权重组合。
 
+如果希望按历史收益波动做更高级的权重优化，也可以使用：
+
+```toml
+allocation_model = "max_sharpe"
+```
+
+或：
+
+```toml
+allocation_model = "min_variance"
+```
+
+```bash
+python -m python_quant.main --csv prices.csv --allocation-model max_sharpe
+python -m python_quant.main --csv prices.csv --allocation-model min_variance
+```
+
+这两个模型会先根据因子分数筛出候选股票，再结合最近一段历史收益做优化求解。它们依赖可选库 `scipy`；如果环境里没有安装，可以先执行：
+
+```bash
+python -m pip install scipy>=1.10.0
+```
+
+如果只是做基础回测或教学演示，不安装 `scipy` 也可以正常使用 `equal_weight` 和 `score_weighted`。
+
 费用模型支持比例费率、最低佣金和过户费：
 
 ```toml

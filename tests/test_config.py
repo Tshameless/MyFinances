@@ -102,6 +102,23 @@ low_volatility = 0.3
             self.assertEqual(0.25, overrides["max_position_weight"])
             self.assertEqual(0.7, overrides["factor_weights"]["momentum"])
 
+    def test_accepts_advanced_allocation_models(self) -> None:
+        max_sharpe_config = BacktestConfig(
+            allocation_model="max_sharpe",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+        )
+        min_variance_config = BacktestConfig(
+            allocation_model="min_variance",
+            lookback_momentum=1,
+            lookback_mean_reversion=1,
+            lookback_volatility=1,
+        )
+
+        self.assertEqual("max_sharpe", max_sharpe_config.allocation_model)
+        self.assertEqual("min_variance", min_variance_config.allocation_model)
+
     def test_rejects_toml_without_backtest_section(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "backtest.toml"

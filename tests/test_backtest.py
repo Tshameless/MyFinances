@@ -10,8 +10,9 @@ from python_quant.backtest import (
     _can_be_selected,
 )
 from python_quant.config import BacktestConfig
-from python_quant.execution_model import rebalance_account
+from python_quant.execution_model import generate_orders_from_weights
 from python_quant.models import PriceBar, FactorScoreRecord
+from python_quant.simulated_broker import SimulatedBroker
 
 
 def _build_target_holdings(
@@ -295,22 +296,26 @@ class BacktestTests(unittest.TestCase):
             price_field="close",
         )
 
-        trade_plan = rebalance_account(
-            cash=0.0,
-            positions={"AAA": 10},
-            entry_dates={"AAA": date(2024, 1, 3)},
+        broker = SimulatedBroker(initial_cash=0.0, config=config)
+        broker.positions = {"AAA": 10}
+        broker.entry_dates = {"AAA": date(2024, 1, 3)}
+
+        orders = generate_orders_from_weights(
+            cash=broker.cash,
+            positions=broker.positions,
             target_weights={"BBB": 1.0},
             aligned_history=aligned_history,
             index=1,
             config=config,
-            current_date=date(2024, 1, 4),
         )
+        broker.submit_orders(orders)
+        broker.process_market_data(date(2024, 1, 4), aligned_history, 1)
 
-        self.assertEqual({"AAA": 10}, trade_plan.positions)
+        self.assertEqual({"AAA": 10}, broker.positions)
         self.assertTrue(
             any(
                 attempt.symbol == "AAA" and attempt.reason == "suspended"
-                for attempt in trade_plan.trade_attempts
+                for attempt in broker.trade_attempts_today
             )
         )
 
@@ -594,8 +599,8 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual((), result.equity_curve[-1].holdings)
         self.assertEqual(100.0, result.equity_curve[-1].equity)
         self.assertEqual("CASH", (result.positions or [])[-1].symbol)
-        self.assertTrue(result.trade_attempts)
-        self.assertEqual("insufficient_cash_for_lot", (result.trade_attempts or [])[-1].reason)
+        self.assertFalse(result.trades)
+        self.assertFalse(result.trade_attempts)
 
     def test_t_plus_one_lock_keeps_same_day_new_buy_in_target_holdings(self) -> None:
         bars = _build_reversing_signal_bars()
@@ -793,20 +798,24 @@ class BacktestTests(unittest.TestCase):
             factor_weights={"momentum": 1.0},
         )
 
-        trade_plan = rebalance_account(
-            cash=1000.0,
-            positions={"AAA": 200},
-            entry_dates={"AAA": date(2024, 1, 2)},
+        broker = SimulatedBroker(initial_cash=1000.0, config=config)
+        broker.positions = {"AAA": 200}
+        broker.entry_dates = {"AAA": date(2024, 1, 2)}
+
+        orders = generate_orders_from_weights(
+            cash=broker.cash,
+            positions=broker.positions,
             target_weights={},
             aligned_history=aligned_history,
             index=1,
             config=config,
-            current_date=date(2024, 1, 3),
         )
+        broker.submit_orders(orders)
+        broker.process_market_data(date(2024, 1, 3), aligned_history, 1)
 
-        self.assertEqual({"AAA": 50}, trade_plan.positions)
-        self.assertEqual(150, trade_plan.trades[0].shares)
-        self.assertEqual("rebalance_exit_partial_volume_limit", trade_plan.trades[0].reason)
+        self.assertEqual({"AAA": 50}, broker.positions)
+        self.assertEqual(150, broker.trades_today[0].shares)
+        self.assertEqual("rebalance_exit_partial_volume_limit", broker.trades_today[0].reason)
 
 
 def _build_aligned_bars() -> list[PriceBar]:

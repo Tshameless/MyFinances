@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -62,6 +63,22 @@ from .workflows import (
 logger = logging.getLogger(__name__)
 
 
+def _configure_console_encoding() -> None:
+    if os.name != "nt":
+        return
+
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        encoding = getattr(stream, "encoding", None)
+        if callable(reconfigure) and encoding and encoding.lower() != "utf-8":
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except ValueError:
+                # Some wrapped streams may reject reconfiguration; keep best-effort behavior.
+                pass
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="运行 MyFinances A 股量化回测工具。"
@@ -118,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--import-data-to-sqlite",
         type=str,
-        help="Import provided CSV inputs into a SQLite database path, then exit.",
+        help="将提供的 CSV 输入导入 SQLite 数据库路径，然后退出。",
     )
     parser.add_argument(
         "--sweep",
@@ -257,37 +274,38 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execution-price-field",
         choices=["close", "adjusted_close", "open", "vwap"],
-        help="Select the trade execution price field. Defaults to price_field when omitted.",
+        help="选择交易执行价格字段；不填时默认沿用 price_field。",
     )
     parser.add_argument(
         "--execution-delay-days",
         type=int,
-        help="Delay trade execution by N aligned trading bars after the signal date.",
+        help="在信号日之后延迟 N 个对齐交易 bar 执行交易。",
     )
     parser.add_argument(
         "--execution-style",
         choices=["market", "twap"],
-        help="Execution style. market is the default; twap splits volume participation across slices.",
+        help="执行风格；默认 market，twap 会把成交量参与率拆分到多个切片。",
     )
     parser.add_argument(
         "--twap-slices",
         type=int,
-        help="Number of TWAP slices used when --execution-style twap is enabled.",
+        help="启用 --execution-style twap 时使用的 TWAP 切片数量。",
     )
     parser.add_argument(
         "--max-allowed-rebalance-changes",
         type=float,
-        help="Maximum average entries plus exits per rebalance allowed by the strategy health gate.",
+        help="策略健康闸门允许的平均每次调仓最大进入数加退出数。",
     )
     parser.add_argument(
         "--min-allowed-holding-days",
         type=float,
-        help="Minimum average realized holding days allowed by the strategy health gate.",
+        help="策略健康闸门允许的最小平均已实现持有天数。",
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_console_encoding()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -301,17 +319,50 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+def _handle_pre_run_commands(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> bool:
     if args.import_data_to_sqlite:
         imported = _import_data_to_sqlite(args, parser)
         for label, row_count in imported:
             print(f"Imported {row_count} {label} rows into SQLite: {args.import_data_to_sqlite}")
-        return
+        return True
 
     if args.validate_csv:
         _validate_csv_inputs(args, parser)
-        return
+        return True
 
+    return False
+
+
+def _filtered_benchmark_bars(
+    args: argparse.Namespace,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> list[PriceBar] | None:
+    benchmark_bars = _load_benchmark_bars(args)
+    if benchmark_bars is None:
+        return None
+    return _filter_bars_by_date_range(
+        benchmark_bars,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def _prepare_run_context(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> tuple[
+    object,
+    list[PriceBar],
+    list[PriceBar] | None,
+    dict[date, set[str]] | None,
+    dict[str, str] | None,
+    dict[date, dict[str, float]] | None,
+]:
     backtest_config = build_backtest_config(args)
     bars = _filter_bars_by_date_range(
         _load_bars(args, parser),
@@ -319,21 +370,36 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         end_date=backtest_config.end_date,
     )
     bars = apply_inferred_limit_flags(bars, backtest_config)
-    benchmark_bars = _load_benchmark_bars(args)
+    benchmark_bars = _filtered_benchmark_bars(
+        args,
+        start_date=backtest_config.start_date,
+        end_date=backtest_config.end_date,
+    )
     stock_pool_by_date = _load_stock_pool(backtest_config)
     symbol_groups = _load_symbol_groups(backtest_config)
     factor_scores_by_date = _load_factor_scores(backtest_config)
-    if benchmark_bars is not None:
-        benchmark_bars = _filter_bars_by_date_range(
-            benchmark_bars,
-            start_date=backtest_config.start_date,
-            end_date=backtest_config.end_date,
-        )
+    return (
+        backtest_config,
+        bars,
+        benchmark_bars,
+        stock_pool_by_date,
+        symbol_groups,
+        factor_scores_by_date,
+    )
 
+
+def _dispatch_workflow(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    backtest_config: object,
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+) -> bool:
     if args.sweep:
         if not args.config:
             parser.error("--sweep 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
-            return
+            return True
         run_sweep(
             args,
             bars,
@@ -341,7 +407,7 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             base_config=backtest_config,
             build_config_sources=build_config_sources,
         )
-        return
+        return True
 
     if args.walk_forward:
         run_walk_forward(
@@ -351,12 +417,12 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             base_config=backtest_config,
             build_config_sources=build_config_sources,
         )
-        return
+        return True
 
     if args.walk_optimize:
         if not args.config:
             parser.error("--walk-optimize 需要配合 --config 使用，且配置文件中必须包含 [sweep]。")
-            return
+            return True
         run_walk_forward_optimization(
             args,
             bars,
@@ -364,8 +430,21 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             base_config=backtest_config,
             build_config_sources=build_config_sources,
         )
-        return
+        return True
 
+    return False
+
+
+def _run_single_backtest(
+    args: argparse.Namespace,
+    *,
+    backtest_config: object,
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+    stock_pool_by_date: dict[date, set[str]] | None,
+    symbol_groups: dict[str, str] | None,
+    factor_scores_by_date: dict[date, dict[str, float]] | None,
+) -> None:
     result = run_backtest(
         bars,
         backtest_config,
@@ -383,6 +462,39 @@ def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         config_sources=build_config_sources(args),
     )
     print_single_run_artifacts(artifact_paths)
+
+
+def _run_with_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if _handle_pre_run_commands(args, parser):
+        return
+
+    (
+        backtest_config,
+        bars,
+        benchmark_bars,
+        stock_pool_by_date,
+        symbol_groups,
+        factor_scores_by_date,
+    ) = _prepare_run_context(args, parser)
+
+    if _dispatch_workflow(
+        args,
+        parser,
+        backtest_config=backtest_config,
+        bars=bars,
+        benchmark_bars=benchmark_bars,
+    ):
+        return
+
+    _run_single_backtest(
+        args,
+        backtest_config=backtest_config,
+        bars=bars,
+        benchmark_bars=benchmark_bars,
+        stock_pool_by_date=stock_pool_by_date,
+        symbol_groups=symbol_groups,
+        factor_scores_by_date=factor_scores_by_date,
+    )
 
 
 def _load_bars(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[PriceBar]:

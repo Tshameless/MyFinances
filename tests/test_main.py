@@ -25,6 +25,53 @@ from scripts.dev_check import _check_manifest_artifacts
 
 
 class MainTests(unittest.TestCase):
+    def test_configures_windows_console_streams_to_utf8_when_supported(self) -> None:
+        class _FakeStream:
+            def __init__(self, encoding: str) -> None:
+                self.encoding = encoding
+                self.calls: list[tuple[str, str]] = []
+
+            def reconfigure(self, *, encoding: str, errors: str) -> None:
+                self.encoding = encoding
+                self.calls.append((encoding, errors))
+
+        from python_quant import main as main_module
+
+        stdout = _FakeStream("cp936")
+        stderr = _FakeStream("gbk")
+        with (
+            patch.object(main_module.os, "name", "nt"),
+            patch.object(main_module.sys, "stdout", stdout),
+            patch.object(main_module.sys, "stderr", stderr),
+        ):
+            main_module._configure_console_encoding()
+
+        self.assertEqual([("utf-8", "replace")], stdout.calls)
+        self.assertEqual([("utf-8", "replace")], stderr.calls)
+
+    def test_skips_console_reconfigure_when_not_needed(self) -> None:
+        class _FakeStream:
+            def __init__(self, encoding: str) -> None:
+                self.encoding = encoding
+                self.calls: list[tuple[str, str]] = []
+
+            def reconfigure(self, *, encoding: str, errors: str) -> None:
+                self.calls.append((encoding, errors))
+
+        from python_quant import main as main_module
+
+        stdout = _FakeStream("utf-8")
+        stderr = _FakeStream("utf-8")
+        with (
+            patch.object(main_module.os, "name", "nt"),
+            patch.object(main_module.sys, "stdout", stdout),
+            patch.object(main_module.sys, "stderr", stderr),
+        ):
+            main_module._configure_console_encoding()
+
+        self.assertEqual([], stdout.calls)
+        self.assertEqual([], stderr.calls)
+
     def test_parser_help_keeps_chinese_text_readable(self) -> None:
         from python_quant.main import build_parser
 
@@ -35,6 +82,10 @@ class MainTests(unittest.TestCase):
         self.assertIn("批量扫描结果的排序指标", help_text)
         self.assertIn("--rolling-risk-window", help_text)
         self.assertIn("--forward-fill-suspended-bars", help_text)
+        self.assertIn("--allocation-model {equal_weight,score_weighted,max_sharpe,min_variance}", help_text)
+        self.assertIn("将提供的 CSV 输入导入 SQLite 数据库路径，然后退出。", help_text)
+        self.assertIn("选择交易执行价格字段；不填时默认沿用 price_field。", help_text)
+        self.assertIn("执行风格；默认 market，twap 会把成交量参与率拆分到多个切片。", help_text)
 
     def test_demo_cli_run_writes_expected_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

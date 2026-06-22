@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import date
 from itertools import product
 from pathlib import Path
-from typing import Protocol, TypedDict, cast
+from typing import Protocol, TypeVar, TypedDict, cast
 
 from .analysis import (
     build_batch_stability_analysis,
@@ -60,10 +60,116 @@ class _GlobalTrainCandidateResult(_TrainCandidateResult):
 
 
 _WORKER_CTX: dict[str, object] = {}
+_TaskT = TypeVar("_TaskT")
+_ResultT = TypeVar("_ResultT")
+
 
 def _init_worker(ctx: dict[str, object]) -> None:
     global _WORKER_CTX
     _WORKER_CTX = ctx
+
+
+def _run_serial_or_parallel(
+    *,
+    items: list[_TaskT],
+    jobs: int,
+    serial_runner: Callable[[_TaskT], _ResultT],
+    worker_runner: Callable[[_TaskT], _ResultT] | None = None,
+    worker_ctx: dict[str, object] | None = None,
+) -> list[_ResultT]:
+    if jobs <= 1 or len(items) <= 1:
+        return [serial_runner(item) for item in items]
+
+    if worker_runner is None or worker_ctx is None:
+        return [serial_runner(item) for item in items]
+
+    from concurrent.futures import ProcessPoolExecutor
+
+    with ProcessPoolExecutor(
+        max_workers=jobs,
+        initializer=_init_worker,
+        initargs=(worker_ctx,),
+    ) as executor:
+        return list(executor.map(worker_runner, items))
+
+
+def _build_run_config(
+    base_config: BacktestConfig,
+    *,
+    output_dir: Path,
+    overrides: dict[str, object] | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> BacktestConfig:
+    config_kwargs = base_config.to_dict()
+    if overrides:
+        config_kwargs.update(overrides)
+    if start_date is not None:
+        config_kwargs["start_date"] = start_date
+    if end_date is not None:
+        config_kwargs["end_date"] = end_date
+    config_kwargs["output_dir"] = output_dir
+    return BacktestConfig.from_dict(config_kwargs)
+
+
+def _filter_run_bars(
+    bars: list[PriceBar],
+    benchmark_bars: list[PriceBar] | None,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> tuple[list[PriceBar], list[PriceBar] | None]:
+    return (
+        filter_bars_by_date_range(
+            bars,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        (
+            None
+            if benchmark_bars is None
+            else filter_bars_by_date_range(
+                benchmark_bars,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        ),
+    )
+
+
+def _run_backtest_with_config(
+    bars: list[PriceBar],
+    config: BacktestConfig,
+    *,
+    benchmark_bars: list[PriceBar] | None,
+) -> BacktestResult:
+    return run_backtest(
+        bars,
+        config,
+        benchmark_bars=benchmark_bars,
+        stock_pool_by_date=load_stock_pool(config),
+        symbol_groups=load_symbol_groups(config),
+        factor_scores_by_date=load_factor_scores(config),
+    )
+
+
+def _persist_artifacts(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    result: BacktestResult,
+    config: BacktestConfig,
+    build_config_sources: ConfigSourcesBuilder,
+    sweep_overrides: dict[str, object] | None = None,
+) -> dict[str, Path]:
+    return persist_run_outputs(
+        output_dir=output_dir,
+        result=result,
+        config=config,
+        inputs=build_input_metadata(args, config),
+        print_console=False,
+        config_sources=build_config_sources(args, sweep_overrides=sweep_overrides),
+    )
 
 def _sweep_worker_wrapper(item: tuple[int, dict[str, object]]) -> dict[str, object]:
     global _WORKER_CTX
@@ -144,37 +250,33 @@ def run_sweep(
     batch_output_dir = base_config.output_dir / "batch_runs"
     combinations = expand_sweep_combinations(sweep_overrides)
 
-    from concurrent.futures import ProcessPoolExecutor
-
     items = [
         (run_number, override_values)
         for run_number, override_values in enumerate(combinations, start=1)
     ]
-    if args.jobs <= 1 or len(items) <= 1:
-        rows = [
-            _run_sweep_case(
-                args=args,
-                bars=bars,
-                benchmark_bars=benchmark_bars,
-                base_config=base_config,
-                batch_output_dir=batch_output_dir,
-                run_number=item[0],
-                override_values=item[1],
-                build_config_sources=build_config_sources,
-            )
-            for item in items
-        ]
-    else:
-        ctx = {
+    rows = _run_serial_or_parallel(
+        items=items,
+        jobs=args.jobs,
+        serial_runner=lambda item: _run_sweep_case(
+            args=args,
+            bars=bars,
+            benchmark_bars=benchmark_bars,
+            base_config=base_config,
+            batch_output_dir=batch_output_dir,
+            run_number=item[0],
+            override_values=item[1],
+            build_config_sources=build_config_sources,
+        ),
+        worker_runner=_sweep_worker_wrapper,
+        worker_ctx={
             "args": args,
             "bars": bars,
             "benchmark_bars": benchmark_bars,
             "base_config": base_config,
             "batch_output_dir": batch_output_dir,
             "build_config_sources": build_config_sources,
-        }
-        with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
-            rows = list(executor.map(_sweep_worker_wrapper, items))
+        },
+    )
 
     summary_csv_path, summary_json_path = save_batch_summary(rows, batch_output_dir)
     stability_analysis = build_batch_stability_analysis(rows, rank_by=args.rank_by)
@@ -243,33 +345,29 @@ def run_walk_forward(
         (window_number, window)
         for window_number, window in enumerate(windows, start=1)
     ]
-    if args.jobs <= 1 or len(items) <= 1:
-        rows = [
-            _run_walk_forward_window(
-                args=args,
-                bars=bars,
-                benchmark_bars=benchmark_bars,
-                base_config=base_config,
-                walk_output_dir=walk_output_dir,
-                window_number=item[0],
-                window=item[1],
-                build_config_sources=build_config_sources,
-            )
-            for item in items
-        ]
-    else:
-        from concurrent.futures import ProcessPoolExecutor
-
-        ctx = {
+    rows = _run_serial_or_parallel(
+        items=items,
+        jobs=args.jobs,
+        serial_runner=lambda item: _run_walk_forward_window(
+            args=args,
+            bars=bars,
+            benchmark_bars=benchmark_bars,
+            base_config=base_config,
+            walk_output_dir=walk_output_dir,
+            window_number=item[0],
+            window=item[1],
+            build_config_sources=build_config_sources,
+        ),
+        worker_runner=_wf_window_worker_wrapper,
+        worker_ctx={
             "args": args,
             "bars": bars,
             "benchmark_bars": benchmark_bars,
             "base_config": base_config,
             "walk_output_dir": walk_output_dir,
             "build_config_sources": build_config_sources,
-        }
-        with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
-            rows = list(executor.map(_wf_window_worker_wrapper, items))
+        },
+    )
 
     analysis = build_walk_forward_summary(rows)
     paths = save_walk_forward_files(analysis, walk_output_dir)
@@ -301,40 +399,29 @@ def _run_walk_forward_window(
     start_date, end_date = window
     window_id = f"window_{window_number:03d}"
     run_output_dir = walk_output_dir / window_id
-    config_kwargs = base_config.to_dict()
-    config_kwargs["start_date"] = start_date
-    config_kwargs["end_date"] = end_date
-    config_kwargs["output_dir"] = run_output_dir
-    run_config = BacktestConfig.from_dict(config_kwargs)
-    window_bars = filter_bars_by_date_range(
-        bars,
+    run_config = _build_run_config(
+        base_config,
+        output_dir=run_output_dir,
         start_date=start_date,
         end_date=end_date,
     )
-    window_benchmark_bars = (
-        None
-        if benchmark_bars is None
-        else filter_bars_by_date_range(
-            benchmark_bars,
-            start_date=start_date,
-            end_date=end_date,
-        )
+    window_bars, window_benchmark_bars = _filter_run_bars(
+        bars,
+        benchmark_bars,
+        start_date=start_date,
+        end_date=end_date,
     )
-    result = run_backtest(
+    result = _run_backtest_with_config(
         window_bars,
         run_config,
         benchmark_bars=window_benchmark_bars,
-        stock_pool_by_date=load_stock_pool(run_config),
-        symbol_groups=load_symbol_groups(run_config),
-        factor_scores_by_date=load_factor_scores(run_config),
     )
-    artifact_paths = persist_run_outputs(
+    artifact_paths = _persist_artifacts(
+        args=args,
         output_dir=run_output_dir,
         result=result,
         config=run_config,
-        inputs=build_input_metadata(args, run_config),
-        print_console=False,
-        config_sources=build_config_sources(args),
+        build_config_sources=build_config_sources,
     )
     return {
         "window_id": window_id,
@@ -367,33 +454,17 @@ def _prepare_walk_optimization_windows(
         train_end = cast(date, window["train_end_date"])
         test_start = cast(date, window["test_start_date"])
         test_end = cast(date, window["test_end_date"])
-        train_bars = filter_bars_by_date_range(
+        train_bars, train_benchmark_bars = _filter_run_bars(
             bars,
+            benchmark_bars,
             start_date=train_start,
             end_date=train_end,
         )
-        test_bars = filter_bars_by_date_range(
+        test_bars, test_benchmark_bars = _filter_run_bars(
             bars,
+            benchmark_bars,
             start_date=test_start,
             end_date=test_end,
-        )
-        train_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=train_start,
-                end_date=train_end,
-            )
-        )
-        test_benchmark_bars = (
-            None
-            if benchmark_bars is None
-            else filter_bars_by_date_range(
-                benchmark_bars,
-                start_date=test_start,
-                end_date=test_end,
-            )
         )
         prepared_windows.append(
             {
@@ -434,25 +505,22 @@ def _run_global_train_tasks(
     train_tasks: list[dict[str, object]],
     build_config_sources: ConfigSourcesBuilder,
 ) -> list[_GlobalTrainCandidateResult]:
-    if args.jobs <= 1 or len(train_tasks) <= 1:
-        return [
-            _wf_global_train_worker_wrapper_with_ctx(
-                task,
-                args=args,
-                base_config=base_config,
-                build_config_sources=build_config_sources,
-            )
-            for task in train_tasks
-        ]
-    from concurrent.futures import ProcessPoolExecutor
-
-    ctx = {
-        "args": args,
-        "base_config": base_config,
-        "build_config_sources": build_config_sources,
-    }
-    with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init_worker, initargs=(ctx,)) as executor:
-        return list(executor.map(_wf_global_train_worker_wrapper, train_tasks))
+    return _run_serial_or_parallel(
+        items=train_tasks,
+        jobs=args.jobs,
+        serial_runner=lambda task: _wf_global_train_worker_wrapper_with_ctx(
+            task,
+            args=args,
+            base_config=base_config,
+            build_config_sources=build_config_sources,
+        ),
+        worker_runner=_wf_global_train_worker_wrapper,
+        worker_ctx={
+            "args": args,
+            "base_config": base_config,
+            "build_config_sources": build_config_sources,
+        },
+    )
 
 
 def _wf_global_train_worker_wrapper_with_ctx(
@@ -568,27 +636,25 @@ def run_walk_forward_optimization(
         )
 
         test_output_dir = optimize_output_dir / window_id / "test"
-        test_config_kwargs = base_config.to_dict()
-        test_config_kwargs.update(best_overrides)
-        test_config_kwargs["start_date"] = test_start
-        test_config_kwargs["end_date"] = test_end
-        test_config_kwargs["output_dir"] = test_output_dir
-        test_config = BacktestConfig.from_dict(test_config_kwargs)
-        test_result = run_backtest(
+        test_config = _build_run_config(
+            base_config,
+            output_dir=test_output_dir,
+            overrides=best_overrides,
+            start_date=test_start,
+            end_date=test_end,
+        )
+        test_result = _run_backtest_with_config(
             test_bars,
             test_config,
             benchmark_bars=test_benchmark_bars,
-            stock_pool_by_date=load_stock_pool(test_config),
-            symbol_groups=load_symbol_groups(test_config),
-            factor_scores_by_date=load_factor_scores(test_config),
         )
-        test_artifacts = persist_run_outputs(
+        test_artifacts = _persist_artifacts(
+            args=args,
             output_dir=test_output_dir,
             result=test_result,
             config=test_config,
-            inputs=build_input_metadata(args, test_config),
-            print_console=False,
-            config_sources=build_config_sources(args, sweep_overrides=best_overrides),
+            build_config_sources=build_config_sources,
+            sweep_overrides=best_overrides,
         )
         row: dict[str, object] = {
             "window_id": window_id,
@@ -659,25 +725,23 @@ def _run_sweep_case(
 ) -> dict[str, object]:
     run_id = f"run_{run_number:03d}"
     run_output_dir = batch_output_dir / run_id
-    config_kwargs = base_config.to_dict()
-    config_kwargs.update(override_values)
-    config_kwargs["output_dir"] = run_output_dir
-    run_config = BacktestConfig.from_dict(config_kwargs)
-    result = run_backtest(
+    run_config = _build_run_config(
+        base_config,
+        output_dir=run_output_dir,
+        overrides=override_values,
+    )
+    result = _run_backtest_with_config(
         bars,
         run_config,
         benchmark_bars=benchmark_bars,
-        stock_pool_by_date=load_stock_pool(run_config),
-        symbol_groups=load_symbol_groups(run_config),
-        factor_scores_by_date=load_factor_scores(run_config),
     )
-    artifact_paths = persist_run_outputs(
+    artifact_paths = _persist_artifacts(
+        args=args,
         output_dir=run_output_dir,
         result=result,
         config=run_config,
-        inputs=build_input_metadata(args, run_config),
-        print_console=False,
-        config_sources=build_config_sources(args, sweep_overrides=override_values),
+        build_config_sources=build_config_sources,
+        sweep_overrides=override_values,
     )
     return build_batch_row(
         run_id=run_id,
@@ -702,27 +766,25 @@ def _run_walk_forward_train_candidate(
     override_values: dict[str, object],
     build_config_sources: ConfigSourcesBuilder,
 ) -> _TrainCandidateResult:
-    config_kwargs = base_config.to_dict()
-    config_kwargs.update(override_values)
-    config_kwargs["start_date"] = train_start
-    config_kwargs["end_date"] = train_end
-    config_kwargs["output_dir"] = train_output_dir
-    train_config = BacktestConfig.from_dict(config_kwargs)
-    train_result = run_backtest(
+    train_config = _build_run_config(
+        base_config,
+        output_dir=train_output_dir,
+        overrides=override_values,
+        start_date=train_start,
+        end_date=train_end,
+    )
+    train_result = _run_backtest_with_config(
         train_bars,
         train_config,
         benchmark_bars=train_benchmark_bars,
-        stock_pool_by_date=load_stock_pool(train_config),
-        symbol_groups=load_symbol_groups(train_config),
-        factor_scores_by_date=load_factor_scores(train_config),
     )
-    train_artifacts = persist_run_outputs(
+    train_artifacts = _persist_artifacts(
+        args=args,
         output_dir=train_output_dir,
         result=train_result,
         config=train_config,
-        inputs=build_input_metadata(args, train_config),
-        print_console=False,
-        config_sources=build_config_sources(args, sweep_overrides=override_values),
+        build_config_sources=build_config_sources,
+        sweep_overrides=override_values,
     )
     return {
         "result": train_result,
