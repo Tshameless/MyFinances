@@ -100,7 +100,7 @@ def load_price_bars_from_csv(csv_path: str | Path) -> list[PriceBar]:
                 "adjustment_factor",
                 line_number,
             )
-            
+
             if adjusted_close is None and adjustment_factor is not None:
                 adjusted_close = close_value * adjustment_factor
 
@@ -334,7 +334,7 @@ def load_corporate_actions_from_csv(csv_path: str | Path) -> list[CorporateActio
     if _is_sqlite_path(path):
         from .data_store import load_corporate_actions_from_sqlite
         return load_corporate_actions_from_sqlite(path)
-    
+
     if not path.exists():
         raise FileNotFoundError(f"Corporate actions CSV file not found: {path}")
 
@@ -361,14 +361,14 @@ def load_corporate_actions_from_csv(csv_path: str | Path) -> list[CorporateActio
                 raise DataValidationError(
                     f"Line {line_number}: unsupported A-share symbol format '{symbol}'."
                 )
-            
+
             action_type = (row.get("action_type") or "").strip()
             if not action_type:
                 raise DataValidationError(f"Line {line_number}: action_type is empty.")
-                
+
             value = _parse_optional_float(row.get("value"), "value", line_number)
             description = (row.get("description") or "").strip() or None
-            
+
             actions.append(CorporateAction(
                 date=parsed_date,
                 symbol=symbol,

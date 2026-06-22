@@ -331,7 +331,7 @@ def jsonable_config_value(value: object) -> object:
             str(key): jsonable_config_value(item)
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
         }
-    if isinstance(value, (str, int, float, bool)) or value is None:
+    if isinstance(value, str | int | float | bool) or value is None:
         return value
     return str(value)
 

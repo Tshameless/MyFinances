@@ -4,14 +4,14 @@ import unittest
 from datetime import date
 
 from python_quant.backtest import (
-    run_backtest,
+    _can_be_selected,
     _can_exit_position,
     _is_in_allowed_stock_pool,
-    _can_be_selected,
+    run_backtest,
 )
 from python_quant.config import BacktestConfig
 from python_quant.execution_model import generate_orders_from_weights
-from python_quant.models import PriceBar, FactorScoreRecord
+from python_quant.models import PriceBar
 from python_quant.simulated_broker import SimulatedBroker
 
 

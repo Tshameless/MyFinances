@@ -3,11 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
-
 from datetime import date
 from itertools import product
 from pathlib import Path
-from typing import Protocol, TypeVar, TypedDict, cast
+from typing import Protocol, TypedDict, TypeVar, cast
 
 from .analysis import (
     build_batch_stability_analysis,
@@ -22,6 +21,11 @@ from .console_output import print_walk_forward_optimization_artifacts
 from .data_loader import load_factor_scores_from_csv, load_stock_pool_from_csv
 from .models import BacktestResult, PriceBar
 from .reporting import load_symbol_group_mapping
+from .reporting_csv import (
+    save_batch_stability_files,
+    save_walk_forward_files,
+    save_walk_forward_optimization_files,
+)
 from .reporting_html import (
     save_batch_report_html,
     save_walk_forward_report_html,
@@ -29,11 +33,6 @@ from .reporting_html import (
 from .reporting_json import (
     save_batch_rankings,
     save_batch_summary,
-)
-from .reporting_csv import (
-    save_batch_stability_files,
-    save_walk_forward_files,
-    save_walk_forward_optimization_files,
 )
 from .run_outputs import persist_run_outputs
 
@@ -588,11 +587,14 @@ def run_walk_forward_optimization(
         raise ValueError("配置文件中未找到 [sweep] 配置段。")
     combinations = expand_sweep_combinations(sweep_overrides)
     dates = sorted({bar.date for bar in bars})
-    windows = build_walk_forward_train_test_windows(
-        dates,
-        train_size=args.walk_train_window,
-        test_size=args.walk_test_window,
-        step_size=args.walk_step,
+    windows = cast(
+        list[dict[str, object]],
+        build_walk_forward_train_test_windows(
+            dates,
+            train_size=args.walk_train_window,
+            test_size=args.walk_test_window,
+            step_size=args.walk_step,
+        ),
     )
     if not windows:
         raise ValueError("walk-forward optimization window settings produced no windows.")
@@ -950,7 +952,7 @@ def health_aware_rank_key(
 
 def _numeric_summary_value(summary: dict[str, object], key: str) -> float:
     value = summary.get(key, 0.0)
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     try:
         return float(str(value))
@@ -962,7 +964,7 @@ def _metric_value_for_rank(result: BacktestResult, rank_by: str) -> float:
     value = getattr(result.metrics, rank_by, None)
     if value is None:
         raise ValueError(f"Rank metric '{rank_by}' is not available on backtest metrics.")
-    if not isinstance(value, (int, float)):
+    if not isinstance(value, int | float):
         raise ValueError(f"Rank metric '{rank_by}' must be numeric.")
     return float(value)
 

@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+
 def split_reporting():
     base_dir = Path(r"d:\file\MyFinances\python_quant")
     reporting_path = base_dir / "reporting.py"
@@ -54,42 +55,40 @@ def split_reporting():
 
     # Regex to match top level functions
     func_pattern = re.compile(r"^def\s+([A-Za-z0-9_]+)\s*\(", re.MULTILINE)
-    
+
     matches = list(func_pattern.finditer(content))
-    
+
     json_code = []
     html_code = []
     core_code = []
-    
+
     # Imports for JSON
     json_code.append("from __future__ import annotations\n\nimport csv\nimport hashlib\nimport json\nimport platform\nimport subprocess\nimport sys\nfrom dataclasses import asdict\nfrom datetime import datetime\nfrom pathlib import Path\n\nfrom .config import BacktestConfig\nfrom .models import BacktestMetrics\nfrom .reporting_labels import display_label\nfrom .reporting_rank import float_metric\n\n_HUMAN_READABLE_ENCODING = \"utf-8-sig\"\n")
-    
+
     # Imports for HTML
     html_code.append("from __future__ import annotations\n\nimport json\nfrom datetime import datetime\nfrom html import escape\nfrom pathlib import Path\n\nfrom .config import BacktestConfig\nfrom .models import BacktestMetrics, BenchmarkPoint, EquityPoint, RebalanceRecord\nfrom .reporting_labels import chinese_label, display_label, format_symbol, metric_explanation\nfrom .reporting_rank import float_metric, sort_rows_by_metric, validate_rank_metric\nfrom .reporting_svg import build_bar_chart_svg\n\n_HUMAN_READABLE_ENCODING = \"utf-8-sig\"\n")
-    
-    last_end = 0
-    
+
     for i, match in enumerate(matches):
         func_name = match.group(1)
         start_idx = match.start()
         end_idx = matches[i+1].start() if i+1 < len(matches) else len(content)
-        
+
         # If it's the very first function, grab the header (imports, globals) for core
         if i == 0:
             core_code.append(content[:start_idx])
-            
+
         func_body = content[start_idx:end_idx]
-        
+
         if func_name in json_funcs:
             json_code.append(func_body)
         elif func_name in html_funcs:
             html_code.append(func_body)
         else:
             core_code.append(func_body)
-            
+
     # Modify core code imports
     core_text = "".join(core_code)
-    
+
     new_imports = """
 from .reporting_json import (
     save_performance_summary_json,
@@ -110,7 +109,7 @@ from .reporting_html import (
         "from .reporting_svg import (\n    build_bar_chart_svg,\n    build_heatmap_svg,\n    build_line_chart_svg,\n)",
         "from .reporting_svg import (\n    build_bar_chart_svg,\n    build_heatmap_svg,\n    build_line_chart_svg,\n)" + new_imports
     )
-    
+
     html_path.write_text("".join(html_code), encoding="utf-8-sig")
     json_path.write_text("".join(json_code), encoding="utf-8-sig")
     reporting_path.write_text(core_text, encoding="utf-8-sig")

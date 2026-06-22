@@ -313,8 +313,9 @@ rebalance_every_n_days = [5, "10"]
 
     def test_loads_custom_factor_script(self) -> None:
         import tempfile
+
         from python_quant.factor_registry import get_registered_factors
-        
+
         with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
             f.write("""
 from python_quant.factor_registry import register_factor
@@ -326,7 +327,7 @@ def compute_custom_unit_test(closes: list[float], config: BacktestConfig) -> flo
 """.strip())
             f.flush()
             temp_file_path = Path(f.name)
-            
+
         try:
             config = BacktestConfig(
                 custom_factors_py=temp_file_path,

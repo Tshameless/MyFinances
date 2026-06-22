@@ -48,7 +48,7 @@ def float_metric(
         raise ValueError(f"Metric '{key}' is missing from row.")
     if isinstance(value, bool):
         return float(value)
-    if isinstance(value, (int, float, str)):
+    if isinstance(value, int | float | str):
         return float(value)
     raise TypeError(f"Metric '{key}' must be numeric, got {type(value).__name__}.")
 
@@ -67,7 +67,7 @@ def _is_numeric_metric_value(value: object) -> bool:
         return False
     if isinstance(value, bool):
         return True
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return True
     if isinstance(value, str):
         try:

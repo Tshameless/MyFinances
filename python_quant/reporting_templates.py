@@ -102,11 +102,11 @@ def get_echarts_init_script() -> str:
       var dates = {json_dates};
       var portfolio = {json_portfolio};
       var benchmark = {json_benchmark};
-      
+
       var container = document.getElementById('echarts-container');
       if (container) {{
         var chart = echarts.init(container);
-        
+
         var series = [{{
           name: '策略净值',
           type: 'line',
@@ -116,7 +116,7 @@ def get_echarts_init_script() -> str:
           lineStyle: {{ width: 2, color: '#1890ff' }},
           itemStyle: {{ color: '#1890ff' }}
         }}];
-        
+
         var legendData = ['策略净值'];
         if (benchmark && benchmark.length > 0) {{
           series.push({{
@@ -130,7 +130,7 @@ def get_echarts_init_script() -> str:
           }});
           legendData.push('基准净值');
         }}
-        
+
         var option = {{
           tooltip: {{
             trigger: 'axis',
@@ -178,7 +178,7 @@ def get_echarts_init_script() -> str:
           }},
           series: series
         }};
-        
+
         chart.setOption(option);
         window.addEventListener('resize', function() {{
           chart.resize();

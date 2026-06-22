@@ -4,8 +4,8 @@ import argparse
 import contextlib
 import io
 import json
-import sys
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -268,7 +268,7 @@ top_n = "2"
             self.assertTrue((output_dir / "run_manifest.json").exists())
 
     def test_reports_clear_error_when_scipy_optimizer_is_unavailable(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory():
             stderr = io.StringIO()
             with (
                 contextlib.redirect_stderr(stderr),

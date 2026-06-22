@@ -287,7 +287,7 @@ def _parameter_ranges(rows: list[dict[str, object]]) -> dict[str, dict[str, obje
         numeric_values = [
             float(value)
             for value in values
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            if isinstance(value, int | float) and not isinstance(value, bool)
         ]
         if numeric_values and len(numeric_values) == len(values):
             ranges[key] = {
@@ -654,7 +654,7 @@ def _float_value(row: dict[str, object], key: str) -> float:
     value = row.get(key, 0.0)
     if isinstance(value, bool):
         return float(value)
-    if isinstance(value, (int, float, str)):
+    if isinstance(value, int | float | str):
         return float(value)
     return 0.0
 
@@ -662,7 +662,7 @@ def _float_value(row: dict[str, object], key: str) -> float:
 def _numeric_object(value: object) -> float:
     if isinstance(value, bool):
         return float(value)
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if isinstance(value, str):
         return float(value)

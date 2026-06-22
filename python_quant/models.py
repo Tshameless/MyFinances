@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date as Date
 
 from .enums import OrderStatusEnum
 
 
 @dataclass(frozen=True)
 class PriceBar:
-    date: date
+    date: Date
     symbol: str
     close: float
     adjusted_close: float | None = None
@@ -28,7 +28,7 @@ class PriceBar:
 
 @dataclass(frozen=True)
 class CorporateAction:
-    date: date
+    date: Date
     symbol: str
     action_type: str
     value: float | None = None
@@ -37,7 +37,7 @@ class CorporateAction:
 
 @dataclass(frozen=True)
 class EquityPoint:
-    date: date
+    date: Date
     equity: float
     daily_return: float
     holdings: tuple[str, ...]
@@ -45,7 +45,7 @@ class EquityPoint:
 
 @dataclass(frozen=True)
 class RebalanceRecord:
-    date: date
+    date: Date
     holdings: tuple[str, ...]
     buy_turnover: float
     sell_turnover: float
@@ -55,7 +55,7 @@ class RebalanceRecord:
 
 @dataclass(frozen=True)
 class PositionPoint:
-    date: date
+    date: Date
     symbol: str
     shares: int
     price: float
@@ -78,7 +78,7 @@ class OrderStatus:
 @dataclass
 class Order:
     order_id: str
-    date: date
+    date: Date
     symbol: str
     side: str
     target_shares: int
@@ -90,7 +90,7 @@ class Order:
 
 @dataclass(frozen=True)
 class TradeRecord:
-    date: date
+    date: Date
     symbol: str
     side: str
     shares: int
@@ -109,7 +109,7 @@ class TradeRecord:
 
 @dataclass(frozen=True)
 class TradeAttemptRecord:
-    date: date
+    date: Date
     symbol: str
     side: str
     target_shares: int
@@ -118,7 +118,7 @@ class TradeAttemptRecord:
     cash: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class FactorScoreRecord:
     """因子评分记录。
 
@@ -127,12 +127,52 @@ class FactorScoreRecord:
     ``@property`` 提供向后兼容只读访问。
     """
 
-    date: date
+    date: Date
     symbol: str
     total_score: float
     selected: bool
     raw_scores: dict[str, float] = field(default_factory=dict)
     normalized_scores: dict[str, float] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        *,
+        date: Date,
+        symbol: str,
+        total_score: float,
+        selected: bool,
+        raw_scores: dict[str, float] | None = None,
+        normalized_scores: dict[str, float] | None = None,
+        momentum: float | None = None,
+        mean_reversion: float | None = None,
+        low_volatility: float | None = None,
+        normalized_momentum: float | None = None,
+        normalized_mean_reversion: float | None = None,
+        normalized_low_volatility: float | None = None,
+    ) -> None:
+        raw = dict(raw_scores or {})
+        normalized = dict(normalized_scores or {})
+        legacy_raw = {
+            "momentum": momentum,
+            "mean_reversion": mean_reversion,
+            "low_volatility": low_volatility,
+        }
+        legacy_normalized = {
+            "momentum": normalized_momentum,
+            "mean_reversion": normalized_mean_reversion,
+            "low_volatility": normalized_low_volatility,
+        }
+        raw.update({key: value for key, value in legacy_raw.items() if value is not None})
+        normalized.update(
+            {key: value for key, value in legacy_normalized.items() if value is not None}
+        )
+
+        object.__setattr__(self, "date", date)
+        object.__setattr__(self, "symbol", symbol)
+        object.__setattr__(self, "total_score", total_score)
+        object.__setattr__(self, "selected", selected)
+        object.__setattr__(self, "raw_scores", raw)
+        object.__setattr__(self, "normalized_scores", normalized)
 
     # ------ 向后兼容只读属性 ------
 
@@ -186,7 +226,7 @@ class BacktestMetrics:
 
 @dataclass(frozen=True)
 class BenchmarkPoint:
-    date: date
+    date: Date
     equity: float
     daily_return: float
 

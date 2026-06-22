@@ -1,5 +1,6 @@
-from python_quant.factor_registry import register_factor
 from python_quant.config import BacktestConfig
+from python_quant.factor_registry import register_factor
+
 
 @register_factor("custom_momentum")
 def compute_custom_momentum(closes: list[float], config: BacktestConfig) -> float:

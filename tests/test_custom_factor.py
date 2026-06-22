@@ -5,9 +5,9 @@ from datetime import date
 
 from python_quant.backtest import run_backtest
 from python_quant.config import BacktestConfig
-from python_quant.factor_registry import register_factor, get_registered_factors
+from python_quant.factor_registry import get_registered_factors, register_factor
 from python_quant.factors import calculate_factor_score_records
-from python_quant.models import PriceBar, FactorScoreRecord
+from python_quant.models import FactorScoreRecord, PriceBar
 
 
 class CustomFactorTests(unittest.TestCase):
@@ -177,9 +177,9 @@ class CustomFactorTests(unittest.TestCase):
             raw_scores={"momentum": 2.1, "mean_reversion": 1.1, "low_volatility": 2.1, "custom_dummy": 6.0},
             normalized_scores={"momentum": 0.9, "mean_reversion": 0.3, "low_volatility": 0.3, "custom_dummy": 0.3},
         )
-        
+
         factor_scores = [rec1_aaa, rec1_bbb, rec2_aaa, rec2_bbb]
-        
+
         # We need mock price_bars to compute returns in IC and group return analysis
         # Return for AAA on 2024-01-02 -> 2024-01-03: (22-20)/20 = 10%
         # Return for BBB on 2024-01-02 -> 2024-01-03: (38-40)/40 = -5%
@@ -189,36 +189,37 @@ class CustomFactorTests(unittest.TestCase):
             PriceBar(date=date(2024, 1, 2), symbol="BBB", close=40.0),
             PriceBar(date=date(2024, 1, 3), symbol="BBB", close=38.0),
         ]
-        
+
         from python_quant.factor_analysis import (
-            build_factor_ic_analysis,
-            build_factor_group_return_analysis,
+            build_factor_correlation_analysis,
             build_factor_decay_analysis,
-            build_factor_correlation_analysis
+            build_factor_group_return_analysis,
+            build_factor_ic_analysis,
         )
-        
+
         # Run IC analysis
         ic_res = build_factor_ic_analysis(factor_scores, [], price_bars=price_bars)
         self.assertIn("custom_dummy", ic_res["summary"])
-        
+
         # Run Group return analysis
         group_res = build_factor_group_return_analysis(factor_scores, [], group_count=2, price_bars=price_bars)
         self.assertIn("custom_dummy", group_res["summary"])
-        
+
         # Run Decay analysis
         decay_res = build_factor_decay_analysis(factor_scores)
         self.assertIn("custom_dummy", decay_res["summary"])
-        
+
         # Run Correlation analysis
         corr_res = build_factor_correlation_analysis(factor_scores)
         self.assertIn("momentum__custom_dummy", corr_res["summary"])
 
     def test_custom_factor_csv_export(self) -> None:
-        import tempfile
         import csv
+        import tempfile
         from pathlib import Path
+
         from python_quant.reporting_csv import save_factor_scores_csv
-        
+
         rec = FactorScoreRecord(
             date=date(2024, 1, 2),
             symbol="000001",
@@ -227,7 +228,7 @@ class CustomFactorTests(unittest.TestCase):
             raw_scores={"momentum": 1.0, "mean_reversion": 2.0, "low_volatility": 3.0, "custom_dummy": 10.0},
             normalized_scores={"momentum": 0.5, "mean_reversion": 0.5, "low_volatility": 0.5, "custom_dummy": 0.8},
         )
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             out_path = Path(temp_dir)
             save_factor_scores_csv(
@@ -236,25 +237,25 @@ class CustomFactorTests(unittest.TestCase):
                 format_symbol=lambda x: x,
                 display_label=lambda x: x,
             )
-            
+
             csv_file = out_path / "factor_scores.csv"
             self.assertTrue(csv_file.exists())
-            
+
             with csv_file.open("r", encoding="utf-8-sig") as f:
                 reader = csv.reader(f)
                 rows = list(reader)
-                
+
                 self.assertGreater(len(rows), 1)
                 header = rows[0]
-                
+
                 # Check for dynamic factor columns in header
                 self.assertIn("custom_dummy", header)
                 self.assertIn("normalized_custom_dummy", header)
-                
+
                 data_row = rows[1]
                 custom_dummy_idx = header.index("custom_dummy")
                 normalized_custom_dummy_idx = header.index("normalized_custom_dummy")
-                
+
                 self.assertEqual(data_row[custom_dummy_idx], "10.00000000")
                 self.assertEqual(data_row[normalized_custom_dummy_idx], "0.80000000")
 

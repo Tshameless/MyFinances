@@ -10,11 +10,10 @@ from .config import BacktestConfig
 from .exceptions import InsufficientDataError
 from .execution_model import (
     calculate_account_equity,
+    generate_orders_from_weights,
     is_buyable,
     is_sellable,
-    generate_orders_from_weights,
 )
-from .simulated_broker import SimulatedBroker
 from .factors import (
     align_history_to_calendar,
     align_history_with_suspended_fills,
@@ -33,8 +32,9 @@ from .models import (
     PriceBar,
     RebalanceRecord,
 )
-from .strategy import TopNFactorStrategy
 from .portfolio_optimizer import PortfolioOptimizer, ScipyPortfolioOptimizer
+from .simulated_broker import SimulatedBroker
+from .strategy import TopNFactorStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +92,13 @@ def run_backtest(
                 config,
                 external_scores_by_date=factor_scores_by_date,
             )
-            scores = {symbol: record.total_score for symbol, record in factor_records.items()}
             allowed_symbols = _resolve_stock_pool_for_date(stock_pool_by_date, current_date)
-            
+
             available_records = {
                 sym: rec for sym, rec in factor_records.items()
                 if _is_in_allowed_stock_pool(sym, allowed_symbols) and _can_be_selected(sym, aligned_history, index, holdings)
             }
-            
+
             locked_symbols = [
                 symbol
                 for symbol in holdings
@@ -124,7 +123,7 @@ def run_backtest(
                             curr_p = price_for_bar(bars[i], config)
                             rets.append(curr_p / prev_p - 1.0 if prev_p > 0 else 0.0)
                         historical_returns[sym] = rets
-                
+
                 # We need to filter the top N before giving it to the optimizer to avoid OOM or slow solving on 5000 stocks
                 strategy = TopNFactorStrategy(top_n=config.top_n, mode=config.selection_mode, allocation_model="equal")
                 unconstrained = strategy.generate_target_weights(current_date, available_records)
@@ -162,7 +161,7 @@ def run_backtest(
                 target_weights = legacy_optimizer.optimize(unconstrained_weights, locked_symbols)
 
             selected = tuple(target_weights.keys())
-            
+
             factor_score_records.extend(
                 _factor_records_for_date(
                     aligned_history,
@@ -172,10 +171,10 @@ def run_backtest(
                     selected_symbols=set(selected),
                 ).values()
             )
-            
+
             for oid in list(broker.active_orders.keys()):
                 broker.cancel_order(oid)
-                
+
             orders = generate_orders_from_weights(
                 cash=cash,
                 positions=positions,
@@ -185,23 +184,23 @@ def run_backtest(
                 config=config,
             )
             broker.submit_orders(orders)
-            
+
             start_equity = calculate_account_equity(cash, positions, aligned_history, execution_index, config)
-            
+
             broker.process_market_data(execution_date, aligned_history, execution_index)
-            
+
             cash = broker.cash
             positions = broker.positions
             entry_dates = broker.entry_dates
             holdings = tuple(sorted(positions))
-            
+
             buy_turnover = broker.bought_value_today / start_equity if start_equity > 0 else 0.0
             sell_turnover = broker.sold_value_today / start_equity if start_equity > 0 else 0.0
             turnover = buy_turnover + sell_turnover
-            
+
             total_cost += broker.cost_today
             total_turnover += turnover
-            
+
             rebalance_records.append(
                 RebalanceRecord(
                     date=current_date,

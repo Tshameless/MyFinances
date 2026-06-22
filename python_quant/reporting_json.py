@@ -26,7 +26,7 @@ def save_performance_summary_json(
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_path = output_dir / "performance_summary.json"
-    
+
     # We use dynamic module loading here to avoid circular dependencies with reporting_html
     from .reporting_html import _build_performance_summary_items
 

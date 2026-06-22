@@ -665,7 +665,7 @@ def _summary_float(row: dict[str, object], key: str) -> float:
     value = row.get(key)
     if isinstance(value, bool):
         return float(value)
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if isinstance(value, str):
         return float(value)

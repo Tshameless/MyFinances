@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-from html import escape
 from pathlib import Path
 
 from .config import BacktestConfig
@@ -26,10 +25,6 @@ from .reporting_labels import (
     display_label,
     format_symbol,
     metric_explanation,
-)
-from .reporting_rank import (
-    float_metric,
-    validate_rank_metric,
 )
 from .reporting_svg import build_line_chart_svg
 

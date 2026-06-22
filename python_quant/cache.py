@@ -11,8 +11,9 @@ import hmac
 import os
 import pickle
 import secrets
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -54,7 +55,7 @@ def memoize_to_disk(cache_dir: str | Path = ".cache", depends_on_file_arg: str |
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         def wrapper(*args: Any, **kwargs: Any) -> T:
             # Create a base key using func name, args, kwargs
-            key_data = [func.__name__, args, kwargs]
+            key_data: list[object] = [func.__name__, args, kwargs]
 
             # If there's a file dependency, include its mtime in the key
             if depends_on_file_arg:

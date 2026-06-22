@@ -13,7 +13,7 @@ def _optional_numpy() -> Any:
 
 def _optional_pandas() -> Any | None:
     try:
-        import pandas as pd  # type: ignore[import-not-found]
+        import pandas as pd  # type: ignore[import-untyped]
     except Exception:
         return None
     return pd

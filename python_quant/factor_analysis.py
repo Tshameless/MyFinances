@@ -16,7 +16,7 @@ def _get_factor_value(record: FactorScoreRecord, factor_name: str) -> float:
 
 
 def _get_factor_names(factor_scores: list[FactorScoreRecord]) -> tuple[str, ...]:
-    dynamic_factors = set()
+    dynamic_factors: set[str] = set()
     for record in factor_scores:
         if record.raw_scores:
             dynamic_factors.update(record.raw_scores.keys())

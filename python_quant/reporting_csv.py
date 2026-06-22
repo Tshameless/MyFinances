@@ -129,7 +129,7 @@ def save_factor_scores_csv(
     target_path = output_dir / "factor_scores.csv"
 
     # Identify all factor names dynamically from raw_scores
-    dynamic_factors = set()
+    dynamic_factors: set[str] = set()
     for record in records:
         if record.raw_scores:
             dynamic_factors.update(record.raw_scores.keys())

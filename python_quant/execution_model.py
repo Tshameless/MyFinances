@@ -7,7 +7,7 @@ from datetime import date
 
 from .config import BacktestConfig
 from .market import execution_price_for_bar, price_for_bar
-from .models import Order, OrderStatus, PriceBar, TradeAttemptRecord, TradeRecord
+from .models import Order, PriceBar, TradeAttemptRecord, TradeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,51 @@ def generate_orders_from_weights(
             )
 
     return orders
+
+
+def rebalance_account(
+    *,
+    cash: float,
+    positions: dict[str, int],
+    entry_dates: dict[str, date],
+    target_weights: dict[str, float],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+    current_date: date,
+) -> AccountTradeResult:
+    """Backward-compatible one-shot rebalance helper built on the broker model."""
+    from .simulated_broker import SimulatedBroker
+
+    start_equity = calculate_account_equity(cash, positions, aligned_history, index, config)
+    broker = SimulatedBroker(initial_cash=cash, config=config)
+    broker.positions = positions.copy()
+    broker.entry_dates = entry_dates.copy()
+    orders = generate_orders_from_weights(
+        cash=cash,
+        positions=positions,
+        target_weights=target_weights,
+        aligned_history=aligned_history,
+        index=index,
+        config=config,
+    )
+    broker.submit_orders(orders)
+    broker.process_market_data(current_date, aligned_history, index)
+
+    buy_turnover = broker.bought_value_today / start_equity if start_equity > 0 else 0.0
+    sell_turnover = broker.sold_value_today / start_equity if start_equity > 0 else 0.0
+    return AccountTradeResult(
+        cash=broker.cash,
+        positions=broker.positions.copy(),
+        entry_dates=broker.entry_dates.copy(),
+        holdings=tuple(sorted(broker.positions)),
+        buy_turnover=buy_turnover,
+        sell_turnover=sell_turnover,
+        cost=broker.cost_today,
+        trades=list(broker.trades_today),
+        trade_attempts=list(broker.trade_attempts_today),
+        orders=list(broker.all_orders),
+    )
 
 
 def is_buyable(bar: PriceBar) -> bool:

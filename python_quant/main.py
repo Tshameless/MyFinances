@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .backtest import run_backtest
 from .cli_config import build_backtest_config, build_config_sources
+from .config import BacktestConfig
 from .console_output import print_single_run_artifacts
 from .data_loader import (
     load_benchmark_bars_from_csv,
@@ -356,7 +357,7 @@ def _prepare_run_context(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
 ) -> tuple[
-    object,
+    BacktestConfig,
     list[PriceBar],
     list[PriceBar] | None,
     dict[date, set[str]] | None,
@@ -392,7 +393,7 @@ def _dispatch_workflow(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     *,
-    backtest_config: object,
+    backtest_config: BacktestConfig,
     bars: list[PriceBar],
     benchmark_bars: list[PriceBar] | None,
 ) -> bool:
@@ -438,7 +439,7 @@ def _dispatch_workflow(
 def _run_single_backtest(
     args: argparse.Namespace,
     *,
-    backtest_config: object,
+    backtest_config: BacktestConfig,
     bars: list[PriceBar],
     benchmark_bars: list[PriceBar] | None,
     stock_pool_by_date: dict[date, set[str]] | None,

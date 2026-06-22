@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -9,7 +10,7 @@ from .config import BacktestConfig
 from .models import BacktestMetrics, BenchmarkPoint, EquityPoint, RebalanceRecord
 from .reporting_labels import chinese_label, display_label, format_symbol, metric_explanation
 from .reporting_rank import sort_rows_by_metric, validate_rank_metric
-from .reporting_templates import get_single_run_html_template, get_echarts_init_script
+from .reporting_templates import get_echarts_init_script, get_single_run_html_template
 
 _HUMAN_READABLE_ENCODING = "utf-8-sig"
 
@@ -28,7 +29,7 @@ def save_single_run_report_html(
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_path = output_dir / "report.html"
-    
+
     json_dates = "[]"
     json_portfolio = "[]"
     json_benchmark = "[]"
@@ -89,11 +90,12 @@ def save_single_run_report_html(
     config_rows_list = []
     for key in ("initial_cash", "top_n", "selection_mode", "score_source", "lot_size", "max_group_positions", "target_cash_weight", "max_position_weight"):
         val = getattr(config, key)
-        if isinstance(val, float): val = f"{val:.4f}"
+        if isinstance(val, float):
+            val = f"{val:.4f}"
         config_rows_list.append(f"<tr><th>{escape(display_label(key))}</th><td>{escape(str(val))}</td></tr>")
-    
+
     config_rows = "\n".join(config_rows_list)
-    
+
     html = get_single_run_html_template().format(
         generation_time=escape(datetime.now().isoformat(timespec="seconds")),
         conclusion=escape(conclusion),
@@ -628,7 +630,7 @@ def _format_metric_value(metric: str, value: object) -> str:
         "excess_return",
         "tracking_error",
     }
-    if not isinstance(value, (int, float, str)):
+    if not isinstance(value, int | float | str):
         return str(value)
     try:
         numeric_value = float(value)
@@ -1117,93 +1119,9 @@ def _build_report_conclusion(metrics: BacktestMetrics) -> str:
         base = f"本次回测表现尚可。年化收益率为 {metrics.annualized_return:.2%}，但需注意最大回撤为 {metrics.max_drawdown:.2%}。"
     else:
         base = f"本次回测表现不佳。策略录得 {-metrics.total_return:.2%} 的亏损，最大回撤达到 {metrics.max_drawdown:.2%}。"
-    
+
     benchmark = _build_benchmark_conclusion(metrics)
     return f"{base} {benchmark}".strip()
-
-
-def _build_benchmark_conclusion(metrics: BacktestMetrics) -> str:
-    if not _has_benchmark_metrics(metrics):
-        return ""
-    if metrics.excess_return is not None and metrics.excess_return > 0:
-        return f"相比基准，策略创造了 {metrics.excess_return:.2%} 的超额收益，体现了显著的 Alpha 能力。"
-    return f"未能跑赢基准（超额收益：{getattr(metrics, 'excess_return', 0.0):.2%}），Alpha 能力不足。"
-
-
-def _summary_card(label: str, value: str) -> str:
-    return f'<div class="summary-tile"><div class="summary-label">{escape(label)}</div><div class="summary-value">{escape(value)}</div></div>'
-
-
-def _build_rebalance_summary_rows(record: RebalanceRecord) -> str:
-    rows = [
-        ("日期", record.date.isoformat()),
-        ("目标持仓数量", str(len(record.target_positions))),
-        ("卖出指令数量", str(len(record.sell_trades))),
-        ("买入指令数量", str(len(record.buy_trades))),
-        ("忽略指令数量", str(len(record.ignored_trades))),
-        ("期初可用资金", _format_money(record.pre_rebalance_cash)),
-        ("买入消耗资金", _format_money(record.total_buy_value)),
-        ("卖出获得资金", _format_money(record.total_sell_value)),
-        ("期末可用资金", _format_money(record.post_rebalance_cash)),
-        ("总交易成本", _format_money(record.total_cost)),
-    ]
-    return _build_html_table_rows(rows)
-
-
-def _build_benchmark_summary_rows(point: BenchmarkPoint) -> str:
-    rows = [
-        ("日期", point.date.isoformat()),
-        ("基准每日收益", _format_pct(point.daily_return)),
-        ("基准累计收益", _format_pct(point.cumulative_return)),
-        ("基准高水位", _format_pct(point.high_water_mark)),
-        ("基准回撤", _format_pct(point.drawdown)),
-    ]
-    return _build_html_table_rows(rows)
-
-
-def _format_pct(value: float) -> str:
-    return f"{value:.2%}"
-
-
-def _format_money(value: float) -> str:
-    return f"¥{value:,.2f}"
-
-
-def _format_optional_date(value: str | None) -> str:
-    return escape(value) if value else "-"
-
-
-def _format_optional_rate(value: float | None) -> str:
-    return f"{value:.2%}" if value is not None else "-"
-
-
-def _format_optional_int(value: int | None) -> str:
-    return str(value) if value is not None else "-"
-
-
-def _build_equity_curve_benchmark_columns(points: list[EquityPoint]) -> str:
-    if not points or getattr(points[0], "benchmark_cumulative_return", None) is None:
-        return ""
-    return "<th>基准累计收益</th><th>基准回撤</th><th>超额收益</th>"
-
-
-def _equity_curve_note(points: list[EquityPoint]) -> str:
-    if not points or getattr(points[0], "benchmark_cumulative_return", None) is None:
-        return ""
-    return "<tr><td colspan='7' class='muted'>包含基准对比数据</td></tr>"
-
-
-def _rebalance_note(points: list[EquityPoint]) -> str:
-    if not any(point.rebalance_record for point in points):
-        return "<tr><td colspan='2' class='muted'>此区间无调仓记录</td></tr>"
-    return ""
-
-
-def _format_holdings(holdings: dict[str, float]) -> str:
-    if not holdings:
-        return "-"
-    parts = [f"{symbol}: {_format_pct(weight)}" for symbol, weight in sorted(holdings.items())]
-    return escape(", ".join(parts))
 
 
 def _format_run_label(row: dict[str, object], default_index: int) -> str:
@@ -1536,6 +1454,6 @@ def _batch_parameter_fields(rows: list[dict[str, object]]) -> list[str]:
     return sorted({key for row in rows for key in row if key.startswith("param_")})
 
 
-def _unique_sorted_strings(values: object) -> list[str]:
+def _unique_sorted_strings(values: Iterable[object]) -> list[str]:
     return sorted({str(value) for value in values if value not in (None, "")})
 

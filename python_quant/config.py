@@ -2,18 +2,14 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import KeysView, Mapping
-from dataclasses import dataclass, field, fields as dataclass_fields
+from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import date, datetime
 from pathlib import Path
 from typing import cast
 
 from .enums import (
     AllocationModel,
-    ExecutionPriceField,
-    ExecutionStyle,
-    PriceField,
-    ScoreSource,
-    SelectionMode,
 )
 from .exceptions import ConfigValidationError
 
@@ -724,7 +720,7 @@ def _require_int(value: object, field_name: str) -> int:
 
 
 def _require_number(value: object, field_name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{field_name} must be a number.")
     return float(value)
 

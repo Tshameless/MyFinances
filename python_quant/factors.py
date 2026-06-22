@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from .config import BacktestConfig
+
 from .compute_backend import daily_returns, minmax_normalize, sample_stddev
+from .config import BacktestConfig
+from .factor_registry import register_factor
 from .market import price_for_bar
 from .models import FactorScoreRecord, PriceBar
-from .factor_registry import register_factor
 
 
 def group_prices_by_symbol(bars: list[PriceBar]) -> dict[str, list[PriceBar]]:

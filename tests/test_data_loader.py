@@ -11,10 +11,10 @@ from python_quant.data_loader import (
     load_price_bars_from_csv,
     load_stock_pool_from_csv,
 )
-from python_quant.data_store import import_price_csv_to_sqlite
 from python_quant.data_store import (
     import_benchmark_csv_to_sqlite,
     import_factor_scores_csv_to_sqlite,
+    import_price_csv_to_sqlite,
     import_stock_pool_csv_to_sqlite,
     import_symbol_groups_csv_to_sqlite,
 )

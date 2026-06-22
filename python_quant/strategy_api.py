@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import date
-from typing import Iterable
 
 from .models import FactorScoreRecord, PriceBar
 

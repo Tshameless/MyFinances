@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import csv
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 from pathlib import Path
 
+from .cache import memoize_to_disk
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
 from .models import CorporateAction, PriceBar
-from .cache import memoize_to_disk
 
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d")
 
@@ -438,7 +438,7 @@ def _require_columns(reader: csv.DictReader[str], required: set[str], label: str
         raise DataValidationError(f"{label} missing required columns: {', '.join(sorted(missing))}")
 
 
-def _execute_many(path: Path, statement: str, rows: list[tuple[object, ...]]) -> None:
+def _execute_many(path: Path, statement: str, rows: Sequence[Sequence[object]]) -> None:
     conn = sqlite3.connect(path)
     try:
         conn.executemany(statement, rows)

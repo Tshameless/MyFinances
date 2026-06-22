@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import uuid
+from collections.abc import Sequence
 from datetime import date
-from typing import Sequence
 
 from .broker_gateway import BaseBrokerGateway
 from .config import BacktestConfig
 from .execution_model import (
-    build_trade_attempt,
     affordable_buy_shares,
+    build_trade_attempt,
     buy_rejection_reason,
     calculate_commission,
     calculate_slippage,
@@ -32,16 +31,16 @@ class SimulatedBroker(BaseBrokerGateway):
         self.positions: dict[str, int] = {}
         self.entry_dates: dict[str, date] = {}
         self.config = config
-        
+
         self.active_orders: dict[str, Order] = {}
-        
+
         self.trades_today: list[TradeRecord] = []
         self.trade_attempts_today: list[TradeAttemptRecord] = []
-        
+
         self.all_trades: list[TradeRecord] = []
         self.all_attempts: list[TradeAttemptRecord] = []
         self.all_orders: list[Order] = []
-        
+
         self.cost_today = 0.0
         self.bought_value_today = 0.0
         self.sold_value_today = 0.0
@@ -87,60 +86,60 @@ class SimulatedBroker(BaseBrokerGateway):
         self.cost_today = 0.0
         self.bought_value_today = 0.0
         self.sold_value_today = 0.0
-        
+
         # Sort to ensure SELL runs before BUY (free up cash)
         sell_orders = [o for o in self.active_orders.values() if o.side == "SELL"]
         buy_orders = [o for o in self.active_orders.values() if o.side == "BUY"]
-        
+
         for o in sell_orders:
             self._process_sell(o, current_date, aligned_history, index)
-            
+
         for o in buy_orders:
             self._process_buy(o, current_date, aligned_history, index)
-            
+
         to_remove = [
-            oid for oid, o in self.active_orders.items() 
+            oid for oid, o in self.active_orders.items()
             if o.status in (OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED)
         ]
         for oid in to_remove:
             del self.active_orders[oid]
 
     def _process_sell(
-        self, 
-        order: Order, 
-        current_date: date, 
-        aligned_history: dict[str, list[PriceBar]], 
+        self,
+        order: Order,
+        current_date: date,
+        aligned_history: dict[str, list[PriceBar]],
         index: int
     ) -> None:
         if order.symbol not in aligned_history or index >= len(aligned_history[order.symbol]):
             return
-            
+
         bar = aligned_history[order.symbol][index]
         remaining = order.target_shares - order.filled_shares
         if remaining <= 0:
             return
-            
+
         if self.entry_dates.get(order.symbol) == current_date:
             order.status = OrderStatus.REJECTED
             order.reason = "t_plus_one_locked"
             self._record_attempt(bar, order, self.cash)
             return
-            
+
         if not is_sellable(bar):
             order.status = OrderStatus.REJECTED
             order.reason = sell_rejection_reason(bar)
             self._record_attempt(bar, order, self.cash)
             return
-            
+
         max_sell = max_sell_shares_by_volume(bar, self.config)
         shares = min(remaining, max_sell)
-        
+
         if shares <= 0:
             order.status = OrderStatus.REJECTED
             order.reason = "volume_limit_blocked"
             self._record_attempt(bar, order, self.cash)
             return
-            
+
         # Execute trade
         order.filled_shares += shares
         if order.filled_shares < order.target_shares:
@@ -156,7 +155,7 @@ class SimulatedBroker(BaseBrokerGateway):
             else:
                 self.positions[order.symbol] = current_pos - shares
             reason = "rebalance_exit"
-            
+
         execution_price = order.limit_price or bar.close
         gross_value = shares * execution_price
         commission = calculate_commission(gross_value, self.config, side="SELL")
@@ -164,11 +163,11 @@ class SimulatedBroker(BaseBrokerGateway):
         transfer_fee = gross_value * self.config.transfer_fee_rate
         stamp_duty = gross_value * self.config.stamp_duty_rate
         trade_cost = commission + slippage.total + transfer_fee + stamp_duty
-        
+
         self.cash += gross_value - trade_cost
         self.sold_value_today += gross_value
         self.cost_today += trade_cost
-        
+
         trade = TradeRecord(
             date=bar.date,
             symbol=order.symbol,
@@ -190,26 +189,26 @@ class SimulatedBroker(BaseBrokerGateway):
         self.all_trades.append(trade)
 
     def _process_buy(
-        self, 
-        order: Order, 
-        current_date: date, 
-        aligned_history: dict[str, list[PriceBar]], 
+        self,
+        order: Order,
+        current_date: date,
+        aligned_history: dict[str, list[PriceBar]],
         index: int
     ) -> None:
         if order.symbol not in aligned_history or index >= len(aligned_history[order.symbol]):
             return
-            
+
         bar = aligned_history[order.symbol][index]
         remaining = order.target_shares - order.filled_shares
         if remaining <= 0:
             return
-            
+
         if not is_buyable(bar):
             order.status = OrderStatus.REJECTED
             order.reason = buy_rejection_reason(bar)
             self._record_attempt(bar, order, self.cash)
             return
-            
+
         execution_price = order.limit_price or bar.close
         volume_limited = max_buy_shares_by_volume(bar, self.config)
         affordable = affordable_buy_shares(
@@ -219,34 +218,34 @@ class SimulatedBroker(BaseBrokerGateway):
             bar,
             self.config,
         )
-        
+
         if affordable <= 0:
             reason = "volume_limit_blocked" if remaining > 0 and volume_limited <= 0 else "insufficient_cash_for_lot"
             order.status = OrderStatus.REJECTED
             order.reason = reason
             self._record_attempt(bar, order, self.cash)
             return
-            
+
         order.filled_shares += affordable
         if order.filled_shares < order.target_shares:
             order.status = OrderStatus.PARTIAL
         else:
             order.status = OrderStatus.FILLED
-            
+
         gross_value = affordable * execution_price
         commission = calculate_commission(gross_value, self.config, side="BUY")
         slippage = calculate_slippage(gross_value, affordable, bar, self.config)
         transfer_fee = gross_value * self.config.transfer_fee_rate
         stamp_duty = 0.0
         trade_cost = commission + slippage.total + transfer_fee
-        
+
         self.cash -= gross_value + trade_cost
         self.positions[order.symbol] = self.positions.get(order.symbol, 0) + affordable
         self.entry_dates[order.symbol] = current_date
-        
+
         self.bought_value_today += gross_value
         self.cost_today += trade_cost
-        
+
         trade = TradeRecord(
             date=bar.date,
             symbol=order.symbol,
@@ -269,11 +268,11 @@ class SimulatedBroker(BaseBrokerGateway):
 
     def _record_attempt(self, bar: PriceBar, order: Order, cash: float) -> None:
         attempt = build_trade_attempt(
-            bar, 
-            order.side, 
-            order.target_shares - order.filled_shares, 
-            order.limit_price or bar.close, 
-            order.reason or "unknown", 
+            bar,
+            order.side,
+            order.target_shares - order.filled_shares,
+            order.limit_price or bar.close,
+            order.reason or "unknown",
             cash
         )
         self.trade_attempts_today.append(attempt)
