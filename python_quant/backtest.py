@@ -152,13 +152,13 @@ def run_backtest(
                     allocation_model=config.allocation_model,
                 )
                 unconstrained_weights = strategy.generate_target_weights(current_date, available_records)
-                legacy_optimizer = PortfolioOptimizer(
+                constrained_optimizer = PortfolioOptimizer(
                     max_position_weight=config.max_position_weight,
                     max_group_positions=config.max_group_positions,
                     target_cash_weight=config.target_cash_weight,
                     symbol_groups=symbol_groups,
                 )
-                target_weights = legacy_optimizer.optimize(unconstrained_weights, locked_symbols)
+                target_weights = constrained_optimizer.optimize(unconstrained_weights, locked_symbols)
 
             selected = tuple(target_weights.keys())
 

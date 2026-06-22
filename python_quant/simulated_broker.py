@@ -5,6 +5,7 @@ from datetime import date
 
 from .broker_gateway import BaseBrokerGateway
 from .config import BacktestConfig
+from .enums import OrderStatusEnum
 from .execution_model import (
     affordable_buy_shares,
     build_trade_attempt,
@@ -17,7 +18,7 @@ from .execution_model import (
     max_sell_shares_by_volume,
     sell_rejection_reason,
 )
-from .models import Order, OrderStatus, PriceBar, TradeAttemptRecord, TradeRecord
+from .models import Order, PriceBar, TradeAttemptRecord, TradeRecord
 
 
 class SimulatedBroker(BaseBrokerGateway):
@@ -60,7 +61,7 @@ class SimulatedBroker(BaseBrokerGateway):
     def cancel_order(self, order_id: str) -> bool:
         if order_id in self.active_orders:
             o = self.active_orders[order_id]
-            o.status = OrderStatus.CANCELED
+            o.status = OrderStatusEnum.CANCELED
             del self.active_orders[order_id]
             return True
         return False
@@ -99,7 +100,7 @@ class SimulatedBroker(BaseBrokerGateway):
 
         to_remove = [
             oid for oid, o in self.active_orders.items()
-            if o.status in (OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED)
+            if o.status in (OrderStatusEnum.FILLED, OrderStatusEnum.CANCELED, OrderStatusEnum.REJECTED)
         ]
         for oid in to_remove:
             del self.active_orders[oid]
@@ -120,13 +121,13 @@ class SimulatedBroker(BaseBrokerGateway):
             return
 
         if self.entry_dates.get(order.symbol) == current_date:
-            order.status = OrderStatus.REJECTED
+            order.status = OrderStatusEnum.REJECTED
             order.reason = "t_plus_one_locked"
             self._record_attempt(bar, order, self.cash)
             return
 
         if not is_sellable(bar):
-            order.status = OrderStatus.REJECTED
+            order.status = OrderStatusEnum.REJECTED
             order.reason = sell_rejection_reason(bar)
             self._record_attempt(bar, order, self.cash)
             return
@@ -135,7 +136,7 @@ class SimulatedBroker(BaseBrokerGateway):
         shares = min(remaining, max_sell)
 
         if shares <= 0:
-            order.status = OrderStatus.REJECTED
+            order.status = OrderStatusEnum.REJECTED
             order.reason = "volume_limit_blocked"
             self._record_attempt(bar, order, self.cash)
             return
@@ -143,11 +144,11 @@ class SimulatedBroker(BaseBrokerGateway):
         # Execute trade
         order.filled_shares += shares
         if order.filled_shares < order.target_shares:
-            order.status = OrderStatus.PARTIAL
+            order.status = OrderStatusEnum.PARTIAL
             self.positions[order.symbol] = self.positions.get(order.symbol, 0) - shares
             reason = "rebalance_exit_partial_volume_limit"
         else:
-            order.status = OrderStatus.FILLED
+            order.status = OrderStatusEnum.FILLED
             current_pos = self.positions.get(order.symbol, 0)
             if current_pos <= shares:
                 self.positions.pop(order.symbol, None)
@@ -204,7 +205,7 @@ class SimulatedBroker(BaseBrokerGateway):
             return
 
         if not is_buyable(bar):
-            order.status = OrderStatus.REJECTED
+            order.status = OrderStatusEnum.REJECTED
             order.reason = buy_rejection_reason(bar)
             self._record_attempt(bar, order, self.cash)
             return
@@ -221,16 +222,16 @@ class SimulatedBroker(BaseBrokerGateway):
 
         if affordable <= 0:
             reason = "volume_limit_blocked" if remaining > 0 and volume_limited <= 0 else "insufficient_cash_for_lot"
-            order.status = OrderStatus.REJECTED
+            order.status = OrderStatusEnum.REJECTED
             order.reason = reason
             self._record_attempt(bar, order, self.cash)
             return
 
         order.filled_shares += affordable
         if order.filled_shares < order.target_shares:
-            order.status = OrderStatus.PARTIAL
+            order.status = OrderStatusEnum.PARTIAL
         else:
-            order.status = OrderStatus.FILLED
+            order.status = OrderStatusEnum.FILLED
 
         gross_value = affordable * execution_price
         commission = calculate_commission(gross_value, self.config, side="BUY")

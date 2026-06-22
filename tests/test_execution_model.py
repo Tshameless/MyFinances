@@ -10,13 +10,41 @@ from python_quant.execution_model import (
     calculate_account_equity,
     calculate_commission,
     calculate_slippage,
+    generate_orders_from_weights,
     max_buy_shares_by_volume,
     max_sell_shares_by_volume,
-    rebalance_account,
     round_down_to_lot,
     sell_rejection_reason,
 )
 from python_quant.models import PriceBar
+from python_quant.simulated_broker import SimulatedBroker
+
+
+def _run_orders(
+    *,
+    cash: float,
+    positions: dict[str, int],
+    entry_dates: dict[str, date],
+    target_weights: dict[str, float],
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    config: BacktestConfig,
+    current_date: date,
+) -> SimulatedBroker:
+    broker = SimulatedBroker(initial_cash=cash, config=config)
+    broker.positions = positions.copy()
+    broker.entry_dates = entry_dates.copy()
+    orders = generate_orders_from_weights(
+        cash=cash,
+        positions=positions,
+        target_weights=target_weights,
+        aligned_history=aligned_history,
+        index=index,
+        config=config,
+    )
+    broker.submit_orders(orders)
+    broker.process_market_data(current_date, aligned_history, index)
+    return broker
 
 
 class ExecutionModelTests(unittest.TestCase):
@@ -124,7 +152,7 @@ class ExecutionModelTests(unittest.TestCase):
             ]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=0.0,
             positions={"000001": 100},
             entry_dates={"000001": date(2024, 1, 2)},
@@ -141,14 +169,14 @@ class ExecutionModelTests(unittest.TestCase):
         )
 
         self.assertEqual({"000001": 100}, result.positions)
-        self.assertEqual("suspended", result.trade_attempts[0].reason)
+        self.assertEqual("suspended", result.trade_attempts_today[0].reason)
 
     def test_rebalance_blocks_same_day_sell_by_t_plus_one(self) -> None:
         aligned_history = {
             "000001": [PriceBar(date=date(2024, 1, 3), symbol="000001", close=10)]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=0.0,
             positions={"000001": 100},
             entry_dates={"000001": date(2024, 1, 3)},
@@ -165,7 +193,7 @@ class ExecutionModelTests(unittest.TestCase):
         )
 
         self.assertEqual({"000001": 100}, result.positions)
-        self.assertEqual("t_plus_one_locked", result.trade_attempts[0].reason)
+        self.assertEqual("t_plus_one_locked", result.trade_attempts_today[0].reason)
 
     def test_rebalance_allows_odd_lot_sell(self) -> None:
         aligned_history = {
@@ -179,7 +207,7 @@ class ExecutionModelTests(unittest.TestCase):
             ]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=0.0,
             positions={"000001": 50},
             entry_dates={"000001": date(2024, 1, 2)},
@@ -197,8 +225,8 @@ class ExecutionModelTests(unittest.TestCase):
         )
 
         self.assertEqual({}, result.positions)
-        self.assertEqual(50, result.trades[0].shares)
-        self.assertEqual("rebalance_exit", result.trades[0].reason)
+        self.assertEqual(50, result.trades_today[0].shares)
+        self.assertEqual("rebalance_exit", result.trades_today[0].reason)
 
     def test_rebalance_does_not_buy_when_full_cost_exceeds_cash(self) -> None:
         aligned_history = {
@@ -212,7 +240,7 @@ class ExecutionModelTests(unittest.TestCase):
             ]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=1000.0,
             positions={},
             entry_dates={},
@@ -231,8 +259,8 @@ class ExecutionModelTests(unittest.TestCase):
         )
 
         self.assertEqual({}, result.positions)
-        self.assertEqual([], result.trades)
-        self.assertEqual("insufficient_cash_for_lot", result.trade_attempts[0].reason)
+        self.assertEqual([], result.trades_today)
+        self.assertEqual("insufficient_cash_for_lot", result.trade_attempts_today[0].reason)
         self.assertEqual(1000.0, result.cash)
 
     def test_rebalance_uses_execution_price_field_for_trades(self) -> None:
@@ -249,7 +277,7 @@ class ExecutionModelTests(unittest.TestCase):
             ]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=10_000.0,
             positions={},
             entry_dates={},
@@ -266,7 +294,7 @@ class ExecutionModelTests(unittest.TestCase):
             current_date=date(2024, 1, 3),
         )
 
-        self.assertEqual(9.5, result.trades[0].price)
+        self.assertEqual(9.5, result.trades_today[0].price)
 
     def test_score_weighted_allocation_buys_more_high_score_symbol(self) -> None:
         aligned_history = {
@@ -278,7 +306,7 @@ class ExecutionModelTests(unittest.TestCase):
             ],
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=10_000.0,
             positions={},
             entry_dates={},
@@ -310,7 +338,7 @@ class ExecutionModelTests(unittest.TestCase):
             ]
         }
 
-        result = rebalance_account(
+        result = _run_orders(
             cash=10_000.0,
             positions={},
             entry_dates={},
@@ -329,10 +357,10 @@ class ExecutionModelTests(unittest.TestCase):
             current_date=date(2024, 1, 3),
         )
 
-        self.assertEqual(200, result.trades[0].shares)
-        self.assertEqual(40.0, result.trades[0].slippage)
-        self.assertEqual(0.0, result.trades[0].fixed_slippage)
-        self.assertEqual(40.0, result.trades[0].market_impact)
+        self.assertEqual(200, result.trades_today[0].shares)
+        self.assertEqual(40.0, result.trades_today[0].slippage)
+        self.assertEqual(0.0, result.trades_today[0].fixed_slippage)
+        self.assertEqual(40.0, result.trades_today[0].market_impact)
 
     def test_classifies_buy_rejection_reasons(self) -> None:
         self.assertEqual(

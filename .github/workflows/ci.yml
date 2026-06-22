@@ -26,14 +26,8 @@ jobs:
       - name: Install project and dev tools
         run: python -m pip install --upgrade pip setuptools && python -m pip install -e ".[dev]"
 
-      - name: Ruff lint
-        run: python -m ruff check .
-
-      - name: Mypy type check
-        run: python -m mypy python_quant
-
-      - name: Unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Quality checks
+        run: python scripts/dev_check.py --skip-smoke
 
   smoke:
     runs-on: ubuntu-latest

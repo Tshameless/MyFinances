@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from python_quant.config import BacktestConfig
 from python_quant.factor_registry import register_factor
 

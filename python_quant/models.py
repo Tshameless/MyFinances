@@ -65,16 +65,6 @@ class PositionPoint:
     total_equity: float
 
 
-class OrderStatus:
-    """Backward-compatible OrderStatus constants backed by StrEnum values."""
-
-    PENDING = OrderStatusEnum.PENDING
-    PARTIAL = OrderStatusEnum.PARTIAL
-    FILLED = OrderStatusEnum.FILLED
-    CANCELED = OrderStatusEnum.CANCELED
-    REJECTED = OrderStatusEnum.REJECTED
-
-
 @dataclass
 class Order:
     order_id: str
@@ -84,7 +74,7 @@ class Order:
     target_shares: int
     limit_price: float | None = None
     filled_shares: int = 0
-    status: str = OrderStatus.PENDING
+    status: OrderStatusEnum = OrderStatusEnum.PENDING
     reason: str | None = None
 
 
@@ -118,63 +108,19 @@ class TradeAttemptRecord:
     cash: float
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class FactorScoreRecord:
     """因子评分记录。
 
-    所有因子分数统一存储在 ``raw_scores`` / ``normalized_scores`` 字典中，
-    不再为内置三因子保留硬编码字段。旧的 ``momentum`` 等属性通过
-    ``@property`` 提供向后兼容只读访问。
+    所有因子分数统一存储在 ``raw_scores`` / ``normalized_scores`` 字典中。
+    内置三因子的属性访问是对字典值的只读便捷映射。
     """
-
     date: Date
     symbol: str
     total_score: float
     selected: bool
     raw_scores: dict[str, float] = field(default_factory=dict)
     normalized_scores: dict[str, float] = field(default_factory=dict)
-
-    def __init__(
-        self,
-        *,
-        date: Date,
-        symbol: str,
-        total_score: float,
-        selected: bool,
-        raw_scores: dict[str, float] | None = None,
-        normalized_scores: dict[str, float] | None = None,
-        momentum: float | None = None,
-        mean_reversion: float | None = None,
-        low_volatility: float | None = None,
-        normalized_momentum: float | None = None,
-        normalized_mean_reversion: float | None = None,
-        normalized_low_volatility: float | None = None,
-    ) -> None:
-        raw = dict(raw_scores or {})
-        normalized = dict(normalized_scores or {})
-        legacy_raw = {
-            "momentum": momentum,
-            "mean_reversion": mean_reversion,
-            "low_volatility": low_volatility,
-        }
-        legacy_normalized = {
-            "momentum": normalized_momentum,
-            "mean_reversion": normalized_mean_reversion,
-            "low_volatility": normalized_low_volatility,
-        }
-        raw.update({key: value for key, value in legacy_raw.items() if value is not None})
-        normalized.update(
-            {key: value for key, value in legacy_normalized.items() if value is not None}
-        )
-
-        object.__setattr__(self, "date", date)
-        object.__setattr__(self, "symbol", symbol)
-        object.__setattr__(self, "total_score", total_score)
-        object.__setattr__(self, "selected", selected)
-        object.__setattr__(self, "raw_scores", raw)
-        object.__setattr__(self, "normalized_scores", normalized)
-
-    # ------ 向后兼容只读属性 ------
 
     @property
     def momentum(self) -> float:

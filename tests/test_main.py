@@ -21,7 +21,7 @@ from python_quant.workflows import (
     expand_sweep_combinations,
     health_aware_rank_key,
 )
-from scripts.dev_check import _check_manifest_artifacts
+from scripts.dev_check import _check_manifest_artifacts, _run
 
 
 class MainTests(unittest.TestCase):
@@ -210,6 +210,28 @@ output_dir = "{output_dir.as_posix()}"
                         "artifact_files": {},
                     }
                 )
+
+    def test_dev_check_flushes_step_label_before_subprocess(self) -> None:
+        calls: list[bool] = []
+
+        def fake_run(command: list[str], *, cwd: Path):
+            calls.append(True)
+            self.assertEqual([sys.executable, "-c", "pass"], command)
+            self.assertTrue(cwd.exists())
+
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
+        with (
+            patch("scripts.dev_check.subprocess.run", side_effect=fake_run),
+            patch("builtins.print") as mocked_print,
+        ):
+            _run("sample", [sys.executable, "-c", "pass"])
+
+        mocked_print.assert_called_once_with("==> sample", flush=True)
+        self.assertEqual([True], calls)
 
     def test_cli_reports_expected_errors_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

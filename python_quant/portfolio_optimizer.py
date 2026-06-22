@@ -22,7 +22,7 @@ def _load_scipy_minimize() -> Any:
     return minimize
 
 class PortfolioOptimizer:
-    """Applies constraints to unconstrained target weights. (Legacy greedy optimizer)"""
+    """Apply portfolio constraints to unconstrained target weights."""
 
     def __init__(
         self,

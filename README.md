@@ -377,11 +377,19 @@ stock_pool_csv = "stock_pool.csv"
 
 同一个 `date` 可以写多行，表示该生效日的完整可投股票池。回测在调仓时会使用不晚于当前日期的最近一份股票池；新开仓只能来自股票池，已经持有但因 T+1 或不可卖而锁定的旧仓位会继续保留到可卖。
 
-当前版本只支持这 3 个固定因子权重名称：
+内置因子权重名称包括：
 
 - `momentum`
 - `mean_reversion`
 - `low_volatility`
+
+也可以通过 Python 脚本注册自定义因子，示例见 `examples/custom_factor.py`：
+
+```bash
+python -m python_quant.main --demo --custom-factors-py examples/custom_factor.py --factor-weight custom_momentum=1.0
+```
+
+自定义因子函数需要使用 `@register_factor("factor_name")` 注册，并在 `factor_weights` 或 `--factor-weight` 中使用相同名称。
 
 基准 CSV 只读取价格序列本身，实际需要的列为：
 

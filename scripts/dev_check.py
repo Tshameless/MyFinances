@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(label: str, command: list[str]) -> None:
-    print(f"==> {label}")
+    print(f"==> {label}", flush=True)
     completed = subprocess.run(command, cwd=PROJECT_ROOT)
     if completed.returncode == 0:
         return
