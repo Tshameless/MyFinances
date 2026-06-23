@@ -34,7 +34,7 @@ from .models import (
 )
 from .portfolio_optimizer import PortfolioOptimizer, ScipyPortfolioOptimizer
 from .simulated_broker import SimulatedBroker
-from .strategy import TopNFactorStrategy
+from .strategy_api import AbstractStrategy, StrategyContext
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ def run_backtest(
     stock_pool_by_date: dict[date, set[str]] | None = None,
     symbol_groups: dict[str, str] | None = None,
     factor_scores_by_date: dict[date, dict[str, float]] | None = None,
+    strategy: AbstractStrategy | None = None,
 ) -> BacktestResult:
     config = config or BacktestConfig()
     history_by_symbol = group_prices_by_symbol(bars)
@@ -77,6 +78,10 @@ def run_backtest(
 
     broker = SimulatedBroker(initial_cash=config.initial_cash, config=config)
 
+    if strategy is None:
+        from .strategy import DefaultBuiltinStrategy
+        strategy = DefaultBuiltinStrategy()
+
     last_signal_index = common_length - config.execution_delay_days - 2
     for index in range(warmup, last_signal_index + 1):
         current_date = calendar[index]
@@ -86,18 +91,7 @@ def run_backtest(
 
         should_rebalance = not holdings or (index - warmup) % config.rebalance_every_n_days == 0
         if should_rebalance:
-            factor_records = _factor_records_for_date(
-                aligned_history,
-                index,
-                config,
-                external_scores_by_date=factor_scores_by_date,
-            )
             allowed_symbols = _resolve_stock_pool_for_date(stock_pool_by_date, current_date)
-
-            available_records = {
-                sym: rec for sym, rec in factor_records.items()
-                if _is_in_allowed_stock_pool(sym, allowed_symbols) and _can_be_selected(sym, aligned_history, index, holdings)
-            }
 
             locked_symbols = [
                 symbol
@@ -111,78 +105,40 @@ def run_backtest(
                 )
             ]
 
-            if config.allocation_model in {"max_sharpe", "min_variance"}:
-                historical_returns = {}
-                lookback = 60
-                for sym in available_records:
-                    bars = aligned_history[sym][max(0, index-lookback):index+1]
-                    if len(bars) > 1:
-                        rets = []
-                        for i in range(1, len(bars)):
-                            prev_p = price_for_bar(bars[i-1], config)
-                            curr_p = price_for_bar(bars[i], config)
-                            rets.append(curr_p / prev_p - 1.0 if prev_p > 0 else 0.0)
-                        historical_returns[sym] = rets
+            start_equity_approx = calculate_account_equity(cash, positions, aligned_history, index, config)
+            current_weights = {}
+            if start_equity_approx > 0:
+                for symbol, qty in positions.items():
+                    price = price_for_bar(aligned_history[symbol][index], config)
+                    current_weights[symbol] = (qty * price) / start_equity_approx
 
-                # We need to filter the top N before giving it to the optimizer to avoid OOM or slow solving on 5000 stocks
-                strategy = TopNFactorStrategy(top_n=config.top_n, mode=config.selection_mode, allocation_model="equal")
-                unconstrained = strategy.generate_target_weights(current_date, available_records)
-                filtered_records = {s: available_records[s] for s in unconstrained}
-                for s in locked_symbols:
-                    if s in available_records:
-                        filtered_records[s] = available_records[s]
-
-                scipy_optimizer = ScipyPortfolioOptimizer(
-                    objective=config.allocation_model,
-                    target_cash_weight=config.target_cash_weight,
-                    max_position_weight=config.max_position_weight,
-                    max_group_positions=config.max_group_positions,
-                    symbol_groups=symbol_groups,
-                )
-                target_weights = scipy_optimizer.generate_target_weights(
-                    current_date=current_date,
-                    signals=filtered_records,
-                    historical_returns=historical_returns,
-                    locked_symbols=locked_symbols
-                )
-            else:
-                strategy = TopNFactorStrategy(
-                    top_n=config.top_n,
-                    mode=config.selection_mode,
-                    allocation_model=config.allocation_model,
-                )
-                unconstrained_weights = strategy.generate_target_weights(current_date, available_records)
-                constrained_optimizer = PortfolioOptimizer(
-                    max_position_weight=config.max_position_weight,
-                    max_group_positions=config.max_group_positions,
-                    target_cash_weight=config.target_cash_weight,
-                    symbol_groups=symbol_groups,
-                )
-                target_weights = constrained_optimizer.optimize(unconstrained_weights, locked_symbols)
-
-            selected = tuple(target_weights.keys())
-
-            factor_score_records.extend(
-                _factor_records_for_date(
-                    aligned_history,
-                    index,
-                    config,
-                    external_scores_by_date=factor_scores_by_date,
-                    selected_symbols=set(selected),
-                ).values()
+            context = StrategyContext(
+                current_date=current_date,
+                aligned_history=aligned_history,
+                index=index,
+                allowed_symbols=allowed_symbols,
+                locked_symbols=locked_symbols,
+                current_holdings=holdings,
+                current_weights=current_weights,
+                config=config,
+                external_scores=factor_scores_by_date.get(current_date) if factor_scores_by_date else None,
+                symbol_groups=symbol_groups,
             )
 
-            for oid in list(broker.active_orders.keys()):
-                broker.cancel_order(oid)
+            target_weights, generated_factor_records = strategy.execute(context)
+            factor_score_records.extend(generated_factor_records.values())
 
-            orders = generate_orders_from_weights(
+            orders, cancels = generate_orders_from_weights(
                 cash=cash,
                 positions=positions,
                 target_weights=target_weights,
                 aligned_history=aligned_history,
                 index=execution_index,
                 config=config,
+                active_orders=broker.active_orders,
             )
+            for oid in cancels:
+                broker.cancel_order(oid)
             broker.submit_orders(orders)
 
             start_equity = calculate_account_equity(cash, positions, aligned_history, execution_index, config)
@@ -275,46 +231,6 @@ def run_backtest(
         ],
         orders=broker.all_orders,
     )
-
-
-def _factor_records_for_date(
-    aligned_history: dict[str, list[PriceBar]],
-    index: int,
-    config: BacktestConfig,
-    *,
-    external_scores_by_date: dict[date, dict[str, float]] | None = None,
-    selected_symbols: set[str] | None = None,
-) -> dict[str, FactorScoreRecord]:
-    current_date = next(iter(aligned_history.values()))[index].date
-    external_scores = None if external_scores_by_date is None else external_scores_by_date.get(current_date)
-    if config.score_source == "builtin":
-        external_scores = None
-    if config.score_source == "external" and external_scores is None:
-        raise InsufficientDataError(
-            f"External factor scores are required for {current_date.isoformat()} "
-            "when score_source is 'external'."
-        )
-    if external_scores is None:
-        return calculate_factor_score_records(
-            aligned_history,
-            index,
-            config,
-            selected_symbols=selected_symbols,
-        )
-
-    selected_symbols = selected_symbols or set()
-    return {
-        symbol: FactorScoreRecord(
-            date=current_date,
-            symbol=symbol,
-            total_score=score,
-            selected=symbol in selected_symbols,
-            raw_scores={"external": score},
-            normalized_scores={"external": score},
-        )
-        for symbol, score in external_scores.items()
-        if symbol in aligned_history and index < len(aligned_history[symbol])
-    }
 
 
 def _build_position_points(
@@ -530,18 +446,6 @@ def _attach_benchmark_metrics(
         tracking_error=tracking_error,
         information_ratio=information_ratio,
     )
-
-def _can_be_selected(
-    symbol: str,
-    aligned_history: dict[str, list[PriceBar]],
-    index: int,
-    current_holdings: tuple[str, ...],
-) -> bool:
-    bar = aligned_history[symbol][index]
-    if symbol in current_holdings:
-        return bar.tradable or bar.can_buy or bar.can_sell
-    return is_buyable(bar)
-
 
 def _can_exit_position(
     symbol: str,

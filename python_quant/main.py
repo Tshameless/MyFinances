@@ -379,6 +379,29 @@ def _prepare_run_context(
     stock_pool_by_date = _load_stock_pool(backtest_config)
     symbol_groups = _load_symbol_groups(backtest_config)
     factor_scores_by_date = _load_factor_scores(backtest_config)
+    
+    if backtest_config.score_source == "builtin" and factor_scores_by_date is None:
+        try:
+            from .pipeline import FactorPipeline, pd_momentum, pd_mean_reversion, pd_low_volatility
+            pipeline = FactorPipeline(backtest_config)
+            weights = backtest_config.factor_weights
+            if "momentum" in weights:
+                pipeline.add_factor(pd_momentum, "momentum", weights["momentum"])
+            if "mean_reversion" in weights:
+                pipeline.add_factor(pd_mean_reversion, "mean_reversion", weights["mean_reversion"])
+            if "low_volatility" in weights:
+                pipeline.add_factor(pd_low_volatility, "low_volatility", weights["low_volatility"])
+            
+            # Precompute factor scores for all bars using pandas
+            scores = pipeline.run(bars)
+            if scores:
+                factor_scores_by_date = scores
+                import dataclasses
+                backtest_config = dataclasses.replace(backtest_config, score_source="external")
+                logger.info("Successfully precomputed builtin factor scores using Pandas FactorPipeline.")
+        except ImportError:
+            pass
+
     return (
         backtest_config,
         bars,

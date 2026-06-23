@@ -132,7 +132,17 @@ class SimulatedBroker(BaseBrokerGateway):
             self._record_attempt(bar, order, self.cash)
             return
 
-        max_sell = max_sell_shares_by_volume(bar, self.config)
+        execution_price = order.limit_price or bar.close
+
+        if order.limit_price is not None and bar.high is not None and execution_price > bar.high:
+            order.status = OrderStatusEnum.PENDING if order.filled_shares == 0 else OrderStatusEnum.PARTIAL
+            return
+
+        queue_factor = 1.0
+        if bar.is_limit_down and execution_price >= bar.close:
+            queue_factor = 0.05
+
+        max_sell = int(max_sell_shares_by_volume(bar, self.config) * queue_factor)
         shares = min(remaining, max_sell)
 
         if shares <= 0:
@@ -157,7 +167,6 @@ class SimulatedBroker(BaseBrokerGateway):
                 self.positions[order.symbol] = current_pos - shares
             reason = "rebalance_exit"
 
-        execution_price = order.limit_price or bar.close
         gross_value = shares * execution_price
         commission = calculate_commission(gross_value, self.config, side="SELL")
         slippage = calculate_slippage(gross_value, shares, bar, self.config)
@@ -211,7 +220,16 @@ class SimulatedBroker(BaseBrokerGateway):
             return
 
         execution_price = order.limit_price or bar.close
-        volume_limited = max_buy_shares_by_volume(bar, self.config)
+
+        if order.limit_price is not None and bar.low is not None and execution_price < bar.low:
+            order.status = OrderStatusEnum.PENDING if order.filled_shares == 0 else OrderStatusEnum.PARTIAL
+            return
+
+        queue_factor = 1.0
+        if bar.is_limit_up and execution_price <= bar.close:
+            queue_factor = 0.05
+
+        volume_limited = int(max_buy_shares_by_volume(bar, self.config) * queue_factor)
         affordable = affordable_buy_shares(
             min(remaining, volume_limited),
             execution_price,

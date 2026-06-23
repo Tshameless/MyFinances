@@ -91,12 +91,16 @@ class ScipyPortfolioOptimizer(PortfolioConstructionModel):
         max_position_weight: float | None = None,
         max_group_positions: int | None = None,
         symbol_groups: dict[str, str] | None = None,
+        target_turnover: float | None = None,
+        target_volatility: float | None = None,
     ):
         self.objective = objective
         self.target_cash_weight = target_cash_weight
         self.max_position_weight = max_position_weight
         self.max_group_positions = max_group_positions
         self.symbol_groups = symbol_groups or {}
+        self.target_turnover = target_turnover
+        self.target_volatility = target_volatility
 
     def generate_target_weights(
         self,
@@ -104,6 +108,7 @@ class ScipyPortfolioOptimizer(PortfolioConstructionModel):
         signals: dict[str, FactorScoreRecord],
         historical_returns: dict[str, list[float]] | None = None,
         locked_symbols: Iterable[str] = (),
+        current_weights: dict[str, float] | None = None,
     ) -> dict[str, float]:
         if not signals:
             return {}
@@ -136,6 +141,22 @@ class ScipyPortfolioOptimizer(PortfolioConstructionModel):
         constraints = [
             {'type': 'eq', 'fun': lambda w: np.sum(w) - investable_ratio}
         ]
+
+        current_weights = current_weights or {}
+        cw_array = np.array([current_weights.get(s, 0.0) for s in symbols])
+
+        if self.target_turnover is not None:
+            constraints.append({
+                'type': 'ineq',
+                'fun': lambda w: self.target_turnover - np.sum(np.abs(w - cw_array))
+            })
+
+        if self.target_volatility is not None and historical_returns:
+            max_var = (self.target_volatility / np.sqrt(252)) ** 2
+            constraints.append({
+                'type': 'ineq',
+                'fun': lambda w: max_var - np.dot(w.T, np.dot(cov_matrix, w))
+            })
 
         def objective_function(w):
             if self.objective == "min_variance":

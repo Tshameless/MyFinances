@@ -11,6 +11,23 @@ from typing import Any
 from .exceptions import DataValidationError
 from .market import BENCHMARK_SYMBOL, is_a_share_symbol
 from .models import CorporateAction, PriceBar
+from abc import ABC, abstractmethod
+
+
+class AbstractDataLoader(ABC):
+    """标准数据源加载接口"""
+    @abstractmethod
+    def load_data(self) -> list[PriceBar]:
+        pass
+
+
+class CSVDataLoader(AbstractDataLoader):
+    """基于 CSV 的数据加载器"""
+    def __init__(self, csv_path: str | Path):
+        self.csv_path = csv_path
+
+    def load_data(self) -> list[PriceBar]:
+        return load_price_bars_from_csv(self.csv_path)
 
 _DATE_FORMATS = (
     "%Y-%m-%d",

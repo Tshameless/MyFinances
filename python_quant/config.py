@@ -152,6 +152,8 @@ _BACKTEST_SIMPLE_FIELDS = frozenset(
         "transfer_fee_rate",
         "target_cash_weight",
         "max_position_weight",
+        "target_turnover",
+        "target_volatility",
         "limit_up_down_rate",
         "st_limit_up_down_rate",
         "growth_limit_up_down_rate",
@@ -202,6 +204,8 @@ _FLOAT_FIELDS = frozenset(
         "transfer_fee_rate",
         "target_cash_weight",
         "max_position_weight",
+        "target_turnover",
+        "target_volatility",
         "limit_up_down_rate",
         "st_limit_up_down_rate",
         "growth_limit_up_down_rate",
@@ -223,7 +227,7 @@ _FLOAT_FIELDS = frozenset(
         "min_allowed_holding_days",
     }
 )
-_OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate"})
+_OPTIONAL_FLOAT_FIELDS = frozenset({"buy_commission_rate", "sell_commission_rate", "target_turnover", "target_volatility"})
 _STRING_FIELDS = frozenset({"selection_mode", "score_source", "allocation_model", "price_field", "execution_price_field", "execution_style"})
 _OPTIONAL_STRING_FIELDS = frozenset({"execution_price_field"})
 _DATE_FIELDS = frozenset({"start_date", "end_date"})
@@ -271,6 +275,8 @@ class BacktestConfig:
     transfer_fee_rate: float = 0.0
     target_cash_weight: float = 0.0
     max_position_weight: float = 1.0
+    target_turnover: float | None = None
+    target_volatility: float | None = None
     limit_up_down_rate: float = 0.10
     st_limit_up_down_rate: float = 0.05
     growth_limit_up_down_rate: float = 0.20
@@ -390,6 +396,10 @@ class BacktestConfig:
             raise ConfigValidationError("target_cash_weight must be between 0 and 1.")
         if self.max_position_weight <= 0 or self.max_position_weight > 1:
             raise ConfigValidationError("max_position_weight must be between 0 and 1.")
+        if self.target_turnover is not None and (self.target_turnover <= 0 or self.target_turnover > 2):
+            raise ConfigValidationError("target_turnover must be between 0 and 2.")
+        if self.target_volatility is not None and (self.target_volatility <= 0 or self.target_volatility > 2):
+            raise ConfigValidationError("target_volatility must be between 0 and 2.")
         if self.max_allowed_drawdown <= 0 or self.max_allowed_drawdown > 1:
             raise ConfigValidationError("max_allowed_drawdown must be between 0 and 1.")
         if self.max_allowed_daily_var < 0 or self.max_allowed_daily_var > 1:
@@ -532,6 +542,8 @@ class BacktestConfig:
             transfer_fee_rate=cast(float, mapping["transfer_fee_rate"]),
             target_cash_weight=cast(float, mapping["target_cash_weight"]),
             max_position_weight=cast(float, mapping["max_position_weight"]),
+            target_turnover=cast(float | None, mapping.get("target_turnover")),
+            target_volatility=cast(float | None, mapping.get("target_volatility")),
             limit_up_down_rate=cast(float, mapping["limit_up_down_rate"]),
             st_limit_up_down_rate=cast(float, mapping["st_limit_up_down_rate"]),
             growth_limit_up_down_rate=cast(float, mapping["growth_limit_up_down_rate"]),

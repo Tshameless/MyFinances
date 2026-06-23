@@ -34,7 +34,7 @@ def _run_orders(
     broker = SimulatedBroker(initial_cash=cash, config=config)
     broker.positions = positions.copy()
     broker.entry_dates = entry_dates.copy()
-    orders = generate_orders_from_weights(
+    orders, _ = generate_orders_from_weights(
         cash=cash,
         positions=positions,
         target_weights=target_weights,

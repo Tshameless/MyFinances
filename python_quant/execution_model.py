@@ -39,50 +39,92 @@ def generate_orders_from_weights(
     aligned_history: dict[str, list[PriceBar]],
     index: int,
     config: BacktestConfig,
-) -> list[Order]:
+    active_orders: dict[str, Order] | None = None,
+) -> tuple[list[Order], list[str]]:
     start_equity = calculate_account_equity(cash, positions, aligned_history, index, config)
     orders: list[Order] = []
+    cancel_order_ids: list[str] = []
+    active_orders = active_orders or {}
 
-    for symbol in sorted(set(positions) - set(target_weights.keys())):
-        bar = aligned_history[symbol][index]
-        price = execution_price_for_bar(bar, config)
-        orders.append(
-            Order(
-                order_id=str(uuid.uuid4()),
-                date=bar.date,
-                symbol=symbol,
-                side="SELL",
-                target_shares=positions[symbol],
-                limit_price=price,
-            )
-        )
+    pending_buys = {}
+    pending_sells = {}
+    
+    for oid, o in active_orders.items():
+        rem = o.target_shares - o.filled_shares
+        if rem <= 0:
+            continue
+        if o.side == "BUY":
+            pending_buys[o.symbol] = pending_buys.get(o.symbol, 0) + rem
+        else:
+            pending_sells[o.symbol] = pending_sells.get(o.symbol, 0) + rem
 
-    target_values = {
-        symbol: start_equity * weight
-        for symbol, weight in target_weights.items()
-    }
+    all_symbols = set(positions.keys()) | set(target_weights.keys()) | set(pending_buys.keys()) | set(pending_sells.keys())
 
-    new_targets = tuple(symbol for symbol in target_weights if symbol not in positions)
-    for symbol in new_targets:
+    for symbol in sorted(all_symbols):
+        if symbol not in aligned_history or index >= len(aligned_history[symbol]):
+            continue
+            
         bar = aligned_history[symbol][index]
         price = execution_price_for_bar(bar, config)
         if price <= 0:
             continue
-        max_cash_for_position = min(target_values.get(symbol, 0.0), cash)
-        requested_shares = round_down_to_lot(max_cash_for_position / price, config.lot_size)
-        if requested_shares > 0:
-            orders.append(
-                Order(
+
+        current_shares = positions.get(symbol, 0)
+        target_weight = target_weights.get(symbol, 0.0)
+        target_val = start_equity * target_weight
+        target_shares = round_down_to_lot(target_val / price, config.lot_size)
+
+        diff = target_shares - current_shares
+
+        p_buy = pending_buys.get(symbol, 0)
+        p_sell = pending_sells.get(symbol, 0)
+
+        if diff > 0: # Need to buy
+            if p_sell > 0:
+                for oid, o in active_orders.items():
+                    if o.symbol == symbol and o.side == "SELL":
+                        cancel_order_ids.append(oid)
+            
+            if p_buy != diff:
+                for oid, o in active_orders.items():
+                    if o.symbol == symbol and o.side == "BUY":
+                        cancel_order_ids.append(oid)
+                orders.append(Order(
                     order_id=str(uuid.uuid4()),
                     date=bar.date,
                     symbol=symbol,
                     side="BUY",
-                    target_shares=requested_shares,
+                    target_shares=diff,
                     limit_price=price,
-                )
-            )
+                ))
 
-    return orders
+        elif diff < 0: # Need to sell
+            sell_amt = -diff
+            if p_buy > 0:
+                for oid, o in active_orders.items():
+                    if o.symbol == symbol and o.side == "BUY":
+                        cancel_order_ids.append(oid)
+            
+            if p_sell != sell_amt:
+                for oid, o in active_orders.items():
+                    if o.symbol == symbol and o.side == "SELL":
+                        cancel_order_ids.append(oid)
+                orders.append(Order(
+                    order_id=str(uuid.uuid4()),
+                    date=bar.date,
+                    symbol=symbol,
+                    side="SELL",
+                    target_shares=sell_amt,
+                    limit_price=price,
+                ))
+
+        else: # target == current
+            if p_buy > 0 or p_sell > 0:
+                for oid, o in active_orders.items():
+                    if o.symbol == symbol:
+                        cancel_order_ids.append(oid)
+
+    return orders, cancel_order_ids
 
 
 def is_buyable(bar: PriceBar) -> bool:

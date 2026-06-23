@@ -4,7 +4,6 @@ import unittest
 from datetime import date
 
 from python_quant.backtest import (
-    _can_be_selected,
     _can_exit_position,
     _is_in_allowed_stock_pool,
     run_backtest,
@@ -14,6 +13,18 @@ from python_quant.execution_model import generate_orders_from_weights
 from python_quant.models import PriceBar
 from python_quant.simulated_broker import SimulatedBroker
 
+
+def _can_be_selected(
+    symbol: str,
+    aligned_history: dict[str, list[PriceBar]],
+    index: int,
+    current_holdings: tuple[str, ...],
+) -> bool:
+    bar = aligned_history[symbol][index]
+    if symbol in current_holdings:
+        return bar.tradable or bar.can_buy or bar.can_sell
+    from python_quant.execution_model import is_buyable
+    return is_buyable(bar)
 
 def _build_target_holdings(
     *,
@@ -300,7 +311,7 @@ class BacktestTests(unittest.TestCase):
         broker.positions = {"AAA": 10}
         broker.entry_dates = {"AAA": date(2024, 1, 3)}
 
-        orders = generate_orders_from_weights(
+        orders, _ = generate_orders_from_weights(
             cash=broker.cash,
             positions=broker.positions,
             target_weights={"BBB": 1.0},
@@ -802,7 +813,7 @@ class BacktestTests(unittest.TestCase):
         broker.positions = {"AAA": 200}
         broker.entry_dates = {"AAA": date(2024, 1, 2)}
 
-        orders = generate_orders_from_weights(
+        orders, _ = generate_orders_from_weights(
             cash=broker.cash,
             positions=broker.positions,
             target_weights={},
